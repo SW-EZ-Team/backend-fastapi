@@ -1,0 +1,52 @@
+# VCS
+.git/
+.gitignore
+.gitattributes
+
+# Python 런타임 산출물
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 가상환경 (호스트 venv는 이미지에 포함하지 마)
+.venv/
+venv/
+env/
+ENV/
+
+# uv 캐시
+.uv-cache/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 문서/로그
+*.md
+logs/
+*.log
+
+# 환경변수
+.env
+.env.*
+!.env.example
+
+# 테스트/커버리지
+htmlcov/
+.coverage
+.tox/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker 관련 자기 자신
+Dockerfile
+docker-compose*.yml
+.dockerignore

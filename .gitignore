@@ -1,0 +1,49 @@
+# Python 바이트코드
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 가상환경
+venv/
+.venv/
+env/
+ENV/
+
+# 테스트 / 린트 캐시
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 패키지 빌드 산출물
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# 환경변수
+.env
+.env.*
+!.env.example
+
+# 커버리지
+.coverage
+htmlcov/
+.tox/
+
+# 에디터 설정
+.idea/
+.vscode/
+*.swp
+
+# OS 메타파일
+.DS_Store
+Thumbs.db
+
+# 로그
+*.log
+logs/
+
+# Flask / Celery 인스턴스
+instance/
+celerybeat-schedule
+celerybeat.pid

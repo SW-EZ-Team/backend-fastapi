@@ -1,0 +1,53 @@
+# backend-fastapi 로컬 개발용 compose
+# 사전 조건: infra 레포의 scripts/dev-up.sh로 sw-ez-shared 네트워크와 postgres/redis/qdrant 기동 완료 상태
+# 같은 이미지(sw-ez-team/backend-fastapi:local)를 3개 컨테이너가 공유한다
+
+name: sw-ez-fastapi
+
+networks:
+  sw-ez-shared:
+    external: true
+
+# 3개 서비스가 공통으로 사용하는 설정을 앵커로 정의한다
+x-fastapi-common: &fastapi-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: sw-ez-team/backend-fastapi:local
+  env_file:
+    - .env
+  restart: unless-stopped
+  networks:
+    - sw-ez-shared
+
+services:
+  # FastAPI API 서버
+  api:
+    <<: *fastapi-common
+    container_name: sw-ez-backend-fastapi-api
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8082"]
+    ports:
+      - "8082:8082"
+    healthcheck:
+      # urllib 표준 라이브러리만 사용해서 외부 의존 없이 헬스 체크한다
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8082/health\")' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Celery 비동기 태스크 워커
+  worker:
+    <<: *fastapi-common
+    container_name: sw-ez-backend-fastapi-worker
+    command: ["celery", "-A", "app.celery_app", "worker", "-l", "info"]
+    depends_on:
+      - api
+
+  # Celery 주기적 스케줄러 (beat)
+  beat:
+    <<: *fastapi-common
+    container_name: sw-ez-backend-fastapi-beat
+    command: ["celery", "-A", "app.celery_app", "beat", "-l", "info"]
+    depends_on:
+      - api
