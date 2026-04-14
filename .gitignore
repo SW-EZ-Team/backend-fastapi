@@ -47,3 +47,9 @@ logs/
 instance/
 celerybeat-schedule
 celerybeat.pid
+
+# Kanana 모델 파일 (1.3GB GGUF — git 저장 금지, 운영 환경은 볼륨 마운트 또는 setup.sh 사용)
+app/modules/AI_CPU_Kanana_Nano_Q4/models/*.gguf
+
+# 추론 결과 로그 (로컬 실험용, 커밋 제외)
+results/*.log

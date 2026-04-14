@@ -8,6 +8,8 @@ dependencies = [
     "uvicorn[standard]==0.32.1",
     "celery==5.4.0",
     "redis==5.2.0",
+    "llama-cpp-python==0.3.2",
+    "jinja2==3.1.4",
 ]
 
 [build-system]
@@ -16,3 +18,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+[tool.pytest.ini_options]
+# importlib 모드: 각 테스트 파일을 독립 모듈로 로드해 패키지 __init__.py 체인 실행을 방지
+addopts = "--import-mode=importlib"
