@@ -132,3 +132,4 @@ app/modules/<ModuleName>/
 | 모듈 | 역할 | 상태 |
 |---|---|---|
 | `AI_CPU_Kanana_Nano_Q4` | 텔레그램 과제 캡션 생성 (CPU-only, Kanana Nano 2.1B Q4_K_M) | ✅ |
+| `FilePreprocessor` | 오피스 문서(.docx/.pptx/.xlsx) → Markdown 변환 (MarkItDown) | 📋 계획 (설계 확정, 구현 예정) |
