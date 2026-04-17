@@ -96,7 +96,7 @@ DB 등 의존 서비스는 infra 레포의 docker-compose로 먼저 기동한다
 | 레포 | 역할 |
 |---|---|
 | [backend-spring](https://github.com/SW-EZ-Team/backend-spring) | 메인 백엔드 (REST API·비즈니스 로직·인증·결제) |
-| [backend-rust](https://github.com/SW-EZ-Team/backend-rust) | PDF/이미지 전처리 + 오케스트레이션 |
+| [lib-rust](https://github.com/SW-EZ-Team/lib-rust) | OCR 전처리 PyO3 Rust 라이브러리 (wheel) |
 | [infra](https://github.com/SW-EZ-Team/infra) | 로컬 DB 서버 묶음 (PostgreSQL·Redis·Qdrant) |
 
 ---
