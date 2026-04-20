@@ -52,16 +52,9 @@ print(result.char_count)  # 글자수 정수
 
 ---
 
-## 톤·길이 정책 (v3 확정 2026-04-14)
+## 출력 제약
 
-| 항목 | 정책 |
-|---|---|
-| 말투 | 여성 누나·언니 말투 (`~했어`, `~해봐`, `~하자`, `~할 수 있어`) |
-| 길이 | 20~100자, 1~2문장 |
-| 이모지 | 최대 1개 |
-| 학생 이름 | 자연스러우면 포함, 어색하면 누락 허용 |
-
-이 정책은 `config.py`의 `SYSTEM_PROMPT`와 `MIN_CHARS` / `MAX_CHARS` / `MAX_EMOJIS` 상수로 고정된다. 임의 변경 금지.
+길이 20~100자, 1~2문장, 이모지 최대 1개. 학생 이름은 자연스러우면 포함하고 어색하면 누락을 허용한다. 톤 세부 정책은 `config.py`의 `SYSTEM_PROMPT`로 내부 고정되어 있으며 외부에 공개하지 않는다. `MIN_CHARS` / `MAX_CHARS` / `MAX_EMOJIS` 상수가 제약을 코드 레벨에서 강제한다. 임의 변경 금지.
 
 ---
 
@@ -137,7 +130,7 @@ GCP e2-standard-4 시뮬레이션 기준 `scripts/run_quality.sh` 실행 결과�
 |---|---|
 | 생성 속도 | 22.3 tok/s |
 | 100자 이내 비율 | 15샘플 중 13개 (86.7%) |
-| 여성 톤 일관성 | 유지 |
+| 톤 일관성 | 내부 기준 유지 |
 | 할루시네이션 | 0건 |
 
 100자 초과 2건은 `validator.sanitize()`가 걸러내고 Jinja2 폴백으로 처리된다.
@@ -152,7 +145,7 @@ pytest app/modules/AI_CPU_Kanana_Nano_Q4/tests/
 
 | 테스트 파일 | 검증 내용 |
 |---|---|
-| `test_config.py` | `SYSTEM_PROMPT`에 "누나·언니" 포함, `MAX_CHARS == 100`, `THREADS == 4` 등 v3 정책 회귀 확인 |
+| `test_config.py` | `SYSTEM_PROMPT` 내용 일치, `MAX_CHARS == 100`, `THREADS == 4` 등 출력 제약 회귀 확인 |
 | `test_validator.py` | 10자 미만·100자 초과·이모지 2개 → `None` 반환, 정상 캡션 통과 |
 | `test_fallback.py` | 이름/약점/마감 조합별 Jinja2 출력이 100자 이내인지 확인 |
 
