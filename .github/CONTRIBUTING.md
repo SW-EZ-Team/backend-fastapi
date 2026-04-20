@@ -41,6 +41,31 @@ develop   ●────────●────────●────�
 
 타입은 `feature`, `fix`, `refactor` 세 가지 중 하나를 사용한다.
 
+### 개인별 브랜치 확장 규칙
+
+팀원이 동시에 작업할 때는 브랜치 이름 앞에 **본인 식별자**를 붙여 충돌을 막는다. 포맷은 다음과 같다.
+
+`{name}/{type}/{description}`
+
+| 구성 요소 | 설명 | 예시 |
+|---|---|---|
+| `name` | 본인 영문 식별자 (팀 내 합의한 이니셜 또는 닉네임) | `ktk` |
+| `type` | 작업 타입 (`feature` / `fix` / `refactor` / `docs` 중 하나) | `feature` |
+| `description` | 작업 내용을 케밥 케이스로 | `setup-github-convention` |
+
+**실제 적용 예시**
+- `ktk/feature/setup-github-convention` — 깃 컨벤션 초기 셋업
+- `ktk/fix/login-null-pointer` — 로그인 NPE 수정
+- `ktk/refactor/module-split` — 모듈 분리 리팩터
+- `ktk/docs/update-kanana-readme` — 모듈 README 갱신
+
+**규칙**
+- `name` 부분은 팀원마다 고유하며, 한 번 정하면 계속 같은 식별자를 쓴다.
+- 분기 출발점은 여전히 `develop`. `main`에서 분기하지 않는다.
+- 개인 브랜치에 바로 push 하고, 작업이 끝나면 `develop`으로 PR을 연다.
+- PR이 Squash Merge 되면 개인 브랜치는 즉시 삭제한다.
+- 기본 규칙인 `{type}/{description}` 포맷도 여전히 유효하다. 혼자 작업하는 경우에는 `name` 생략 가능하다.
+
 ---
 
 ## 작업 흐름
