@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Telegram Control Module</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f6f8f7;
+      color: #202124;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .container {
+      background: #fff;
+      border: 1px solid #e0e5e2;
+      border-radius: 8px;
+      padding: 32px;
+      width: 100%;
+      max-width: 440px;
+      box-shadow: 0 2px 12px rgba(32, 33, 36, 0.08);
+    }
+    h1 {
+      font-size: 20px;
+      margin-bottom: 8px;
+    }
+    p {
+      color: #5f6368;
+      font-size: 13px;
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    input, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d4d9d6;
+      border-radius: 8px;
+      font-size: 14px;
+      margin-bottom: 16px;
+      outline: none;
+    }
+    input:focus, textarea:focus { border-color: #0088cc; }
+    textarea { resize: vertical; min-height: 88px; }
+    button {
+      width: 100%;
+      padding: 12px;
+      background: #0088cc;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: #006fa3; }
+    button:disabled { background: #9aa0a6; cursor: not-allowed; }
+    .result {
+      margin-top: 16px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      display: none;
+    }
+    .result.success { display: block; background: #e8f5e9; color: #1b5e20; }
+    .result.error { display: block; background: #ffecec; color: #b3261e; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>텔레그램 제어 모듈</h1>
+    <p>FastAPI의 <strong>/telegram/sendMessage</strong> 경로로 Telegram Bot API 메시지 전송을 확인한다.</p>
+
+    <label for="token">Bot Token</label>
+    <input id="token" type="password" placeholder="환경변수를 쓰지 않을 때만 입력">
+
+    <label for="telegram_chat_id">telegram_chat_id</label>
+    <input id="telegram_chat_id" type="text" placeholder="예: 123456789">
+
+    <label for="message">메시지</label>
+    <textarea id="message" placeholder="보낼 텍스트를 입력하세요"></textarea>
+
+    <button id="sendBtn" onclick="sendMessage()">전송</button>
+    <div id="result" class="result"></div>
+  </main>
+
+  <script>
+    async function sendMessage() {
+      const token = document.getElementById("token").value.trim();
+      const telegramChatId = document.getElementById("telegram_chat_id").value.trim();
+      const message = document.getElementById("message").value.trim();
+      const resultEl = document.getElementById("result");
+      const button = document.getElementById("sendBtn");
+
+      resultEl.className = "result";
+      if (!telegramChatId || !message) {
+        resultEl.textContent = "telegram_chat_id와 메시지를 입력해주세요.";
+        resultEl.className = "result error";
+        return;
+      }
+
+      button.disabled = true;
+      button.textContent = "전송 중...";
+
+      try {
+        const response = await fetch("/telegram/sendMessage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: token || null, telegram_chat_id: telegramChatId, message }),
+        });
+        const data = await response.json();
+
+        if (response.ok && data.ok) {
+          const messageId = data.telegram_message_id ? ` (message_id: ${data.telegram_message_id})` : "";
+          resultEl.textContent = `전송 완료${messageId}`;
+          resultEl.className = "result success";
+          document.getElementById("message").value = "";
+        } else {
+          resultEl.textContent = data.detail || data.description || "전송 실패";
+          resultEl.className = "result error";
+        }
+      } catch {
+        resultEl.textContent = "FastAPI 서버 연결 실패";
+        resultEl.className = "result error";
+      } finally {
+        button.disabled = false;
+        button.textContent = "전송";
+      }
+    }
+  </script>
+</body>
+</html>

@@ -55,9 +55,11 @@ FastAPI      → Modal GPU / Claude API / Qdrant
 
 운영 봇 주소: **https://t.me/ilgwa_EZ_Team_bot**
 
+실제 Telegram API 호출과 웹훅 수신은 FastAPI가 담당한다. 공개 웹훅 경로는 API 명세서 기준 `POST /telegram/webhook`이며, 계정 연동 정본 필드는 ERD 기준 `telegram_account.telegram_chat_id`다.
+
 ### 사용자 연동 방법
 
-1. 유저가 위 봇에 아무 메시지나 보내면 FastAPI `app/telegram/` 웹훅이 수신한다.
+1. 유저가 위 봇에 아무 메시지나 보내면 FastAPI `POST /telegram/webhook`이 수신한다.
 2. 웹훅 페이로드에서 `chat.id`를 추출해 해당 유저의 `telegram_account.telegram_chat_id`에 저장한다.
 3. 이후 과제 알림·AI 튜터 캡션은 이 `chat_id`로 발송된다.
 
@@ -132,4 +134,5 @@ app/modules/<ModuleName>/
 | 모듈 | 역할 | 상태 |
 |---|---|---|
 | `AI_CPU_Kanana_Nano_Q4` | 텔레그램 과제 캡션 생성 (CPU-only, Kanana Nano 2.1B Q4_K_M) | ✅ |
+| `Telegram_control_module` | Telegram Bot API `sendMessage`·`POST /telegram/webhook`·`telegram_chat_id` 추출 제어 모듈 | ✅ |
 | `FilePreprocessor` | 오피스 문서(.docx/.pptx/.xlsx) → Markdown 변환 (MarkItDown) | 📋 계획 (설계 확정, 구현 예정) |
