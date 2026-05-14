@@ -1,0 +1,75 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "tutoring_id",
+    "title",
+    "status",
+    "confirmed",
+    "estimated_total_minutes",
+    "lessons",
+    "source_analysis"
+  ],
+  "properties": {
+    "tutoring_id": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "status": { "const": "CURRICULUM_READY" },
+    "confirmed": { "type": "boolean" },
+    "estimated_total_minutes": { "type": "integer", "minimum": 10 },
+    "lessons": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 15,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "order",
+          "title",
+          "description",
+          "slide_count",
+          "estimated_minutes",
+          "key_topics",
+          "prerequisite"
+        ],
+        "properties": {
+          "order": { "type": "integer", "minimum": 1, "maximum": 15 },
+          "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "description": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "slide_count": { "type": "integer", "minimum": 10, "maximum": 15 },
+          "estimated_minutes": { "type": "integer", "minimum": 10, "maximum": 90 },
+          "key_topics": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 6,
+            "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+          },
+          "prerequisite": { "type": ["string", "null"], "maxLength": 120 }
+        }
+      }
+    },
+    "source_analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "detected_topics",
+        "difficulty_assessment",
+        "recommended_prerequisites"
+      ],
+      "properties": {
+        "detected_topics": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 8,
+          "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+        },
+        "difficulty_assessment": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "recommended_prerequisites": {
+          "type": "array",
+          "maxItems": 6,
+          "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+        }
+      }
+    }
+  }
+}

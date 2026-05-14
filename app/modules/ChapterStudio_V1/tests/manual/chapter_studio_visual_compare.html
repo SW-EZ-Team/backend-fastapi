@@ -1,0 +1,1592 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChapterStudio 시각 비교</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: false, theme: 'neutral', fontFamily: 'Pretendard Variable, sans-serif', securityLevel: 'strict' });</script>
+  <style>
+    /* ── 디자인 토큰 — frontend-web LessonEditor 팔레트 미러 ── */
+    :root {
+      --bg: #F9F8F3; --paper: #FFFDF7; --ink: #1F2A30; --ink-2: #55646C; --ink-3: #8A9199;
+      --muted: #B0B5BA; --line: #DED8CA; --sand: #ECE6D8; --coral: #C2425B;
+      --coral-wash: #FDECEF; --coral-ink-deep: #9A1B32;
+      --accent: #207B4C; --accent-soft: #E7F3E8; --accent-strong: #36B36F;
+      --honey: #FEE87E; --honey-wash: #FEF8E7; --honey-soft: #F5E3A0;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.06); --shadow-lg: 0 12px 36px rgba(0,0,0,.12);
+      --font-sans: 'Pretendard Variable', Pretendard, Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--font-sans); color: var(--ink); background: var(--bg); min-height: 100vh; }
+    button { cursor: pointer; border: 0; font: inherit; }
+    input, select, textarea { font: inherit; }
+
+    /* ── 에디터 쉘 — 4-컬럼 grid ── */
+    .editor-shell {
+      width: 100%; max-width: 1540px; min-height: 900px; margin: 0 auto;
+      background: var(--bg); border-radius: 20px; border: 1px solid var(--line);
+      overflow: hidden; box-shadow: var(--shadow-lg);
+    }
+
+    /* ── 탑 바 ── */
+    .topbar {
+      height: 60px; background: var(--paper); border-bottom: 1px solid var(--line);
+      display: flex; align-items: center; padding: 0 24px; gap: 14px; font-size: 13px;
+    }
+    .logo-circle {
+      width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft);
+      display: grid; place-items: center; font-size: 16px;
+    }
+    .brand-script { font-size: 28px; color: var(--accent); line-height: 1; font-weight: 800; }
+    .back-btn {
+      width: 30px; height: 30px; border-radius: 8px; background: var(--sand);
+      display: grid; place-items: center; font-size: 14px; color: var(--ink-2);
+    }
+    .topbar-title { font-weight: 800; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .topbar-spacer { flex: 1; }
+    .chip {
+      padding: 8px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
+      display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+    }
+    .chip-ghost { background: var(--paper); border: 1px solid var(--line); color: var(--ink-2); }
+    .chip-honey { background: var(--honey-wash); border: 1px solid var(--honey-soft); color: #8B6914; }
+    .chip-accent { background: var(--accent-soft); border: 1px solid var(--accent); color: var(--accent); }
+    .chip-coral { background: var(--coral-wash); border: 1px solid var(--coral); color: var(--coral); }
+
+    /* ── 4-컬럼 grid ── */
+    .grid-body { display: grid; grid-template-columns: 64px 300px 1fr 360px; min-height: 840px; }
+
+    /* ── 아이콘 레일 ── */
+    .rail {
+      background: var(--paper); border-right: 1px solid var(--line);
+      display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 0;
+    }
+    .rail-btn {
+      width: 40px; height: 40px; border-radius: 10px; background: transparent;
+      display: grid; place-items: center; font-size: 18px; color: var(--ink-3);
+    }
+    .rail-btn.active { background: var(--accent-soft); color: var(--accent); }
+
+    /* ── 구조 aside ── */
+    .structure-aside {
+      background: var(--paper); border-right: 1px solid var(--line); padding: 16px;
+    }
+    .aside-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .section-label {
+      font-size: 12px; font-weight: 800; color: var(--muted); letter-spacing: .08em;
+      text-transform: uppercase; margin-bottom: 8px;
+    }
+    .chapter-row {
+      padding: 8px 4px; font-size: 12px; font-weight: 800; color: var(--ink);
+      display: flex; gap: 8px; align-items: center;
+    }
+    .lesson-row {
+      padding: 10px 12px; margin-left: 16px; margin-top: 4px; border-radius: 8px;
+      display: flex; gap: 8px; align-items: center; font-size: 12px; cursor: pointer;
+      border: 1px solid transparent;
+    }
+    .lesson-row.active { background: var(--honey-wash); border-color: var(--honey-soft); font-weight: 700; }
+    .lesson-row .label { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .state-badge {
+      padding: 2px 6px; border-radius: 6px; font-size: 12px; font-weight: 800;
+    }
+    .state-done { background: var(--accent-soft); color: var(--accent); }
+    .state-gen { background: var(--honey); color: #8B6914; }
+    .state-wait { background: var(--sand); color: var(--ink-3); }
+
+    /* ── 메인 패널 ── */
+    .main-pane { padding: 20px 24px; overflow-y: auto; }
+    .main-top-bar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+
+    /* ── 우측 aside ── */
+    .right-aside { padding: 20px; background: var(--bg); border-left: 1px solid var(--line); overflow-y: auto; }
+    .right-section-label {
+      font-size: 12px; font-weight: 800; color: var(--muted); letter-spacing: .08em;
+      text-transform: uppercase; margin: 20px 0 8px;
+    }
+    .right-section-label:first-child { margin-top: 0; }
+    .right-card {
+      background: var(--paper); border-radius: 12px; border: 1px solid var(--line); padding: 14px;
+    }
+    .ai-status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .ai-avatar {
+      width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft);
+      display: grid; place-items: center; font-size: 14px;
+    }
+    .progress-track { height: 5px; background: var(--sand); border-radius: 3px; overflow: hidden; }
+    .progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width .4s; }
+    .outline-item {
+      display: flex; gap: 8px; align-items: center; padding: 7px 12px; font-size: 12px;
+    }
+    .outline-num { font-family: monospace; font-size: 12px; color: var(--muted); width: 14px; }
+
+    /* ── 비교 뷰 ── */
+    .compare-shell { display: none; }
+    .compare-shell.visible { display: block; position: relative; }
+
+    /* ── 생성 로딩 오버레이 ── */
+    .gen-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(244,243,238,0.96);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      z-index: 100;
+      transition: opacity 0.4s;
+    }
+    .gen-overlay.hidden { opacity: 0; pointer-events: none; }
+
+    .gen-spinner {
+      width: 48px; height: 48px;
+      border: 3px solid #e8e6e0;
+      border-top: 3px solid #207B4C;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .gen-status-text {
+      font-size: 15px;
+      font-weight: 700;
+      color: #207B4C;
+    }
+
+    .gen-steps {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: center;
+      max-width: 400px;
+    }
+    .gen-step {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      background: #e8e6e0;
+      color: #8a8780;
+      transition: all 0.3s;
+    }
+    .gen-step.done {
+      background: #d4f0e0;
+      color: #207B4C;
+    }
+    .gen-step.active {
+      background: #207B4C;
+      color: white;
+      animation: pulse-step 1s ease-in-out infinite;
+    }
+    @keyframes pulse-step {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+    }
+
+    .gen-elapsed {
+      font-size: 12px;
+      color: #8a8780;
+      font-family: monospace;
+    }
+    .compare-header {
+      display: flex; gap: 12px; margin-bottom: 16px; align-items: center;
+    }
+    .split-view { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .split-panel {
+      background: var(--paper); border-radius: 16px; border: 1px solid var(--line);
+      padding: 20px; box-shadow: var(--shadow-sm); overflow: hidden;
+    }
+    .split-panel-title {
+      font-size: 14px; font-weight: 800; margin-bottom: 14px; display: flex;
+      align-items: center; gap: 8px;
+    }
+    .badge-text { background: var(--coral-wash); color: var(--coral); padding: 3px 8px; border-radius: 6px; font-size: 11px; }
+    .badge-visual { background: var(--accent-soft); color: var(--accent); padding: 3px 8px; border-radius: 6px; font-size: 11px; }
+
+    /* ── 텍스트 위주 슬라이드 ── */
+    .text-slide {
+      background: var(--bg); border-radius: 12px; border: 1px solid var(--line);
+      padding: 20px; margin-bottom: 14px; min-height: 200px;
+    }
+    .text-slide h2 { font-size: 18px; margin-bottom: 10px; }
+    .text-slide h3 { font-size: 15px; margin: 12px 0 6px; }
+    .text-slide p { font-size: 13px; line-height: 1.7; color: var(--ink-2); margin-bottom: 8px; }
+    .text-slide ul { padding-left: 18px; font-size: 13px; color: var(--ink-2); line-height: 1.7; }
+    .text-slide li { margin-bottom: 4px; }
+
+    /* ── 시각 위주 슬라이드 ── */
+    .visual-slide {
+      background: var(--bg); border-radius: 12px; border: 1px solid var(--line);
+      padding: 20px; margin-bottom: 14px; min-height: 200px;
+    }
+    .visual-slide h3 { font-size: 16px; margin-bottom: 14px; }
+    .chart-container { position: relative; width: 100%; height: 240px; margin-bottom: 10px; }
+
+    /* ── 음성 스크립트 비교 ── */
+    .script-box {
+      background: var(--paper); border-radius: 10px; border: 1px solid var(--line);
+      padding: 14px; margin-top: 10px;
+    }
+    .script-label { font-size: 11px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+    .script-text { font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+    .script-length {
+      display: inline-block; margin-top: 6px; font-size: 11px; color: var(--muted);
+      padding: 2px 8px; border-radius: 999px; background: var(--sand);
+    }
+
+    /* ── 노트 카드 ── */
+    .note-card {
+      display: flex; gap: 8px; align-items: flex-start; padding: 10px 14px;
+      border-bottom: 1px solid var(--line); font-size: 12px;
+    }
+    .note-card:last-child { border-bottom: none; }
+    .note-tag {
+      font-size: 11px; font-weight: 800; padding: 2px 6px; border-radius: 4px;
+      background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-soft);
+      text-transform: uppercase; letter-spacing: .04em; flex-shrink: 0;
+    }
+
+    /* ── JSON 스펙 프리뷰 ── */
+    .json-preview {
+      background: #1B1E26; color: #B8E099; border-radius: 10px; padding: 14px;
+      font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; line-height: 1.5;
+      overflow-x: auto; margin-top: 10px; max-height: 200px; overflow-y: auto;
+    }
+
+    /* ── 흐름도 SVG ── */
+    .flowchart-svg { width: 100%; height: 240px; }
+    /* Safari SVG compat: CSS custom properties 미지원 대비 — 하드코딩 hex 사용 */
+    .fc-node { fill: #FFFDF7; stroke: #207B4C; stroke-width: 2; }
+    .fc-label { font-size: 12px; font-weight: 700; fill: #207B4C; text-anchor: middle; dominant-baseline: central; }
+    .fc-edge { stroke: #36B36F; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+
+    /* ── 개념 맵 ── */
+    .concept-map-svg { width: 100%; height: 280px; }
+    .cm-node { stroke-width: 2; }
+    .cm-center { fill: #E7F3E8; stroke: #207B4C; }
+    .cm-leaf { fill: #FFFDF7; stroke: #DED8CA; }
+    .cm-edge { stroke: #DED8CA; stroke-width: 1.5; }
+    .cm-label { font-size: 11px; font-weight: 600; fill: #1F2A30; text-anchor: middle; dominant-baseline: central; }
+
+    /* ── 타임라인 ── */
+    .timeline-svg .tl-line { stroke: #207B4C; stroke-width: 3; }
+    .timeline-svg .tl-dot { fill: #207B4C; }
+    .timeline-svg .tl-dot-ring { fill: none; stroke: #E7F3E8; stroke-width: 4; }
+    .timeline-svg .tl-year { font-size: 11px; font-weight: 800; fill: #207B4C; }
+    .timeline-svg .tl-event { font-size: 11px; font-weight: 700; fill: #1F2A30; }
+    .timeline-svg .tl-detail { font-size: 10px; fill: #55646C; }
+
+    /* ── 테이블 ── */
+    .visual-table { width: 100%; border-collapse: collapse; font-size: 12px; border-radius: 8px; overflow: hidden; }
+    .visual-table caption { font-size: 13px; font-weight: 800; color: #1F2A30; margin-bottom: 8px; text-align: left; }
+    .visual-table th { background: #E7F3E8; color: #207B4C; font-weight: 700; padding: 8px 10px; text-align: left; border-bottom: 2px solid #207B4C; }
+    .visual-table td { padding: 7px 10px; border-bottom: 1px solid #DED8CA; color: #55646C; }
+    .visual-table tr:last-child td { border-bottom: none; }
+    .visual-table tr:hover td { background: #FEF8E7; }
+
+    /* ── 레이더 차트 ── */
+    .radar-container { height: 280px; }
+
+    /* ── 트리 ── */
+    .tree-svg .tr-line { stroke: #DED8CA; stroke-width: 1.5; }
+    .tree-svg .tr-node { fill: #FFFDF7; stroke: #207B4C; stroke-width: 1.5; rx: 6; ry: 6; }
+    .tree-svg .tr-root { fill: #E7F3E8; stroke: #207B4C; stroke-width: 2; rx: 8; ry: 8; }
+    .tree-svg .tr-label { font-size: 10px; font-weight: 600; fill: #1F2A30; text-anchor: middle; dominant-baseline: central; }
+
+    /* ── 비교 ── */
+    .comparison-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .comparison-side { background: #FFFDF7; border: 1px solid #DED8CA; border-radius: 10px; padding: 14px; }
+    .comparison-side.left-side { border-left: 3px solid #C2425B; }
+    .comparison-side.right-side { border-left: 3px solid #207B4C; }
+    .comparison-title { font-size: 13px; font-weight: 800; margin-bottom: 8px; }
+    .left-side .comparison-title { color: #C2425B; }
+    .right-side .comparison-title { color: #207B4C; }
+    .comparison-points { list-style: none; padding: 0; }
+    .comparison-points li { font-size: 12px; color: #55646C; padding: 4px 0; padding-left: 14px; position: relative; }
+    .comparison-points li::before { content: '•'; position: absolute; left: 0; font-weight: 800; }
+    .left-side .comparison-points li::before { color: #C2425B; }
+    .right-side .comparison-points li::before { color: #207B4C; }
+
+    /* ── Mermaid 다이어그램 컨테이너 ── */
+    .mermaid-container {
+      background: var(--paper); border-radius: 12px; padding: 20px;
+      border: 1px solid var(--line); min-height: 200px;
+      display: flex; justify-content: center; align-items: center;
+    }
+    .mermaid-container svg { max-width: 100%; height: auto; }
+
+    /* ── 모달 ── */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45);
+      z-index: 1000; justify-content: center; align-items: center;
+    }
+    .modal-overlay.visible { display: flex; }
+    .modal-body {
+      background: var(--paper); border-radius: 16px; padding: 28px; width: 90%; max-width: 640px;
+      max-height: 85vh; overflow-y: auto; box-shadow: var(--shadow-lg); position: relative;
+    }
+    .modal-close {
+      position: absolute; top: 16px; right: 16px; width: 32px; height: 32px;
+      border-radius: 8px; background: var(--sand); display: grid; place-items: center;
+      font-size: 16px; color: var(--ink-3);
+    }
+    .modal-title { font-size: 20px; font-weight: 800; margin-bottom: 20px; }
+    .modal-section { margin-bottom: 18px; }
+    .modal-section-title { font-size: 13px; font-weight: 800; color: var(--accent); margin-bottom: 10px; }
+    .modal-field { margin-bottom: 10px; }
+    .modal-field label { display: block; font-size: 12px; font-weight: 700; color: var(--ink-3); margin-bottom: 4px; }
+    .modal-field input, .modal-field select, .modal-field textarea {
+      width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+      background: #fff; color: var(--ink);
+    }
+    .modal-field textarea { min-height: 100px; resize: vertical; }
+    .modal-field input:focus, .modal-field select:focus, .modal-field textarea:focus {
+      outline: 2px solid var(--accent-soft); border-color: var(--accent);
+    }
+    .slider-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .slider-row label { width: 80px; font-size: 12px; font-weight: 700; color: var(--ink-3); flex-shrink: 0; }
+    .slider-row input[type=range] { flex: 1; accent-color: var(--accent); }
+    .slider-row .slider-val { width: 36px; text-align: right; font-size: 13px; font-weight: 700; font-family: monospace; }
+    .modal-run {
+      width: 100%; padding: 12px; border-radius: 8px; background: var(--accent);
+      color: #fff; font-weight: 800; font-size: 14px; margin-top: 10px;
+    }
+
+    /* ── 기본 콘텐츠 (비교 미활성 시) ── */
+    .default-content {
+      background: var(--paper); border-radius: 16px; border: 1px solid var(--line);
+      padding: 24px 28px; box-shadow: var(--shadow-sm);
+    }
+    .default-content h2 { font-size: 22px; font-weight: 800; margin: 18px 0 6px; letter-spacing: -.02em; }
+    .default-content p { font-size: 13px; color: var(--ink-3); line-height: 1.6; }
+
+    /* ── 타임라인 칩 ── */
+    .timeline-area { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .timeline-chip {
+      padding: 5px 10px; border-radius: 8px; font-size: 11px; font-weight: 700;
+      background: var(--sand); color: var(--ink-3); border: 1px solid var(--line);
+      transition: all .3s;
+    }
+    .timeline-chip.done { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft); }
+
+    /* ── 슬라이드 탭 ── */
+    .slide-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .slide-tab-btn {
+      padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
+      background: var(--sand); color: var(--ink-3); border: 1px solid var(--line);
+    }
+    .slide-tab-btn.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+
+    /* ── 플로트 애니메이션 — LessonMainPane 호환 ── */
+    @keyframes float-y { 0%,100% { transform: translate(-50%,-50%) translateY(0); } 50% { transform: translate(-50%,-50%) translateY(-6px); } }
+    .float-anim { animation: float-y 3s ease-in-out infinite; }
+  </style>
+</head>
+<body>
+
+<!-- ===== 에디터 쉘 ===== -->
+<div class="editor-shell">
+
+  <!-- ── 탑 바 ── -->
+  <div class="topbar">
+    <div style="display:flex;align-items:center;gap:6px">
+      <div class="logo-circle">🦉</div>
+      <span class="brand-script">일과</span>
+    </div>
+    <button class="back-btn">←</button>
+    <div class="topbar-title">정보처리기사 실기 대비 — 소프트웨어 개발 생명주기 집중 강의</div>
+    <div class="topbar-spacer"></div>
+    <button class="chip chip-coral" id="btnCompare" onclick="toggleCompare()">📊 출력물 비교</button>
+    <button class="chip chip-accent" id="btnPrompt" onclick="openModal()">⚙️ 프롬프트 조정</button>
+    <button class="chip chip-ghost">👁 미리보기</button>
+    <button class="chip chip-honey">📥 다운로드</button>
+  </div>
+
+  <!-- ── 4-컬럼 grid ── -->
+  <div class="grid-body">
+
+    <!-- ── 레일 ── -->
+    <div class="rail">
+      <button class="rail-btn">🏠</button>
+      <button class="rail-btn active">📖</button>
+      <button class="rail-btn">💬</button>
+      <button class="rail-btn">📁</button>
+      <button class="rail-btn">📝</button>
+      <button class="rail-btn">🏆</button>
+      <button class="rail-btn">👤</button>
+    </div>
+
+    <!-- ── 구조 aside ── -->
+    <div class="structure-aside">
+      <div class="aside-header">
+        <button class="chip chip-coral" style="padding:7px 12px;font-size:11px;">■ 멈추기</button>
+        <div style="flex:1"></div>
+        <button class="chip chip-ghost" style="padding:7px 10px;font-size:12px;">+ 챕터</button>
+        <button class="chip chip-ghost" style="padding:7px 10px;font-size:12px;">+ 수업</button>
+      </div>
+      <div class="section-label">강의 구조 · 드래그로 정렬</div>
+
+      <div class="chapter-row"><span style="color:var(--muted);font-size:11px">⋮⋮</span> 📁 Chapter 1. SW 개발 생명주기와 프로세스 모델</div>
+      <div class="lesson-row active" onclick="selectLesson(this)">
+        <span style="color:var(--muted);font-size:10px">⋮⋮</span>
+        <span class="label">SDLC 개요와 소프트웨어 공학의 핵심…</span>
+        <span class="state-badge state-done">✓</span>
+      </div>
+      <div class="lesson-row" onclick="selectLesson(this)">
+        <span style="color:var(--muted);font-size:10px">⋮⋮</span>
+        <span class="label">소프트웨어 개발 프로세스 모델 정리 및…</span>
+        <span class="state-badge state-gen">⟳ 생성중</span>
+      </div>
+
+      <div class="chapter-row" style="margin-top:14px"><span style="color:var(--muted);font-size:11px">⋮⋮</span> 📁 Chapter 2. 계획 단계와 요구사항 분석의 이해</div>
+      <div class="lesson-row" onclick="selectLesson(this)">
+        <span style="color:var(--muted);font-size:10px">⋮⋮</span>
+        <span class="label">계획 단계: 비용 산정과 일정 계획 핵심…</span>
+        <span class="state-badge state-wait">▸ 대기</span>
+      </div>
+      <div class="lesson-row" onclick="selectLesson(this)">
+        <span style="color:var(--muted);font-size:10px">⋮⋮</span>
+        <span class="label">요구사항 분석 종합 평가</span>
+        <span class="state-badge state-wait">▸ 대기</span>
+      </div>
+
+      <div style="margin-top:24px">
+        <div class="section-label">파이프라인 진행</div>
+        <div class="timeline-area" id="timeline"></div>
+      </div>
+    </div>
+
+    <!-- ── 메인 패널 ── -->
+    <main class="main-pane" id="mainPane">
+
+      <!-- 기본 콘텐츠 -->
+      <div id="defaultContent">
+        <div class="main-top-bar">
+          <span class="chip chip-accent" style="font-weight:800">SDLC 개요와 소프트웨어 공학의 핵심 개념</span>
+          <div style="flex:1"></div>
+          <button class="chip chip-ghost">🪄 AI 재생성</button>
+          <button class="chip chip-ghost">⚙️ 옵션</button>
+        </div>
+        <div class="default-content">
+          <div style="font-size:12px;font-weight:800;color:var(--muted);letter-spacing:.08em;text-transform:uppercase">플래너 노드 · SDLC</div>
+
+          <!-- SDLC 다이어그램 -->
+          <div style="position:relative;height:240px;margin-top:10px">
+            <svg width="100%" height="100%" viewBox="0 0 500 240" style="position:absolute;inset:0">
+              <line x1="120" y1="60" x2="250" y2="120" stroke="var(--accent-soft)" stroke-width="1.5" stroke-dasharray="3 5" opacity=".4"/>
+              <line x1="250" y1="40" x2="250" y2="120" stroke="var(--accent-soft)" stroke-width="1.5" stroke-dasharray="3 5" opacity=".4"/>
+              <line x1="380" y1="60" x2="250" y2="120" stroke="var(--accent-soft)" stroke-width="1.5" stroke-dasharray="3 5" opacity=".4"/>
+              <line x1="100" y1="170" x2="250" y2="120" stroke="var(--accent-soft)" stroke-width="1.5" stroke-dasharray="3 5" opacity=".4"/>
+              <line x1="250" y1="200" x2="250" y2="120" stroke="var(--accent-soft)" stroke-width="1.5" stroke-dasharray="3 5" opacity=".4"/>
+              <line x1="400" y1="170" x2="250" y2="120" stroke="var(--accent-soft)" stroke-width="1.5" stroke-dasharray="3 5" opacity=".4"/>
+            </svg>
+            <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:80px;height:80px;border-radius:50%;background:var(--accent-soft);display:grid;place-items:center;box-shadow:0 8px 22px -4px rgba(32,123,76,.35)">
+              <div style="font-weight:900;font-size:14px;color:var(--accent)">SDLC</div>
+            </div>
+            <div class="float-anim" style="position:absolute;left:24%;top:24%;transform:translate(-50%,-50%);width:46px;height:46px;border-radius:50%;background:var(--paper);border:2px solid var(--accent-soft);display:grid;place-items:center;font-size:12px;font-weight:700;color:var(--accent)">계획</div>
+            <div class="float-anim" style="position:absolute;left:50%;top:10%;transform:translate(-50%,-50%);width:46px;height:46px;border-radius:50%;background:var(--paper);border:2px solid var(--accent-soft);display:grid;place-items:center;font-size:12px;font-weight:700;color:var(--accent);animation-delay:.3s">분석</div>
+            <div class="float-anim" style="position:absolute;left:76%;top:24%;transform:translate(-50%,-50%);width:46px;height:46px;border-radius:50%;background:var(--paper);border:2px solid var(--accent-soft);display:grid;place-items:center;font-size:12px;font-weight:700;color:var(--accent);animation-delay:.6s">설계</div>
+            <div class="float-anim" style="position:absolute;left:20%;top:72%;transform:translate(-50%,-50%);width:46px;height:46px;border-radius:50%;background:var(--paper);border:2px solid var(--accent-soft);display:grid;place-items:center;font-size:12px;font-weight:700;color:var(--accent);animation-delay:.9s">구현</div>
+            <div class="float-anim" style="position:absolute;left:50%;top:84%;transform:translate(-50%,-50%);width:46px;height:46px;border-radius:50%;background:var(--paper);border:2px solid var(--accent-soft);display:grid;place-items:center;font-size:12px;font-weight:700;color:var(--accent);animation-delay:1.2s">테스트</div>
+            <div class="float-anim" style="position:absolute;left:80%;top:72%;transform:translate(-50%,-50%);width:46px;height:46px;border-radius:50%;background:var(--paper);border:2px solid var(--accent-soft);display:grid;place-items:center;font-size:12px;font-weight:700;color:var(--accent);animation-delay:1.5s">배포</div>
+          </div>
+
+          <h2>SDLC 개요와 소프트웨어 공학의 핵심 개념</h2>
+          <p>이 레슨은 핵심 개념을 질문-답변 구조, 표, 연결 고리 중심으로 구성하였다. 비전공자 및 초학습자가 용어 간 관계를 한눈에 파악하는 것을 목표로 한다.</p>
+
+          <h3 style="font-size:14px;font-weight:800;margin-top:18px;margin-bottom:10px">1. 소프트웨어와 소프트웨어 공학은 무엇인가</h3>
+          <div style="border:1px solid var(--line);border-radius:10px;overflow:hidden">
+            <div style="display:grid;grid-template-columns:1fr 1.3fr;background:var(--sand);padding:10px 14px;font-size:12px;font-weight:800;color:var(--ink-3)">
+              <div>질문</div><div>답변</div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1.3fr;padding:12px 14px;font-size:12px">
+              <div style="font-weight:600">소프트웨어란 무엇인가</div>
+              <div style="color:var(--ink-2)">컴퓨터 시스템에서 프로그램, 데이터, 처리된 정보 전체를 의미</div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1.3fr;padding:12px 14px;font-size:12px;border-top:1px solid var(--line);background:var(--bg)">
+              <div style="font-weight:600">컴퓨터의 구성 요소는</div>
+              <div style="color:var(--ink-2)">하드웨어 + 소프트웨어 + 휴먼웨어</div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1.3fr;padding:12px 14px;font-size:12px;border-top:1px solid var(--line)">
+              <div style="font-weight:600">공학(Engineering)의 핵심은</div>
+              <div style="color:var(--ink-2)">체계적·정량적 접근으로 품질·비용·일정 관리</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 비교 뷰 -->
+      <div class="compare-shell" id="compareView">
+        <!-- 생성 중 로딩 오버레이 — 스피너, 단계 칩, 경과 시간 표시 -->
+        <div class="gen-overlay hidden" id="genOverlay">
+          <div class="gen-spinner"></div>
+          <div class="gen-status-text" id="genStatusText">AI가 슬라이드를 생성하고 있습니다...</div>
+          <div class="gen-steps" id="genSteps"></div>
+          <div class="gen-elapsed" id="genElapsed">0.0초</div>
+        </div>
+        <div class="compare-header">
+          <span style="font-size:16px;font-weight:800">출력물 비교</span>
+          <div style="flex:1"></div>
+          <div class="slide-tabs" id="slideTabs"></div>
+        </div>
+        <div class="split-view">
+          <div class="split-panel">
+            <div class="split-panel-title"><span class="badge-text">텍스트 위주</span> 현재 방식</div>
+            <div id="textSlideArea"></div>
+          </div>
+          <div class="split-panel">
+            <div class="split-panel-title"><span class="badge-visual">시각 위주</span> 개선 방식</div>
+            <div id="visualSlideArea"></div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ── 우측 aside ── -->
+    <div class="right-aside">
+      <div class="right-section-label" style="margin-top:0">AI 생성 상태</div>
+      <div class="right-card">
+        <div class="ai-status-row">
+          <div class="ai-avatar">🦉</div>
+          <div style="flex:1">
+            <div style="font-size:12px;font-weight:700">올빼미 플래너</div>
+            <div style="font-size:12px;color:var(--accent);display:flex;align-items:center;gap:4px">
+              <span style="width:5px;height:5px;border-radius:3px;background:var(--accent-strong)"></span>
+              <span id="aiStatusText">대기 중</span>
+            </div>
+          </div>
+          <button class="chip chip-coral" style="padding:4px 9px;font-size:12px">■ 멈춤</button>
+        </div>
+        <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--ink-3);margin-top:5px">
+          <span id="progressLabel">0 / 0 완료</span>
+          <span style="font-family:monospace" id="progressTime">—</span>
+        </div>
+      </div>
+
+      <div class="right-section-label">현재 레슨 아웃라인</div>
+      <div class="right-card" style="padding:10px 4px">
+        <div class="outline-item"><span class="outline-num">1.</span><span style="flex:1;font-weight:600">소프트웨어와 소프트웨어 공학</span><span style="color:var(--accent)">✓</span></div>
+        <div class="outline-item"><span class="outline-num">2.</span><span style="flex:1;font-weight:600">SDLC의 여섯 단계</span><span style="color:var(--accent)">✓</span></div>
+        <div class="outline-item"><span class="outline-num">3.</span><span style="flex:1;color:var(--ink-3)">프로세스 모델 비교: 폭포수 vs 애자일</span></div>
+        <div class="outline-item"><span class="outline-num">4.</span><span style="flex:1;color:var(--ink-3)">핵심 용어 요약표</span></div>
+        <div class="outline-item"><span class="outline-num">5.</span><span style="flex:1;color:var(--ink-3)">학습 확인 문제</span></div>
+      </div>
+
+      <div class="right-section-label">레슨 설정</div>
+      <div class="right-card" style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="font-size:12px;color:var(--ink-3);font-weight:600;width:70px">난이도</div>
+          <div style="flex:1;display:flex;gap:4px;justify-content:flex-end">
+            <span style="padding:3px 8px;border-radius:999px;font-size:12px;font-weight:700;background:var(--accent-soft);color:var(--accent)">초급</span>
+            <span style="padding:3px 8px;border-radius:999px;font-size:12px;font-weight:700;background:var(--sand);color:var(--ink-3)">중급</span>
+            <span style="padding:3px 8px;border-radius:999px;font-size:12px;font-weight:700;background:var(--sand);color:var(--ink-3)">고급</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="font-size:12px;color:var(--ink-3);font-weight:600;width:70px">예상 시간</div>
+          <div style="flex:1;text-align:right;font-size:12px;font-weight:700">12분</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="font-size:12px;color:var(--ink-3);font-weight:600;width:70px">공개 범위</div>
+          <div style="flex:1;text-align:right;font-size:12px;font-weight:600;color:var(--accent)">● 수강생만</div>
+        </div>
+      </div>
+
+      <div class="right-section-label">학생 암기노트 미리보기</div>
+      <div class="right-card" style="padding:4px 0" id="noteCards">
+        <div class="note-card"><span class="note-tag">핵심</span><span style="line-height:1.4">SDLC 6단계</span></div>
+        <div class="note-card"><span class="note-tag">산출물</span><span style="line-height:1.4">SRS의 정의와 구성</span></div>
+        <div class="note-card"><span class="note-tag">비교</span><span style="line-height:1.4">폭포수 vs 애자일</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 프롬프트 조정 모달 ===== -->
+<div class="modal-overlay" id="promptModal">
+  <div class="modal-body">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="modal-title">⚙️ 프롬프트 조정</div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">기본 설정</div>
+      <div class="modal-field"><label>주제 (topic)</label><input id="mTopic" value="SDLC 개요와 소프트웨어 공학" maxlength="80"></div>
+      <div class="modal-field">
+        <label>깊이 (depth)</label>
+        <select id="mDepth"><option value="basic">기초 중심 (light)</option><option value="normal" selected>표준 (normal)</option><option value="deep">심화·예외까지 (deep)</option></select>
+      </div>
+      <div class="modal-field">
+        <label>AI 선생님 (teacher)</label>
+        <select id="mTeacher"><option value="owl" selected>올빼미 교수</option><option value="cat">냥 튜터</option><option value="fox">여우 선배</option><option value="bear">곰 코치</option></select>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">튜터 성향 슬라이더</div>
+      <div class="slider-row"><label>친근도 (tone)</label><input type="range" min="0" max="100" value="55" id="mTone" oninput="this.nextElementSibling.textContent=this.value"><span class="slider-val">55</span></div>
+      <div class="slider-row"><label>속도 (pace)</label><input type="range" min="0" max="100" value="45" id="mPace" oninput="this.nextElementSibling.textContent=this.value"><span class="slider-val">45</span></div>
+      <div class="slider-row"><label>깊이 (tutor)</label><input type="range" min="0" max="100" value="70" id="mTutorDepth" oninput="this.nextElementSibling.textContent=this.value"><span class="slider-val">70</span></div>
+      <div class="slider-row"><label>소크라테스</label><input type="range" min="0" max="100" value="80" id="mSocratic" oninput="this.nextElementSibling.textContent=this.value"><span class="slider-val">80</span></div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">학습자 정보</div>
+      <div class="modal-field"><label>대상 수준 (audience_level)</label><input id="mAudience" value="초중급 학습자" maxlength="80"></div>
+      <div class="modal-field"><label>학습 목표 (learning_goal)</label><input id="mGoal" value="핵심 개념 이해와 실습" maxlength="160"></div>
+      <div class="modal-field"><label>취약점 (weak_points)</label><textarea id="mWeak" maxlength="240">개념과 코드 연결이 약함</textarea></div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">시각 자료 설정 (신규)</div>
+      <div class="slider-row"><label>시각 밀도</label><input type="range" min="0" max="100" value="70" id="mVisualDensity" oninput="this.nextElementSibling.textContent=this.value"><span class="slider-val">70</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin:-4px 90px 8px 90px"><span>글 위주</span><span>시각 위주</span></div>
+      <div class="modal-field">
+        <label>차트 스타일 (chart_style)</label>
+        <select id="mChartStyle"><option value="minimal">미니멀</option><option value="detailed" selected>상세</option><option value="interactive">인터랙티브</option></select>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">생성 프롬프트 템플릿</div>
+      <div class="modal-field">
+        <textarea id="mPromptTemplate" style="min-height:140px;font-family:'SF Mono','Fira Code',monospace;font-size:11px">당신은 {teacher} 캐릭터의 AI 튜터입니다.
+주제: {topic}
+난이도: {depth}
+대상: {audience_level}
+학습 목표: {learning_goal}
+취약점: {weak_points}
+
+친근도 {tone}%, 속도 {pace}%, 깊이 {tutor_depth}%, 소크라테스식 질문 {socratic}%
+
+시각 자료 밀도: {visual_density}% (0=텍스트만, 100=차트/다이어그램 위주)
+차트 스타일: {chart_style}
+
+슬라이드에 텍스트를 최소화하고, 시각 자료(차트, 흐름도, 개념맵)로
+핵심을 전달하세요. 음성 대본에서 상세 설명을 보충합니다.</textarea>
+      </div>
+    </div>
+
+    <button class="modal-run" onclick="runGeneration()">🚀 생성하기</button>
+  </div>
+</div>
+
+<script>
+/* ── 전역 상태 ── */
+/* 동일 FastAPI 서버에서 제공되므로 상대 경로 사용 — 포트 의존성 제거 */
+var BASE_PATH = '/demo/chapter-studio';
+var compareActive = false;
+var currentSlideIdx = 0;
+var generatedResult = null;
+var visualPreview = null;
+
+/* ── 경과 시간 타이머 — 오버레이에 실시간 초 단위 표시 ── */
+var genTimer = null;
+var genStartTime = 0;
+
+function startGenTimer() {
+  genStartTime = Date.now();
+  genTimer = setInterval(function() {
+    var elapsed = ((Date.now() - genStartTime) / 1000).toFixed(1);
+    document.getElementById('genElapsed').textContent = elapsed + '초';
+  }, 100);
+}
+
+function stopGenTimer() {
+  if (genTimer) { clearInterval(genTimer); genTimer = null; }
+}
+
+/* ── 비교 뷰 토글 — 첫 진입 시 실제 API를 호출하고 오버레이를 표시 ── */
+function toggleCompare() {
+  compareActive = !compareActive;
+  var btn = document.getElementById('btnCompare');
+  var defaultEl = document.getElementById('defaultContent');
+  var compareEl = document.getElementById('compareView');
+  var overlay = document.getElementById('genOverlay');
+
+  if (compareActive) {
+    btn.className = 'chip chip-accent';
+    btn.textContent = '📊 비교 닫기';
+    defaultEl.style.display = 'none';
+    compareEl.classList.add('visible');
+
+    if (visualPreview) {
+      /* 이미 생성된 결과가 있으면 오버레이 없이 즉시 표시 */
+      overlay.classList.add('hidden');
+      renderComparison();
+    } else {
+      /* 최초 진입 — 오버레이 노출 후 실제 API 생성 시작 */
+      overlay.classList.remove('hidden');
+      document.getElementById('genSteps').textContent = '';
+      document.getElementById('genStatusText').textContent = 'AI가 슬라이드를 생성하고 있습니다...';
+      document.getElementById('genElapsed').textContent = '0.0초';
+      startGenTimer();
+      startGeneration();
+    }
+  } else {
+    btn.className = 'chip chip-coral';
+    btn.textContent = '📊 출력물 비교';
+    defaultEl.style.display = 'block';
+    compareEl.classList.remove('visible');
+    stopGenTimer();
+  }
+}
+
+/* ── 레슨 선택 ── */
+function selectLesson(el) {
+  var rows = document.querySelectorAll('.lesson-row');
+  for (var i = 0; i < rows.length; i++) { rows[i].classList.remove('active'); }
+  el.classList.add('active');
+}
+
+/* ── 모달 ── */
+function openModal() { document.getElementById('promptModal').classList.add('visible'); }
+function closeModal() { document.getElementById('promptModal').classList.remove('visible'); }
+
+/* loadMockComparison 제거 — LLM 실제 생성으로 대체됨 */
+
+/* ── 비교 렌더링 ── */
+function renderComparison() {
+  if (!generatedResult || !visualPreview) return;
+
+  /* 슬라이드 탭 생성 */
+  var tabsEl = document.getElementById('slideTabs');
+  tabsEl.textContent = '';
+  visualPreview.visual_slides.forEach(function(vs, i) {
+    var btn = document.createElement('button');
+    btn.className = 'slide-tab-btn' + (i === currentSlideIdx ? ' active' : '');
+    btn.textContent = 'Slide ' + (i + 1);
+    btn.setAttribute('data-idx', String(i));
+    btn.addEventListener('click', function() {
+      currentSlideIdx = parseInt(this.getAttribute('data-idx'), 10);
+      renderComparison();
+    });
+    tabsEl.appendChild(btn);
+  });
+
+  renderTextSlide(currentSlideIdx);
+  renderVisualSlide(currentSlideIdx);
+}
+
+/* ── 텍스트 위주 슬라이드 렌더링 ── */
+function renderTextSlide(idx) {
+  var slide = generatedResult.slides[idx];
+  if (!slide) return;
+  var area = document.getElementById('textSlideArea');
+  var scriptLen = slide.voice_script.length;
+
+  /* 안전하게 DOM 생성 — textContent 기반 */
+  area.textContent = '';
+
+  var slideDiv = document.createElement('div');
+  slideDiv.className = 'text-slide';
+
+  /* 슬라이드 HTML 콘텐츠 — srcdoc 삽입 시 sandbox로 스크립트 실행 차단 (P0-1) */
+  var contentFrame = document.createElement('iframe');
+  contentFrame.style.cssText = 'width:100%;min-height:280px;border:0;border-radius:8px;background:var(--paper)';
+  contentFrame.sandbox = '';
+  contentFrame.srcdoc = '<!doctype html><html><head><style>body{font-family:Pretendard Variable,sans-serif;color:#1F2A30;padding:16px;margin:0;font-size:13px;line-height:1.7}h2{font-size:18px;margin:0 0 10px}h3{font-size:15px;margin:12px 0 6px}p{color:#55646C;margin-bottom:8px}ul{padding-left:18px;color:#55646C}li{margin-bottom:4px}b{color:#1F2A30}</style></head><body>' + slide.htmlContent + '</body></html>';
+  slideDiv.appendChild(contentFrame);
+  area.appendChild(slideDiv);
+
+  var scriptBox = document.createElement('div');
+  scriptBox.className = 'script-box';
+
+  var scriptLabel = document.createElement('div');
+  scriptLabel.className = 'script-label';
+  scriptLabel.textContent = '🎤 음성 대본';
+  scriptBox.appendChild(scriptLabel);
+
+  var scriptText = document.createElement('div');
+  scriptText.className = 'script-text';
+  scriptText.textContent = slide.voice_script;
+  scriptBox.appendChild(scriptText);
+
+  var lenBadge = document.createElement('span');
+  lenBadge.className = 'script-length';
+  lenBadge.textContent = scriptLen + '자 — 짧은 안내';
+  scriptBox.appendChild(lenBadge);
+
+  area.appendChild(scriptBox);
+}
+
+/* ── 시각 위주 슬라이드 렌더링 ── */
+function renderVisualSlide(idx) {
+  var vs = visualPreview.visual_slides[idx];
+  if (!vs) return;
+  var area = document.getElementById('visualSlideArea');
+  var scriptLen = vs.voice_script.length;
+
+  /* 기존 Chart.js 인스턴스 전체 파기 — 전체 맵 초기화로 잔류 인스턴스 방지 */
+  Object.keys(chartInstances).forEach(function(key) {
+    chartInstances[key].destroy();
+  });
+  chartInstances = {};
+
+  area.textContent = '';
+
+  var slideDiv = document.createElement('div');
+  slideDiv.className = 'visual-slide';
+
+  var h3 = document.createElement('h3');
+  h3.textContent = vs.title;
+  slideDiv.appendChild(h3);
+
+  /* 시각 타입별 렌더링 — innerHTML 대신 appendChild로 XSS 차단 (P0-2) */
+  if (vs.visual_type === 'flowchart') {
+    if (!vs.visual_spec || !Array.isArray(vs.visual_spec.nodes) || !Array.isArray(vs.visual_spec.edges)) return;
+    var svgContainer = document.createElement('div');
+    svgContainer.appendChild(renderFlowchartSVG(vs.visual_spec));
+    slideDiv.appendChild(svgContainer);
+  } else if (vs.visual_type === 'bar_chart') {
+    if (!vs.visual_spec || !Array.isArray(vs.visual_spec.data)) return;
+    var chartDiv = document.createElement('div');
+    chartDiv.className = 'chart-container';
+    var canvas = document.createElement('canvas');
+    canvas.id = 'barChart_' + idx;
+    chartDiv.appendChild(canvas);
+    slideDiv.appendChild(chartDiv);
+  } else if (vs.visual_type === 'concept_map') {
+    if (!vs.visual_spec || !Array.isArray(vs.visual_spec.nodes) || !Array.isArray(vs.visual_spec.edges)) return;
+    var mapContainer = document.createElement('div');
+    mapContainer.appendChild(renderConceptMapSVG(vs.visual_spec));
+    slideDiv.appendChild(mapContainer);
+  } else if (vs.visual_type === 'mermaid') {
+    if (!vs.visual_spec || !vs.visual_spec.code) return;
+    var mermaidDiv = document.createElement('div');
+    mermaidDiv.className = 'mermaid-container';
+    var mermaidCode = document.createElement('div');
+    mermaidCode.className = 'mermaid';
+    mermaidCode.textContent = vs.visual_spec.code;
+    mermaidDiv.appendChild(mermaidCode);
+    slideDiv.appendChild(mermaidDiv);
+  } else if (vs.visual_type === 'timeline') {
+    if (!vs.visual_spec || !Array.isArray(vs.visual_spec.events) || vs.visual_spec.events.length === 0) return;
+    var tlContainer = document.createElement('div');
+    tlContainer.appendChild(renderTimelineSVG(vs.visual_spec));
+    slideDiv.appendChild(tlContainer);
+  } else if (vs.visual_type === 'table') {
+    if (!vs.visual_spec || !Array.isArray(vs.visual_spec.headers) || !Array.isArray(vs.visual_spec.rows)) return;
+    slideDiv.appendChild(renderTable(vs.visual_spec));
+  } else if (vs.visual_type === 'radar_chart') {
+    if (!vs.visual_spec || !Array.isArray(vs.visual_spec.axes) || !Array.isArray(vs.visual_spec.datasets)) return;
+    var radarDiv = document.createElement('div');
+    radarDiv.className = 'radar-container';
+    var radarCanvas = document.createElement('canvas');
+    radarCanvas.id = 'radarChart_' + idx;
+    radarDiv.appendChild(radarCanvas);
+    slideDiv.appendChild(radarDiv);
+  } else if (vs.visual_type === 'tree') {
+    if (!vs.visual_spec || !vs.visual_spec.root) return;
+    var treeContainer = document.createElement('div');
+    treeContainer.appendChild(renderTreeSVG(vs.visual_spec));
+    slideDiv.appendChild(treeContainer);
+  } else if (vs.visual_type === 'comparison') {
+    if (!vs.visual_spec || !vs.visual_spec.left || !vs.visual_spec.right) return;
+    slideDiv.appendChild(renderComparison_visual(vs.visual_spec));
+  }
+
+  area.appendChild(slideDiv);
+
+  /* Mermaid는 DOM 삽입 후 렌더링해야 함 */
+  if (vs.visual_type === 'mermaid') {
+    requestAnimationFrame(function() {
+      mermaid.run({ nodes: slideDiv.querySelectorAll('.mermaid') });
+    });
+  }
+
+  /* 레이더 차트는 Canvas 삽입 후 Chart.js로 렌더 */
+  if (vs.visual_type === 'radar_chart') {
+    requestAnimationFrame(function() { renderRadarChart(vs.visual_spec, 'radarChart_' + idx); });
+  }
+
+  /* 음성 대본 */
+  var scriptBox = document.createElement('div');
+  scriptBox.className = 'script-box';
+
+  var scriptLabel = document.createElement('div');
+  scriptLabel.className = 'script-label';
+  scriptLabel.textContent = '🎤 음성 대본 (확장)';
+  scriptBox.appendChild(scriptLabel);
+
+  var scriptText = document.createElement('div');
+  scriptText.className = 'script-text';
+  scriptText.textContent = vs.voice_script;
+  scriptBox.appendChild(scriptText);
+
+  var lenBadge = document.createElement('span');
+  lenBadge.className = 'script-length';
+  lenBadge.style.background = 'var(--accent-soft)';
+  lenBadge.style.color = 'var(--accent)';
+  lenBadge.textContent = scriptLen + '자 — 상세 설명';
+  scriptBox.appendChild(lenBadge);
+
+  area.appendChild(scriptBox);
+
+  /* JSON 스펙 프리뷰 */
+  var jsonBox = document.createElement('div');
+  jsonBox.className = 'json-preview';
+
+  var jsonLabel = document.createElement('div');
+  jsonLabel.className = 'script-label';
+  jsonLabel.style.color = '#7ED1E5';
+  jsonLabel.textContent = '📋 LLM 출력 JSON 사양';
+  jsonBox.appendChild(jsonLabel);
+
+  var pre = document.createElement('pre');
+  pre.textContent = JSON.stringify(vs.visual_spec, null, 2);
+  jsonBox.appendChild(pre);
+
+  area.appendChild(jsonBox);
+
+  /* 막대 차트는 Canvas 삽입 후 Chart.js로 렌더 */
+  if (vs.visual_type === 'bar_chart') {
+    requestAnimationFrame(function() { renderBarChart(vs.visual_spec, 'barChart_' + idx); });
+  }
+}
+
+/* ── 흐름도 SVG 렌더링 — createElementNS DOM 빌드로 innerHTML 주입 제거 (P0-2) ── */
+function renderFlowchartSVG(spec) {
+  var NS = 'http://www.w3.org/2000/svg';
+  var w = 500, h = 380;
+
+  var svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('class', 'flowchart-svg');
+  svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+
+  /* arrowhead 마커 정의 */
+  var defs = document.createElementNS(NS, 'defs');
+  var marker = document.createElementNS(NS, 'marker');
+  marker.setAttribute('id', 'arrowhead');
+  marker.setAttribute('markerWidth', '8');
+  marker.setAttribute('markerHeight', '6');
+  marker.setAttribute('refX', '8');
+  marker.setAttribute('refY', '3');
+  marker.setAttribute('orient', 'auto');
+  var poly = document.createElementNS(NS, 'polygon');
+  poly.setAttribute('points', '0 0, 8 3, 0 6');
+  poly.setAttribute('fill', '#36B36F');
+  marker.appendChild(poly);
+  defs.appendChild(marker);
+  svg.appendChild(defs);
+
+  /* 노드 위치 인덱스 구축 */
+  var nodeMap = {};
+  spec.nodes.forEach(function(n) { nodeMap[n.id] = n; });
+
+  /* 엣지 선 렌더링 */
+  spec.edges.forEach(function(e) {
+    var from = nodeMap[e.from];
+    var to = nodeMap[e.to];
+    if (!from || !to) return;
+    var dx = to.x - from.x, dy = to.y - from.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist === 0) return;
+    var r = 28;
+    var fx = from.x + (dx / dist) * r;
+    var fy = from.y + (dy / dist) * r;
+    var tx = to.x - (dx / dist) * (r + 8);
+    var ty = to.y - (dy / dist) * (r + 8);
+    var line = document.createElementNS(NS, 'line');
+    line.setAttribute('class', 'fc-edge');
+    line.setAttribute('marker-end', 'url(#arrowhead)');
+    line.setAttribute('x1', fx);
+    line.setAttribute('y1', fy);
+    line.setAttribute('x2', tx);
+    line.setAttribute('y2', ty);
+    svg.appendChild(line);
+  });
+
+  /* 노드 원 + 레이블 렌더링 */
+  spec.nodes.forEach(function(n) {
+    var circle = document.createElementNS(NS, 'circle');
+    circle.setAttribute('class', 'fc-node');
+    circle.setAttribute('cx', n.x);
+    circle.setAttribute('cy', n.y);
+    circle.setAttribute('r', '28');
+    svg.appendChild(circle);
+
+    var text = document.createElementNS(NS, 'text');
+    text.setAttribute('class', 'fc-label');
+    text.setAttribute('x', n.x);
+    text.setAttribute('y', n.y);
+    text.textContent = n.label;
+    svg.appendChild(text);
+  });
+
+  return svg;
+}
+
+/* ── 개념 맵 SVG 렌더링 — createElementNS DOM 빌드로 innerHTML 주입 제거 (P0-2) ── */
+function renderConceptMapSVG(spec) {
+  var NS = 'http://www.w3.org/2000/svg';
+  var w = 500, h = 320;
+  var cx = w / 2, cy = h / 2;
+
+  var svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('class', 'concept-map-svg');
+  svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+
+  /* 중심 노드 동적 탐지 — 엣지 연결 수가 가장 많은 노드를 중심으로 판별한다.
+     LLM이 'center' 외 다른 id(예: 'main', 'root', 주제명)를 부여해도 정상 동작한다.
+     동률이면 nodes 배열에서 먼저 나온 노드를 중심으로 취급한다. */
+  var edgeCount = {};
+  spec.nodes.forEach(function(n) { edgeCount[n.id] = 0; });
+  spec.edges.forEach(function(e) {
+    if (edgeCount[e.from] !== undefined) edgeCount[e.from]++;
+    if (edgeCount[e.to] !== undefined) edgeCount[e.to]++;
+  });
+  var centerId = spec.nodes[0] ? spec.nodes[0].id : null;
+  var maxEdges = -1;
+  spec.nodes.forEach(function(n) {
+    if (edgeCount[n.id] > maxEdges) {
+      maxEdges = edgeCount[n.id];
+      centerId = n.id;
+    }
+  });
+
+  /* 노드별 위치 계산 */
+  var positions = {};
+  var leaves = spec.nodes.filter(function(n) { return n.id !== centerId; });
+  /* 리프 노드가 없으면 0으로 나누기를 방지하고 빈 SVG를 반환한다 */
+  if (leaves.length === 0) return svg;
+  var angleStep = (2 * Math.PI) / leaves.length;
+  var radius = 120;
+
+  spec.nodes.forEach(function(n) {
+    if (n.id === centerId) {
+      positions[n.id] = { x: cx, y: cy, size: n.size };
+    }
+  });
+  leaves.forEach(function(n, i) {
+    var angle = angleStep * i - Math.PI / 2;
+    positions[n.id] = {
+      x: cx + radius * Math.cos(angle),
+      y: cy + radius * Math.sin(angle),
+      size: n.size
+    };
+  });
+
+  /* 엣지 선 렌더링 */
+  spec.edges.forEach(function(e) {
+    var from = positions[e.from];
+    var to = positions[e.to];
+    if (!from || !to) return;
+    /* 중심 노드에서 출발하지 않는 엣지는 보조 연결선으로 표시한다 */
+    var isSecondary = e.from !== centerId;
+    var line = document.createElementNS(NS, 'line');
+    line.setAttribute('class', 'cm-edge');
+    line.setAttribute('x1', from.x);
+    line.setAttribute('y1', from.y);
+    line.setAttribute('x2', to.x);
+    line.setAttribute('y2', to.y);
+    if (isSecondary) {
+      line.setAttribute('stroke-dasharray', '4 4');
+      line.setAttribute('stroke', '#207B4C');
+    }
+    svg.appendChild(line);
+  });
+
+  /* 노드 원 + 레이블 렌더링 */
+  spec.nodes.forEach(function(n) {
+    var p = positions[n.id];
+    if (!p) return;
+    var isCenter = n.id === centerId;
+    var r = p.size / 2 + 6;
+
+    var circle = document.createElementNS(NS, 'circle');
+    circle.setAttribute('class', 'cm-node ' + (isCenter ? 'cm-center' : 'cm-leaf'));
+    circle.setAttribute('cx', p.x);
+    circle.setAttribute('cy', p.y);
+    circle.setAttribute('r', r);
+    svg.appendChild(circle);
+
+    var text = document.createElementNS(NS, 'text');
+    text.setAttribute('class', 'cm-label');
+    text.setAttribute('x', p.x);
+    text.setAttribute('y', p.y);
+    text.setAttribute('style', 'font-size:' + (isCenter ? 12 : 10) + 'px;font-weight:' + (isCenter ? 800 : 600));
+    text.textContent = n.label;
+    svg.appendChild(text);
+  });
+
+  return svg;
+}
+
+/* ── Canvas별 Chart.js 인스턴스 저장소 — 재렌더 시 destroy()로 메모리 누수 방지 (P1-1) ── */
+var chartInstances = {};
+
+/* ── 막대 차트 (Chart.js) ── */
+function renderBarChart(spec, canvasId) {
+  var canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  /* 동일 canvas에 이미 Chart 인스턴스가 있으면 먼저 파기 */
+  if (chartInstances[canvasId]) {
+    chartInstances[canvasId].destroy();
+  }
+  /* LLM이 100 초과 값을 생성할 수 있으므로 y축 최대값을 데이터로부터 동적 계산 */
+  var maxVal = Math.max.apply(null, spec.data.map(function(d) { return d.value; }));
+  var yMax = Math.ceil(maxVal * 1.2);
+  var ctx = canvas.getContext('2d');
+  chartInstances[canvasId] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: spec.data.map(function(d) { return d.label; }),
+      datasets: [{
+        label: spec.y_label,
+        data: spec.data.map(function(d) { return d.value; }),
+        backgroundColor: spec.data.map(function(d) { return d.color + '99'; }),
+        borderColor: spec.data.map(function(d) { return d.color; }),
+        borderWidth: 2, borderRadius: 8
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        title: { display: true, text: spec.title, font: { size: 14, weight: 'bold', family: 'Pretendard Variable' }, color: '#1F2A30' },
+        legend: { display: false },
+        tooltip: { backgroundColor: '#1F2A30', titleFont: { family: 'Pretendard Variable' }, bodyFont: { family: 'Pretendard Variable' } }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { family: 'Pretendard Variable', weight: 'bold' } } },
+        y: { beginAtZero: true, max: yMax, grid: { color: '#ECE6D8' }, ticks: { font: { family: 'Pretendard Variable' }, callback: function(v) { return v; } } }
+      }
+    }
+  });
+}
+
+/* ── 타임라인 SVG 렌더링 ── */
+function renderTimelineSVG(spec) {
+  var NS = 'http://www.w3.org/2000/svg';
+  var eventCount = spec.events.length;
+  var rowH = 52;
+  var w = 500, h = 60 + eventCount * rowH;
+  var lineX = 60;
+
+  var svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('class', 'timeline-svg');
+  svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+
+  var mainLine = document.createElementNS(NS, 'line');
+  mainLine.setAttribute('class', 'tl-line');
+  mainLine.setAttribute('x1', lineX); mainLine.setAttribute('y1', '30');
+  mainLine.setAttribute('x2', lineX); mainLine.setAttribute('y2', String(30 + (eventCount - 1) * rowH));
+  svg.appendChild(mainLine);
+
+  spec.events.forEach(function(ev, i) {
+    var cy = 30 + i * rowH;
+
+    var ring = document.createElementNS(NS, 'circle');
+    ring.setAttribute('class', 'tl-dot-ring');
+    ring.setAttribute('cx', lineX); ring.setAttribute('cy', cy); ring.setAttribute('r', '10');
+    svg.appendChild(ring);
+
+    var dot = document.createElementNS(NS, 'circle');
+    dot.setAttribute('class', 'tl-dot');
+    dot.setAttribute('cx', lineX); dot.setAttribute('cy', cy); dot.setAttribute('r', '5');
+    svg.appendChild(dot);
+
+    var yearText = document.createElementNS(NS, 'text');
+    yearText.setAttribute('class', 'tl-year');
+    yearText.setAttribute('x', '10'); yearText.setAttribute('y', cy);
+    yearText.setAttribute('dominant-baseline', 'central');
+    yearText.textContent = ev.year;
+    svg.appendChild(yearText);
+
+    var eventText = document.createElementNS(NS, 'text');
+    eventText.setAttribute('class', 'tl-event');
+    eventText.setAttribute('x', '85'); eventText.setAttribute('y', String(cy - 6));
+    eventText.textContent = ev.event;
+    svg.appendChild(eventText);
+
+    var detailText = document.createElementNS(NS, 'text');
+    detailText.setAttribute('class', 'tl-detail');
+    detailText.setAttribute('x', '85'); detailText.setAttribute('y', String(cy + 10));
+    detailText.textContent = ev.detail;
+    svg.appendChild(detailText);
+  });
+
+  return svg;
+}
+
+/* ── 테이블 렌더링 (HTML table, SVG 아님) ── */
+function renderTable(spec) {
+  var table = document.createElement('table');
+  table.className = 'visual-table';
+
+  if (spec.title) {
+    var caption = document.createElement('caption');
+    caption.textContent = spec.title;
+    table.appendChild(caption);
+  }
+
+  var thead = document.createElement('thead');
+  var headRow = document.createElement('tr');
+  spec.headers.forEach(function(h) {
+    var th = document.createElement('th');
+    th.textContent = h;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
+  spec.rows.forEach(function(row) {
+    var tr = document.createElement('tr');
+    row.forEach(function(cell) {
+      var td = document.createElement('td');
+      td.textContent = cell;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+
+  return table;
+}
+
+/* ── 레이더 차트 (Chart.js) ── */
+function renderRadarChart(spec, canvasId) {
+  var canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  if (chartInstances[canvasId]) {
+    chartInstances[canvasId].destroy();
+  }
+  /* LLM이 100 초과 값을 생성할 수 있으므로 r축 최대값을 데이터로부터 동적 계산 */
+  var allValues = [];
+  spec.datasets.forEach(function(ds) { allValues = allValues.concat(ds.values); });
+  var maxVal = allValues.length > 0 ? Math.max.apply(null, allValues) : 100;
+  var rMax = Math.ceil(maxVal * 1.2);
+  var stepSize = Math.ceil(rMax / 5);
+  var ctx = canvas.getContext('2d');
+  chartInstances[canvasId] = new Chart(ctx, {
+    type: 'radar',
+    data: {
+      labels: spec.axes,
+      datasets: spec.datasets.map(function(ds) {
+        return {
+          label: ds.label,
+          data: ds.values,
+          backgroundColor: ds.color + '33',
+          borderColor: ds.color,
+          borderWidth: 2,
+          pointBackgroundColor: ds.color,
+          pointRadius: 3
+        };
+      })
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { family: 'Pretendard Variable', size: 11 } } }
+      },
+      scales: {
+        r: {
+          beginAtZero: true, max: rMax,
+          grid: { color: '#DED8CA' },
+          angleLines: { color: '#DED8CA' },
+          pointLabels: { font: { family: 'Pretendard Variable', size: 11, weight: '600' }, color: '#1F2A30' },
+          ticks: { stepSize: stepSize, font: { family: 'Pretendard Variable', size: 9 }, backdropColor: 'transparent' }
+        }
+      }
+    }
+  });
+}
+
+/* ── 트리 SVG 렌더링 (재귀 레이아웃) ── */
+function renderTreeSVG(spec) {
+  var NS = 'http://www.w3.org/2000/svg';
+
+  function countLeaves(node) {
+    if (!node.children || node.children.length === 0) return 1;
+    var sum = 0;
+    node.children.forEach(function(c) { sum += countLeaves(c); });
+    return sum;
+  }
+
+  function layoutNode(node, x, y, hSpacing, positions) {
+    positions.push({ node: node, x: x, y: y });
+    if (!node.children || node.children.length === 0) return;
+    var totalLeaves = countLeaves(node);
+    var startX = x - (totalLeaves - 1) * hSpacing / 2;
+    var offset = 0;
+    node.children.forEach(function(child) {
+      var childLeaves = countLeaves(child);
+      var childX = startX + offset * hSpacing + (childLeaves - 1) * hSpacing / 2;
+      layoutNode(child, childX, y + 70, hSpacing, positions);
+      offset += childLeaves;
+    });
+  }
+
+  var positions = [];
+  layoutNode(spec.root, 250, 30, 70, positions);
+
+  var minX = Infinity, maxX = -Infinity, maxY = 0;
+  positions.forEach(function(p) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  });
+  var padX = 60, padY = 30;
+  var w = maxX - minX + padX * 2;
+  var h = maxY + padY * 2;
+
+  var svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('class', 'tree-svg');
+  svg.setAttribute('viewBox', (minX - padX) + ' 0 ' + w + ' ' + h);
+
+  /* 포지션 맵 구축 */
+  var posMap = new Map();
+  positions.forEach(function(p) { posMap.set(p.node, p); });
+
+  /* 엣지 렌더링 */
+  function drawEdges(node) {
+    if (!node.children) return;
+    var parentPos = posMap.get(node);
+    node.children.forEach(function(child) {
+      var childPos = posMap.get(child);
+      if (parentPos && childPos) {
+        var line = document.createElementNS(NS, 'line');
+        line.setAttribute('class', 'tr-line');
+        line.setAttribute('x1', parentPos.x); line.setAttribute('y1', parentPos.y + 14);
+        line.setAttribute('x2', childPos.x); line.setAttribute('y2', childPos.y - 14);
+        svg.appendChild(line);
+      }
+      drawEdges(child);
+    });
+  }
+  drawEdges(spec.root);
+
+  /* 노드 렌더링 */
+  positions.forEach(function(p) {
+    var isRoot = p.node === spec.root;
+    var nodeW = p.node.label.length * 9 + 16;
+    var nodeH = 26;
+
+    var rect = document.createElementNS(NS, 'rect');
+    rect.setAttribute('class', isRoot ? 'tr-root' : 'tr-node');
+    rect.setAttribute('x', p.x - nodeW / 2); rect.setAttribute('y', p.y - nodeH / 2);
+    rect.setAttribute('width', nodeW); rect.setAttribute('height', nodeH);
+    rect.setAttribute('rx', isRoot ? '8' : '6');
+    rect.setAttribute('ry', isRoot ? '8' : '6');
+    svg.appendChild(rect);
+
+    var text = document.createElementNS(NS, 'text');
+    text.setAttribute('class', 'tr-label');
+    text.setAttribute('x', p.x); text.setAttribute('y', p.y);
+    text.textContent = p.node.label;
+    svg.appendChild(text);
+  });
+
+  return svg;
+}
+
+/* ── 비교 렌더링 (HTML grid) ── */
+function renderComparison_visual(spec) {
+  var grid = document.createElement('div');
+  grid.className = 'comparison-grid';
+
+  ['left', 'right'].forEach(function(side) {
+    var data = spec[side];
+    var sideDiv = document.createElement('div');
+    sideDiv.className = 'comparison-side ' + side + '-side';
+
+    var title = document.createElement('div');
+    title.className = 'comparison-title';
+    title.textContent = data.title;
+    sideDiv.appendChild(title);
+
+    var ul = document.createElement('ul');
+    ul.className = 'comparison-points';
+    data.points.forEach(function(pt) {
+      var li = document.createElement('li');
+      li.textContent = pt;
+      ul.appendChild(li);
+    });
+    sideDiv.appendChild(ul);
+
+    grid.appendChild(sideDiv);
+  });
+
+  return grid;
+}
+
+/* ── 메인 생성 함수 — 오버레이를 통해 SSE 스트림 호출 후 visual-preview 연계 ── */
+function startGeneration() {
+  /* 모달 필드 값 읽기 (없으면 기본값 사용) */
+  var topicEl = document.getElementById('mTopic');
+  var topic = topicEl ? topicEl.value : '소프트웨어 공학';
+
+  var overlay = document.getElementById('genOverlay');
+  var stepsEl = document.getElementById('genSteps');
+  var statusText = document.getElementById('genStatusText');
+
+  /* 우측 aside 상태 초기화 */
+  document.getElementById('aiStatusText').textContent = '생성 중…';
+  document.getElementById('progressFill').style.width = '10%';
+  document.getElementById('progressLabel').textContent = '시작…';
+  document.getElementById('progressTime').textContent = '계산 중';
+  var timeline = document.getElementById('timeline');
+  timeline.textContent = '';
+
+  var params = new URLSearchParams({
+    topic: topic,
+    depth: 'normal',
+    teacher: 'owl',
+    tone: '50', pace: '50', tutor_depth: '50', socratic: '70',
+    audience_level: '일반 학습자',
+    learning_goal: '핵심 개념 이해와 실습',
+    weak_points: '',
+    engine: 'mock', template: 'concept_code',
+    slide_count: '5'
+  });
+
+  var url = BASE_PATH + '/stream?' + params.toString();
+  var es = new EventSource(url);
+  var stepCount = 0;
+
+  es.addEventListener('node_complete', function(ev) {
+    stepCount++;
+    var data = JSON.parse(ev.data);
+
+    /* 오버레이 단계 칩 추가 */
+    var chip = document.createElement('span');
+    chip.className = 'gen-step done';
+    chip.textContent = '✓ ' + data.node;
+    stepsEl.appendChild(chip);
+    statusText.textContent = data.node + ' 완료...';
+
+    /* 우측 aside 진행률 업데이트 */
+    var pct = Math.min(90, stepCount * 15);
+    document.getElementById('progressFill').style.width = pct + '%';
+    document.getElementById('progressLabel').textContent = stepCount + ' 단계 완료';
+
+    /* 구조 aside 타임라인 칩 추가 */
+    var tChip = document.createElement('span');
+    tChip.className = 'timeline-chip done';
+    tChip.textContent = data.node;
+    timeline.appendChild(tChip);
+  });
+
+  es.addEventListener('complete', function(ev) {
+    es.close();
+    var result = JSON.parse(ev.data);
+    generatedResult = convertResultToTextSlides(result);
+
+    /* 시각 자료 불러오기 단계로 상태 업데이트 */
+    statusText.textContent = '시각 자료 불러오는 중...';
+    document.getElementById('progressFill').style.width = '95%';
+    document.getElementById('aiStatusText').textContent = '시각화 중…';
+
+    var vpUrl = BASE_PATH + '/visual-preview?topic=' + encodeURIComponent(topic);
+    fetch(vpUrl)
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function(data) {
+        visualPreview = data;
+        stopGenTimer();
+        statusText.textContent = '완료!';
+
+        /* 우측 aside 최종 상태 */
+        document.getElementById('progressFill').style.width = '100%';
+        document.getElementById('aiStatusText').textContent = '완료';
+        document.getElementById('progressLabel').textContent = '전체 완료';
+        document.getElementById('progressTime').textContent = ((Date.now() - genStartTime) / 1000).toFixed(1) + 's';
+
+        /* 오버레이 페이드 아웃 후 비교 렌더링 */
+        setTimeout(function() {
+          overlay.classList.add('hidden');
+          currentSlideIdx = 0;
+          renderComparison();
+        }, 600);
+      })
+      .catch(function() {
+        /* visual-preview 실패 시 오류 메시지 표시 */
+        stopGenTimer();
+        statusText.textContent = '생성 실패 — 서버 상태를 확인하세요';
+        document.getElementById('aiStatusText').textContent = '오류 발생';
+        setTimeout(function() {
+          overlay.classList.add('hidden');
+        }, 2000);
+      });
+  });
+
+  es.addEventListener('error', function() {
+    es.close();
+    stopGenTimer();
+    statusText.textContent = '생성 실패 — 서버 상태를 확인하세요';
+    document.getElementById('aiStatusText').textContent = '오류 발생';
+    setTimeout(function() {
+      overlay.classList.add('hidden');
+    }, 2000);
+  });
+}
+
+/* ── 모달 "🚀 생성하기" 버튼 핸들러 — 재생성 시 오버레이 재사용 ── */
+function runGeneration() {
+  closeModal();
+
+  /* 모달 필드 값을 URLSearchParams에 반영 (startGeneration에서는 기본값 사용) */
+  var topicEl = document.getElementById('mTopic');
+  if (topicEl && topicEl.value) {
+    /* topic은 startGeneration 내부에서 mTopic을 다시 읽으므로 별도 처리 불필요 */
+  }
+
+  /* 이전 결과 초기화 — 재생성 강제 */
+  visualPreview = null;
+  generatedResult = null;
+
+  if (!compareActive) {
+    /* 비교 뷰 비활성 상태 → 활성화하면서 생성 시작 */
+    toggleCompare();
+  } else {
+    /* 이미 비교 뷰가 열려 있는 상태 → 오버레이만 다시 띄우고 재생성 */
+    var overlay = document.getElementById('genOverlay');
+    overlay.classList.remove('hidden');
+    document.getElementById('genSteps').textContent = '';
+    document.getElementById('genStatusText').textContent = 'AI가 슬라이드를 재생성하고 있습니다...';
+    document.getElementById('genElapsed').textContent = '0.0초';
+    startGenTimer();
+    startGeneration();
+  }
+}
+
+/* ── SSE 결과를 텍스트 슬라이드 구조로 변환 ── */
+function convertResultToTextSlides(result) {
+  var slides = [];
+  if (result && result.slides) {
+    result.slides.forEach(function(s, i) {
+      slides.push({
+        title: s.title || ('Slide ' + (i+1)),
+        htmlContent: s.src_doc || s.html || '<p>내용 없음</p>',
+        voice_script: s.voice_script || '(음성 대본 없음)'
+      });
+    });
+  }
+  if (slides.length === 0) {
+    /* 슬라이드 없음 — 오류로 처리 */
+    return { slides: [] };
+  }
+  return { slides: slides };
+}
+
+/* ── /visual-preview 엔드포인트 호출 ── */
+function fetchVisualPreview(topic) {
+  var url = BASE_PATH + '/visual-preview?topic=' + encodeURIComponent(topic);
+  fetch(url)
+    .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function(data) {
+      visualPreview = data;
+      if (compareActive) { currentSlideIdx = 0; renderComparison(); }
+    })
+    .catch(function() {
+      /* visual-preview 로드 실패 — 오류 상태 유지, mock 대체 없음 */
+      console.error('visual-preview 로드 실패 — 서버 상태를 확인하세요');
+    });
+}
+</script>
+
+</body>
+</html>

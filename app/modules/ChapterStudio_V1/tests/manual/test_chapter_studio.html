@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChapterStudio_V1 테스트 페이지</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard Variable', Pretendard, Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; background: #F9F8F3; color: #1F2A30; padding: 24px; }
+    h1  { font-size: 20px; font-weight: 700; margin-bottom: 20px; }
+    h2  { font-size: 16px; font-weight: 600; margin: 16px 0 8px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 800px; margin-bottom: 16px; }
+    label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #555; }
+    input, select { padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+    .btn-row { display: flex; gap: 10px; margin-bottom: 20px; }
+    button { padding: 10px 20px; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .btn-sync  { background: #1a73e8; color: #fff; }
+    .btn-sse   { background: #34a853; color: #fff; }
+    .btn-reset { background: #ea4335; color: #fff; }
+    .status-bar { padding: 10px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 16px; display: none; }
+    .node-timeline { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+    .node-chip { padding: 4px 10px; border-radius: 20px; font-size: 12px; background: #e0e0e0; color: #444; }
+    .node-chip.done  { background: #34a853; color: #fff; }
+    .node-chip.error { background: #ea4335; color: #fff; }
+    .outputs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 1200px; }
+    .card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+    .card h3 { font-size: 14px; font-weight: 700; margin-bottom: 10px; }
+    .slide-frame { width: 100%; height: 300px; border: 1px solid #ddd; border-radius: 4px; }
+    .quiz-item { padding: 8px 0; border-bottom: 1px solid #eee; }
+    .quiz-question { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+    .quiz-choice { font-size: 12px; color: #555; }
+    .quiz-choice.answer { color: #34a853; font-weight: 600; }
+    .voice-item { padding: 5px 0; font-size: 12px; border-bottom: 1px solid #eee; }
+    pre { font-size: 12px; background: #f8f8f8; padding: 10px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>ChapterStudio_V1 테스트 페이지</h1>
+
+  <div class="form-grid">
+    <label>챕터 ID<input id="chapter_id" value="ch_test_001"></label>
+    <label>사용자 ID<input id="user_id" value="user_42"></label>
+    <label>커리큘럼 ID<input id="curriculum_id" value="curr_python_intro"></label>
+    <label>챕터 주제<input id="chapter_topic" value="Python 기초 — 변수와 자료형"></label>
+    <label>슬라이드 수 (10~15)<input id="target_slide_count" type="number" value="3" min="1" max="15"></label>
+    <label>학습자 수준
+      <select id="user_level">
+        <option value="beginner" selected>입문 (beginner)</option>
+        <option value="intermediate">중급 (intermediate)</option>
+        <option value="advanced">고급 (advanced)</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn-sync"  onclick="runSync()">동기 실행 (POST /chapters)</button>
+    <button class="btn-sse"   onclick="runSSE()">스트리밍 실행 (SSE)</button>
+    <button class="btn-reset" onclick="resetAll()">초기화</button>
+  </div>
+
+  <div class="status-bar" id="status-bar"></div>
+
+  <h2>노드 진행 타임라인 (SSE 전용)</h2>
+  <div class="node-timeline">
+    <span class="node-chip" id="node-shm_injector">SHMInjector</span>
+    <span class="node-chip" id="node-personalization_analyzer">PersonalizationAnalyzer</span>
+    <span class="node-chip" id="node-planner">Planner</span>
+    <span class="node-chip" id="node-slide_generator">SlideGenerator</span>
+    <span class="node-chip" id="node-coherence_reviewer">CoherenceReviewer</span>
+    <span class="node-chip" id="node-quiz_maker">QuizMaker</span>
+    <span class="node-chip" id="node-note_summarizer">NoteSummarizer</span>
+    <span class="node-chip" id="node-assignment_seed_maker">AssignmentSeedMaker</span>
+    <span class="node-chip" id="node-voice_script_writer">VoiceScriptWriter</span>
+    <span class="node-chip" id="node-db_router">DBRouter</span>
+  </div>
+
+  <div class="outputs" id="outputs" style="display:none">
+    <div class="card"><h3>슬라이드 (HTML)</h3><div id="slides-content"></div></div>
+    <div class="card"><h3>퀴즈 (5문제)</h3><div id="quiz-content"></div></div>
+    <div class="card"><h3>핵심노트</h3><div id="note-content"></div></div>
+    <div class="card"><h3>강의과제</h3><pre id="assignment-content"></pre></div>
+    <div class="card"><h3>음성대본</h3><div id="voice-content"></div></div>
+  </div>
+
+  <script>
+    /* file:// 프로토콜일 때만 절대 경로 사용, 서버 제공 시 상대 경로 — 포트 의존성 제거 */
+    var BASE = location.protocol === 'file:' ? 'http://127.0.0.1:8800' : '';
+
+    function getRequest() {
+      return {
+        chapter_id:           document.getElementById('chapter_id').value.trim(),
+        user_id:              document.getElementById('user_id').value.trim(),
+        curriculum_id:        document.getElementById('curriculum_id').value.trim(),
+        chapter_topic:        document.getElementById('chapter_topic').value.trim(),
+        target_slide_count:   parseInt(document.getElementById('target_slide_count').value, 10),
+        user_level:           document.getElementById('user_level').value,
+      };
+    }
+
+    function setStatus(msg, isError) {
+      var bar = document.getElementById('status-bar');
+      bar.style.display    = 'block';
+      bar.style.background = isError ? '#fce8e6' : '#e8f0fe';
+      bar.style.color      = isError ? '#c62828' : '#1a73e8';
+      bar.textContent = msg;
+    }
+
+    function markNode(name, type) {
+      var chip = document.getElementById('node-' + name);
+      if (!chip) return;
+      chip.classList.remove('done', 'error');
+      chip.classList.add(type);
+    }
+
+    function renderSlides(slides) {
+      var el = document.getElementById('slides-content');
+      el.textContent = '';
+      (slides || []).forEach(function(slide, i) {
+        var lbl = document.createElement('p');
+        lbl.style.cssText = 'font-size:12px;color:#888;margin:4px 0 8px;';
+        lbl.textContent = '슬라이드 ' + (i + 1) + ' — ' + slide.category;
+        el.appendChild(lbl);
+        var fr = document.createElement('iframe');
+        fr.className = 'slide-frame';
+        fr.setAttribute('sandbox', 'allow-scripts');
+        fr.srcdoc = slide.html || '';
+        el.appendChild(fr);
+      });
+    }
+
+    function renderQuiz(quiz) {
+      var el = document.getElementById('quiz-content');
+      el.textContent = '';
+      (quiz || []).forEach(function(q, i) {
+        var item = document.createElement('div');
+        item.className = 'quiz-item';
+        var qd = document.createElement('div');
+        qd.className = 'quiz-question';
+        qd.textContent = 'Q' + (i + 1) + '. [' + q.depth + '] ' + q.question;
+        item.appendChild(qd);
+        (q.choices || []).forEach(function(c, ci) {
+          var cd = document.createElement('div');
+          cd.className = 'quiz-choice' + (ci === q.answer_idx ? ' answer' : '');
+          cd.textContent = (ci + 1) + '. ' + c;
+          item.appendChild(cd);
+        });
+        el.appendChild(item);
+      });
+    }
+
+    function renderOutputs(data) {
+      document.getElementById('outputs').style.display = 'grid';
+      renderSlides(data.slides);
+      renderQuiz(data.quiz);
+      var noteEl = document.getElementById('note-content');
+      noteEl.textContent = '';
+      if (data.note_html) {
+        var fr = document.createElement('iframe');
+        fr.className = 'slide-frame';
+        fr.setAttribute('sandbox', 'allow-scripts');
+        fr.srcdoc = data.note_html;
+        noteEl.appendChild(fr);
+      }
+      document.getElementById('assignment-content').textContent =
+        JSON.stringify(data.assignment_seed, null, 2);
+      var voiceEl = document.getElementById('voice-content');
+      voiceEl.textContent = '';
+      (data.voice_scripts || []).forEach(function(v) {
+        var item = document.createElement('div');
+        item.className = 'voice-item';
+        item.textContent = '[슬라이드 ' + v.slide_index + ' / ' + v.duration_hint_sec + 's] '
+          + (v.text || '').slice(0, 60) + '…';
+        voiceEl.appendChild(item);
+      });
+    }
+
+    async function runSync() {
+      setStatus('동기 실행 중... (최대 300초 소요)');
+      try {
+        var res = await fetch(BASE + '/chapters', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(getRequest()),
+        });
+        if (!res.ok) {
+          var err = await res.json();
+          setStatus('오류 ' + res.status + ': ' + JSON.stringify(err), true);
+          return;
+        }
+        var data = await res.json();
+        setStatus('완료 — 5 산출물 수신 성공');
+        renderOutputs(data);
+      } catch (e) {
+        setStatus('네트워크 오류: ' + e.message, true);
+      }
+    }
+
+    async function runSSE() {
+      setStatus('SSE 스트리밍 시작...');
+      document.querySelectorAll('.node-chip').forEach(function(c) {
+        c.classList.remove('done', 'error');
+      });
+      try {
+        var res = await fetch(BASE + '/chapters/stream', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'Accept': 'text/event-stream'},
+          body: JSON.stringify(getRequest()),
+        });
+        if (!res.ok) { setStatus('SSE 연결 실패 ' + res.status, true); return; }
+        var reader = res.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '', currentEvent = '';
+        while (true) {
+          var chunk = await reader.read();
+          if (chunk.done) break;
+          buffer += decoder.decode(chunk.value, {stream: true});
+          var lines = buffer.split('\n');
+          buffer = lines.pop();
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (line.indexOf('event:') === 0) {
+              currentEvent = line.slice(6).trim();
+            } else if (line.indexOf('data:') === 0) {
+              var payload = JSON.parse(line.slice(5).trim());
+              if (currentEvent === 'node_complete') {
+                markNode(payload.node, 'done');
+                setStatus('노드 완료: ' + payload.node);
+              } else if (currentEvent === 'error') {
+                if (payload.node) markNode(payload.node, 'error');
+                setStatus('노드 오류: ' + (payload.node || '') + ' — ' + (payload.error || ''), true);
+              } else if (currentEvent === 'complete') {
+                setStatus('완료 — 5 산출물 수신 성공');
+                renderOutputs(payload);
+              } else if (currentEvent === 'fatal') {
+                setStatus('치명 오류: ' + payload.error, true);
+              }
+              currentEvent = '';
+            }
+          }
+        }
+      } catch (e) {
+        setStatus('SSE 오류: ' + e.message, true);
+      }
+    }
+
+    function resetAll() {
+      document.getElementById('status-bar').style.display = 'none';
+      document.getElementById('outputs').style.display    = 'none';
+      document.querySelectorAll('.node-chip').forEach(function(c) {
+        c.classList.remove('done', 'error');
+      });
+    }
+  </script>
+</body>
+</html>

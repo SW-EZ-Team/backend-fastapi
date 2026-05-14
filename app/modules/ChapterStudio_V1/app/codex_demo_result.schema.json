@@ -1,0 +1,106 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["slides", "quizzes", "note_blocks", "assignment", "voice_scripts"],
+  "properties": {
+    "slides": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["slide_idx", "title", "focus", "checkpoint", "category", "html", "css"],
+        "properties": {
+          "slide_idx": { "type": "integer", "minimum": 0, "maximum": 4 },
+          "title": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "focus": { "type": "string", "minLength": 1, "maxLength": 140 },
+          "checkpoint": { "type": "string", "minLength": 1, "maxLength": 180 },
+          "category": {
+            "type": "string",
+            "enum": ["text", "diagram", "code", "math", "chart", "interactive"]
+          },
+          "html": { "type": "string", "minLength": 1, "maxLength": 5600 },
+          "css": { "type": "string", "maxLength": 1400 }
+        }
+      }
+    },
+    "quizzes": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["question", "choices", "answer_idx", "difficulty", "explanation"],
+        "properties": {
+          "question": { "type": "string", "minLength": 1, "maxLength": 180 },
+          "choices": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": { "type": "string", "minLength": 1, "maxLength": 60 }
+          },
+          "answer_idx": { "type": "integer", "minimum": 0, "maximum": 3 },
+          "difficulty": { "type": "string", "enum": ["상", "중", "하", "hard", "medium", "easy", "기억", "이해", "적용", "함정 교정", "실전 판단", "오해"] },
+          "explanation": { "type": "string", "minLength": 1, "maxLength": 420 }
+        }
+      }
+    },
+    "note_blocks": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["heading", "bullets"],
+        "properties": {
+          "heading": { "type": "string", "minLength": 1, "maxLength": 30 },
+          "bullets": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 5,
+            "items": { "type": "string", "minLength": 1, "maxLength": 180 }
+          }
+        }
+      }
+    },
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "assignment_format", "expected_minutes", "steps", "rubric"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "assignment_format": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "expected_minutes": { "type": "integer", "minimum": 5, "maximum": 90 },
+        "steps": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 5,
+          "items": { "type": "string", "minLength": 1, "maxLength": 180 }
+        },
+        "rubric": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 5,
+          "items": { "type": "string", "minLength": 1, "maxLength": 180 }
+        }
+      }
+    },
+    "voice_scripts": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["slide_idx", "script_text"],
+        "properties": {
+          "slide_idx": { "type": "integer", "minimum": 0, "maximum": 4 },
+          "script_text": { "type": "string", "minLength": 1, "maxLength": 760 }
+        }
+      }
+    }
+  }
+}
