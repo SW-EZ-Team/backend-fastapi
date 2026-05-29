@@ -2,35 +2,15 @@ from __future__ import annotations
 
 from html import unescape
 from html.parser import HTMLParser
-from typing import Literal, TypedDict
 
-from app.modules.ChapterStudio_V1.app.demo_types import DemoResult
 from app.modules.ChapterStudio_V1.common.errors import ConversionError
 
+# 허용된 iframe sandbox 토큰 — allow-scripts 만 허용한다
 _SANDBOX = "allow-scripts"
 _FORBIDDEN_TOKENS = (
     "allow-same-origin", "allow-top-navigation", "allow-forms",
     "allow-popups", "allow-modals",
 )
-ValidationStatus = Literal["passed", "pending", "failed"]
-
-
-class LessonSlidePayload(TypedDict):
-    slideId: str
-    slideIdx: int
-    title: str
-    category: str
-    templateId: str
-    iframeHtml: str
-    validationStatus: ValidationStatus
-
-
-class FrontendPreviewPayload(TypedDict):
-    tutoringId: str
-    lessonId: str
-    lessonTitle: str
-    generationStatus: str
-    slides: list[LessonSlidePayload]
 
 
 class _IframeParser(HTMLParser):
@@ -59,28 +39,6 @@ def iframe_srcdoc(markup: str) -> str:
     if parser.sandbox != _SANDBOX:
         raise ConversionError("iframe sandbox는 allow-scripts만 허용한다.")
     return _validated_srcdoc(unescape(parser.srcdoc))
-
-
-def frontend_preview_payload(result: DemoResult) -> FrontendPreviewPayload:
-    """데모 결과를 frontend-web의 LessonSlidesDto 계약으로 변환한다."""
-    slides: list[LessonSlidePayload] = []
-    for slide in result["slides"]:
-        slides.append({
-            "slideId": f"demo-slide-{slide['slide_idx']:03d}",
-            "slideIdx": slide["slide_idx"],
-            "title": slide["title"],
-            "category": slide["category"],
-            "templateId": slide["template_role"],
-            "iframeHtml": iframe_srcdoc(slide["iframe_html"]),
-            "validationStatus": "passed",
-        })
-    return {
-        "tutoringId": "demo-tutoring",
-        "lessonId": "demo-lesson",
-        "lessonTitle": result["topic"],
-        "generationStatus": "ready",
-        "slides": slides,
-    }
 
 
 def _is_document(value: str) -> bool:

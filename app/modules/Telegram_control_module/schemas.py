@@ -43,6 +43,9 @@ class TelegramMessageSummary(BaseModel):
     telegram_username: str | None = None
     content: str | None = None
     message_type: str | None = None
+    # 파일 제출 채점을 위한 Telegram 파일 식별자
+    file_id: str | None = None
+    file_name: str | None = None
 
 
 class TelegramWebhookAck(BaseModel):

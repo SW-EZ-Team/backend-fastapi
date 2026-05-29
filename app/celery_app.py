@@ -13,9 +13,28 @@ celery_app = Celery(
     "backend_fastapi",
     broker=broker_url,
     backend=result_backend,
-    include=[],
+    include=[
+        "app.modules.Agent_orchestrator.tasks",
+        "app.modules.Agent_orchestrator.maintenance",
+    ],
 )
 
-# 주기 태스크는 아직 정의 안 함 — beat 기동만 확인
-celery_app.conf.beat_schedule = {}
+# 주기 태스크 스케줄 — beat worker가 자동으로 실행한다
+celery_app.conf.beat_schedule = {
+    # 30분 이상 running 상태로 멈춘 job을 error로 전환 (10분마다)
+    "cleanup-stale-jobs": {
+        "task": "agent_orchestrator.cleanup_stale_jobs",
+        "schedule": 600,
+    },
+    # 24시간 이상 경과한 done/error job을 메모리에서 삭제 (1시간마다)
+    "purge-old-jobs": {
+        "task": "agent_orchestrator.purge_old_completed_jobs",
+        "schedule": 3600,
+    },
+    # callback 전송 실패 job을 재시도 (5분마다)
+    "retry-failed-callbacks": {
+        "task": "agent_orchestrator.retry_failed_callbacks",
+        "schedule": 300,
+    },
+}
 celery_app.conf.timezone = "Asia/Seoul"

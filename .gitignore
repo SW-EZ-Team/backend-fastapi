@@ -43,6 +43,13 @@ Thumbs.db
 *.log
 logs/
 
+# 로컬 브라우저/검증 산출물
+.playwright-cli/
+output/
+artifacts/
+**/artifacts/
+**/.gradle/
+
 # Flask / Celery 인스턴스
 instance/
 celerybeat-schedule

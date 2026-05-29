@@ -24,9 +24,11 @@ RUN uv sync --frozen --no-dev --no-install-project
 # ──────────────────────────────────────────
 FROM python:3.12-slim-bookworm AS runtime
 
-# 네트워크/SSL 관련 최소 런타임 라이브러리
+# 네트워크/SSL + 오디오 처리 최소 런타임 라이브러리
+# libsndfile1: soundfile/librosa 패키지의 네이티브 공유 라이브러리 의존성
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
 # 권한 없는 전용 사용자 생성 (보안 강화)

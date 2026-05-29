@@ -1,0 +1,27 @@
+{
+  "session_id": "voice-session-student-01-lesson-7",
+  "audio_data": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAAAAAZGF0YQAAAAA=",
+  "audio_format": "wav",
+  "sample_rate": 16000,
+  "lecture_context": {
+    "chapter_title": "역전파: 신경망이 학습하는 방법",
+    "slides": [
+      {
+        "slide_idx": 0,
+        "title": "신경망과 경사하강법",
+        "content": "신경망의 가중치를 업데이트하려면 손실 함수의 기울기가 필요합니다."
+      },
+      {
+        "slide_idx": 1,
+        "title": "연쇄법칙이란",
+        "content": "복합 함수의 미분에서 연쇄법칙을 사용합니다. f(g(x))의 도함수는 f'(g(x)) × g'(x)입니다."
+      }
+    ],
+    "voice_scripts": [
+      "신경망 학습의 핵심은 손실을 줄이는 방향으로 가중치를 업데이트하는 것입니다."
+    ],
+    "quiz_items": [
+      "연쇄법칙을 사용하여 f(x) = sin(x²)의 도함수를 구하세요."
+    ]
+  }
+}

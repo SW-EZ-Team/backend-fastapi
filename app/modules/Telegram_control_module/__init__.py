@@ -7,6 +7,7 @@ from .schemas import TelegramMessageSummary
 from .schemas import TelegramSendMessageRequest
 from .schemas import TelegramSendMessageResult
 from .schemas import TelegramWebhookAck
+from .services.command_dispatcher import dispatch_telegram_command
 from .services.telegram_client import TelegramApiError
 from .services.telegram_client import TelegramClient
 
@@ -18,6 +19,7 @@ __all__ = [
     "TelegramSendMessageResult",
     "TelegramWebhookAck",
     "create_router",
+    "dispatch_telegram_command",
     "extract_telegram_message_summary",
     "router",
 ]

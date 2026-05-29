@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OCR v1 파이프라인 테스트</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, "Noto Sans KR", sans-serif;
+      background: #F4F3EE;
+      color: #1a1a1a;
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 32px;
+      color: #111;
+    }
+
+    .container { max-width: 860px; margin: 0 auto; }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 28px;
+      margin-bottom: 28px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+    }
+
+    .card h2 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #E8E6DF;
+      color: #333;
+    }
+
+    label {
+      display: block;
+      font-size: .88rem;
+      font-weight: 500;
+      margin-bottom: 6px;
+      color: #444;
+    }
+
+    input[type="text"], input[type="file"] {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid #d4d0c8;
+      border-radius: 7px;
+      font-size: .92rem;
+      background: #faf9f6;
+      margin-bottom: 14px;
+      outline: none;
+    }
+    input[type="text"]:focus { border-color: #6c63ff; }
+
+    .slider-wrap { margin-bottom: 14px; }
+    .slider-wrap input[type="range"] { width: 100%; accent-color: #6c63ff; }
+    .slider-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: .82rem;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    button {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 22px;
+      border: none;
+      border-radius: 7px;
+      font-size: .93rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .18s;
+    }
+
+    .btn-primary { background: #6c63ff; color: #fff; }
+    .btn-primary:hover { background: #5a52e0; }
+    .btn-primary:disabled { background: #b0aae8; cursor: not-allowed; }
+
+    .spinner {
+      display: none;
+      width: 18px;
+      height: 18px;
+      border: 3px solid rgba(255,255,255,.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .result-box {
+      margin-top: 20px;
+      padding: 16px;
+      border-radius: 8px;
+      background: #f7f6f2;
+      border: 1px solid #e5e2d8;
+      min-height: 60px;
+      font-size: .88rem;
+    }
+
+    .stat-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+
+    .stat-chip {
+      background: #EEF0FF;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: .82rem;
+      font-weight: 600;
+      color: #3730a3;
+    }
+    .stat-chip.chip-error { background: #FFE4E4; color: #b91c1c; }
+    .stat-chip.chip-ok    { background: #D1FAE5; color: #065f46; }
+
+    table { width: 100%; border-collapse: collapse; font-size: .82rem; margin-top: 10px; }
+    th {
+      background: #EDECEA;
+      text-align: left;
+      padding: 7px 10px;
+      color: #555;
+      font-weight: 600;
+    }
+    td { padding: 6px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+
+    .pass-badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: .75rem;
+      font-weight: 700;
+    }
+    .pass-badge.badge-pass { background: #D1FAE5; color: #065f46; }
+    .pass-badge.badge-fail { background: #FFE4E4; color: #b91c1c; }
+
+    .hit-card {
+      border: 1px solid #e5e2d8;
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 12px;
+      background: #faf9f6;
+    }
+    .hit-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 8px;
+    }
+    .hit-title { font-weight: 600; font-size: .9rem; color: #222; }
+    .hit-score {
+      font-size: .8rem;
+      background: #EEF0FF;
+      color: #3730a3;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .hit-meta { font-size: .78rem; color: #777; margin-bottom: 8px; }
+    .hit-text {
+      font-size: .84rem;
+      color: #333;
+      line-height: 1.55;
+      max-height: 120px;
+      overflow: hidden;
+    }
+
+    .error-msg { color: #b91c1c; font-size: .86rem; margin-top: 6px; }
+    .section-title {
+      font-size: .85rem;
+      font-weight: 600;
+      color: #555;
+      margin: 14px 0 6px;
+    }
+    .placeholder { color: #aaa; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>OCR v1 파이프라인 테스트</h1>
+
+  <!-- ===== 섹션 1: PDF 인제스트 ===== -->
+  <div class="card">
+    <h2>PDF 인제스트</h2>
+
+    <label for="pdfFile">PDF 파일 선택</label>
+    <input type="file" id="pdfFile" accept=".pdf" />
+
+    <label for="ingestCollection">컬렉션명 (선택 — 비우면 파일명 기반 자동 생성)</label>
+    <input type="text" id="ingestCollection" placeholder="예: my_documents" />
+
+    <button class="btn-primary" id="ingestBtn" onclick="runIngest()">
+      <span class="spinner" id="ingestSpinner"></span>
+      인제스트 시작
+    </button>
+
+    <div class="result-box" id="ingestResult">
+      <span class="placeholder">결과가 여기에 표시됩니다.</span>
+    </div>
+  </div>
+
+  <!-- ===== 섹션 2: RAG 검색 ===== -->
+  <div class="card">
+    <h2>RAG 검색</h2>
+
+    <label for="searchQuery">검색 쿼리</label>
+    <input type="text" id="searchQuery" placeholder="검색할 내용을 입력하세요..." />
+
+    <label for="searchCollection">컬렉션명</label>
+    <input type="text" id="searchCollection" placeholder="인제스트한 컬렉션명 입력" />
+
+    <div class="slider-wrap">
+      <label for="topK">상위 결과 수 (Top-K): <strong id="topKVal">5</strong></label>
+      <input
+        type="range" id="topK" min="1" max="50" value="5"
+        oninput="document.getElementById('topKVal').textContent = this.value"
+      />
+      <div class="slider-label"><span>1</span><span>50</span></div>
+    </div>
+
+    <button class="btn-primary" id="searchBtn" onclick="runSearch()">
+      <span class="spinner" id="searchSpinner"></span>
+      검색
+    </button>
+
+    <div class="result-box" id="searchResult">
+      <span class="placeholder">검색 결과가 여기에 표시됩니다.</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  'use strict';
+  const API_BASE = '/api/ocr/v1';
+
+  /* ── DOM 헬퍼 (XSS 방지: textContent 사용) ── */
+
+  /**
+   * 지정한 태그와 클래스를 가진 요소를 만들고 텍스트를 채운다.
+   * @param {string} tag - HTML 태그명
+   * @param {string} text - 삽입할 텍스트 (textContent로 이스케이프됨)
+   * @param {string} [cls] - 추가할 CSS 클래스
+   */
+  function el(tag, text, cls) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  /**
+   * 로딩 상태를 버튼과 스피너에 반영한다.
+   * @param {string} btnId
+   * @param {string} spinnerId
+   * @param {boolean} loading
+   */
+  function setLoading(btnId, spinnerId, loading) {
+    document.getElementById(btnId).disabled = loading;
+    document.getElementById(spinnerId).style.display = loading ? 'block' : 'none';
+  }
+
+  /**
+   * 결과 영역을 비우고 새 노드를 채운다.
+   * @param {string} boxId
+   * @param {Node} node
+   */
+  function renderTo(boxId, node) {
+    const box = document.getElementById(boxId);
+    box.replaceChildren(node);
+  }
+
+  /**
+   * stat-chip 요소를 생성한다.
+   * @param {string} label
+   * @param {string|number} value
+   * @param {string} [extra] - 추가 클래스 (chip-ok | chip-error)
+   */
+  function makeChip(label, value, extra) {
+    const chip = document.createElement('span');
+    chip.className = 'stat-chip' + (extra ? ' ' + extra : '');
+    const lbl = el('span', label + ': ');
+    const val = el('strong', String(value));
+    chip.appendChild(lbl);
+    chip.appendChild(val);
+    return chip;
+  }
+
+  /* ── 인제스트 ── */
+
+  async function runIngest() {
+    const fileInput = document.getElementById('pdfFile');
+    const collInput = document.getElementById('ingestCollection');
+
+    if (!fileInput.files.length) {
+      renderTo('ingestResult', el('span', 'PDF 파일을 선택해 주세요.', 'error-msg'));
+      return;
+    }
+
+    setLoading('ingestBtn', 'ingestSpinner', true);
+    renderTo('ingestResult', el('span', '파이프라인 실행 중... (수 분 소요될 수 있습니다)', 'placeholder'));
+
+    const form = new FormData();
+    form.append('file', fileInput.files[0]);
+    form.append('collection_name', collInput.value.trim());
+
+    try {
+      const res = await fetch(API_BASE + '/ingest', { method: 'POST', body: form });
+      if (!res.ok) {
+        const msg = 'HTTP ' + res.status + ' ' + res.statusText;
+        renderTo('ingestResult', el('span', msg, 'error-msg'));
+        return;
+      }
+      const data = await res.json();
+      renderIngestResult(data);
+    } catch (err) {
+      renderTo('ingestResult', el('span', '네트워크 오류: ' + err.message, 'error-msg'));
+    } finally {
+      setLoading('ingestBtn', 'ingestSpinner', false);
+    }
+  }
+
+  /**
+   * 인제스트 응답 데이터를 DOM으로 렌더링한다.
+   * @param {Object} data - OCRv1IngestResponse
+   */
+  function renderIngestResult(data) {
+    const isOk = data.status === 'done';
+    const frag = document.createDocumentFragment();
+
+    // 요약 칩 행
+    const statRow = document.createElement('div');
+    statRow.className = 'stat-row';
+    statRow.appendChild(makeChip('상태', data.status, isOk ? 'chip-ok' : 'chip-error'));
+    statRow.appendChild(makeChip('전체 페이지', data.total_pages));
+    statRow.appendChild(makeChip('청크 수', data.chunk_count));
+    statRow.appendChild(makeChip('임베딩 수', data.embedded_count));
+    statRow.appendChild(makeChip('컬렉션', data.collection_name));
+    frag.appendChild(statRow);
+
+    if (data.error_message) {
+      frag.appendChild(el('div', '오류: ' + data.error_message, 'error-msg'));
+    }
+
+    // 페이지별 품질 테이블
+    if (data.pages && data.pages.length) {
+      frag.appendChild(el('div', '페이지별 품질 점수', 'section-title'));
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      ['페이지', '타입', '엔진', '점수', '결과'].forEach(function(h) {
+        headRow.appendChild(el('th', h));
+      });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      (data.pages || []).forEach(function(p) {
+        const tr = document.createElement('tr');
+        tr.appendChild(el('td', String(p.page_num)));
+        tr.appendChild(el('td', p.page_type));
+        tr.appendChild(el('td', p.engine));
+        tr.appendChild(el('td', (p.quality_score * 100).toFixed(1) + '%'));
+        const td = document.createElement('td');
+        const badge = document.createElement('span');
+        badge.className = 'pass-badge ' + (p.passed ? 'badge-pass' : 'badge-fail');
+        badge.textContent = p.passed ? '통과' : '실패';
+        td.appendChild(badge);
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      frag.appendChild(table);
+    }
+
+    // Stage 타이밍 테이블
+    const timings = data.timings || {};
+    const timingKeys = Object.keys(timings);
+    if (timingKeys.length) {
+      frag.appendChild(el('div', 'Stage 소요 시간', 'section-title'));
+      const table2 = document.createElement('table');
+      const thead2 = document.createElement('thead');
+      const hr2 = document.createElement('tr');
+      ['Stage', '소요 시간 (초)'].forEach(function(h) { hr2.appendChild(el('th', h)); });
+      thead2.appendChild(hr2);
+      table2.appendChild(thead2);
+
+      const tbody2 = document.createElement('tbody');
+      timingKeys.forEach(function(stage) {
+        const tr = document.createElement('tr');
+        tr.appendChild(el('td', stage));
+        tr.appendChild(el('td', Number(timings[stage]).toFixed(3)));
+        tbody2.appendChild(tr);
+      });
+      table2.appendChild(tbody2);
+      frag.appendChild(table2);
+    }
+
+    renderTo('ingestResult', frag);
+
+    // 검색 섹션 컬렉션명 자동 채우기
+    if (isOk && data.collection_name) {
+      document.getElementById('searchCollection').value = data.collection_name;
+    }
+  }
+
+  /* ── 검색 ── */
+
+  async function runSearch() {
+    const query = document.getElementById('searchQuery').value.trim();
+    const collection = document.getElementById('searchCollection').value.trim();
+    const topK = parseInt(document.getElementById('topK').value, 10);
+
+    if (!query) {
+      renderTo('searchResult', el('span', '검색 쿼리를 입력해 주세요.', 'error-msg'));
+      return;
+    }
+    if (!collection) {
+      renderTo('searchResult', el('span', '컬렉션명을 입력해 주세요.', 'error-msg'));
+      return;
+    }
+
+    setLoading('searchBtn', 'searchSpinner', true);
+    renderTo('searchResult', el('span', '검색 중...', 'placeholder'));
+
+    try {
+      const res = await fetch(API_BASE + '/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: query, collection_name: collection, top_k: topK }),
+      });
+      if (!res.ok) {
+        renderTo('searchResult', el('span', 'HTTP ' + res.status + ' ' + res.statusText, 'error-msg'));
+        return;
+      }
+      const data = await res.json();
+      renderSearchResult(data);
+    } catch (err) {
+      renderTo('searchResult', el('span', '네트워크 오류: ' + err.message, 'error-msg'));
+    } finally {
+      setLoading('searchBtn', 'searchSpinner', false);
+    }
+  }
+
+  /**
+   * 검색 응답 데이터를 DOM으로 렌더링한다.
+   * @param {Object} data - OCRv1SearchResponse
+   */
+  function renderSearchResult(data) {
+    const frag = document.createDocumentFragment();
+
+    const statRow = document.createElement('div');
+    statRow.className = 'stat-row';
+    statRow.appendChild(makeChip('총 결과', data.total_found));
+    const qPreview = (data.query || '').substring(0, 50);
+    statRow.appendChild(makeChip('쿼리', '"' + qPreview + (data.query.length > 50 ? '…' : '') + '"'));
+    frag.appendChild(statRow);
+
+    if (!data.hits || !data.hits.length) {
+      frag.appendChild(el('span', '검색 결과가 없습니다.', 'placeholder'));
+      renderTo('searchResult', frag);
+      return;
+    }
+
+    (data.hits || []).forEach(function(hit) {
+      const card = document.createElement('div');
+      card.className = 'hit-card';
+
+      const header = document.createElement('div');
+      header.className = 'hit-header';
+      header.appendChild(el('span', hit.section_title || '(섹션 없음)', 'hit-title'));
+      header.appendChild(el('span', '점수 ' + Number(hit.score).toFixed(4), 'hit-score'));
+      card.appendChild(header);
+
+      const pages = (hit.page_nums || []).join(', ') || '-';
+      card.appendChild(el('div', '청크 ID: ' + hit.chunk_id + '  |  페이지: ' + pages, 'hit-meta'));
+
+      const textEl = document.createElement('div');
+      textEl.className = 'hit-text';
+      const preview = (hit.text || '').substring(0, 300);
+      textEl.textContent = preview + (hit.text && hit.text.length > 300 ? '…' : '');
+      card.appendChild(textEl);
+
+      frag.appendChild(card);
+    });
+
+    renderTo('searchResult', frag);
+  }
+</script>
+</body>
+</html>

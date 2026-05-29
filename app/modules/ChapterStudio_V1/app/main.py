@@ -13,7 +13,6 @@ from app.modules.ChapterStudio_V1.app.db import (
     create_pool,
     ping,
 )
-from app.modules.ChapterStudio_V1.app.routers.demo_chapter_studio import router as demo_router
 from app.modules.ChapterStudio_V1.ai_connectors.registry import close_all as close_connectors
 from app.modules.ChapterStudio_V1.common.logging import logger
 
@@ -53,9 +52,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.include_router(demo_router)
-
 
 @app.get("/healthz")
 async def healthz(response: Response) -> dict[str, str]:

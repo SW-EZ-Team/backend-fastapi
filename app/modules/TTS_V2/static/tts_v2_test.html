@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TTS V2 오디오북 파이프라인 테스트</title>
+  <style>
+    /* ===================== 디자인 토큰 ===================== */
+    :root {
+      --bg:       #F4F3EE;
+      --surface:  #FFFFFF;
+      --border:   #E0DED8;
+      --text:     #2D3436;
+      --text-sub: #636E72;
+      --accent:   #0984E3;
+      --accent-h: #0773C5;
+      --success:  #00B894;
+      --error:    #D63031;
+      --warn:     #FDCB6E;
+      --shadow:   0 2px 12px rgba(0,0,0,0.08);
+      --radius:   12px;
+      --radius-s: 8px;
+    }
+
+    /* ===================== 전역 리셋 ===================== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+      padding: 24px 16px 60px;
+    }
+
+    /* ===================== 레이아웃 컨테이너 ===================== */
+    .page-wrap {
+      max-width: 860px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* ===================== 카드 공통 ===================== */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px;
+    }
+
+    /* ===================== 헤더 ===================== */
+    .header {
+      text-align: center;
+      padding: 32px 24px;
+    }
+    .header h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: var(--text);
+    }
+    .header p {
+      margin-top: 6px;
+      font-size: 0.9rem;
+      color: var(--text-sub);
+    }
+    .badge {
+      display: inline-block;
+      margin-top: 10px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 20px;
+      padding: 3px 12px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+
+    /* ===================== 섹션 제목 ===================== */
+    .section-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-sub);
+      margin-bottom: 14px;
+    }
+
+    /* ===================== 탭 ===================== */
+    .tab-bar {
+      display: flex;
+      gap: 4px;
+      background: var(--bg);
+      border-radius: var(--radius-s);
+      padding: 4px;
+      margin-bottom: 16px;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 8px 0;
+      border: none;
+      background: transparent;
+      border-radius: 6px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--text-sub);
+      cursor: pointer;
+      transition: background 0.18s, color 0.18s;
+    }
+    .tab-btn.active {
+      background: var(--surface);
+      color: var(--accent);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.10);
+    }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ===================== 텍스트 영역 ===================== */
+    textarea {
+      width: 100%;
+      min-height: 150px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-s);
+      padding: 12px 14px;
+      font-family: inherit;
+      font-size: 0.92rem;
+      color: var(--text);
+      background: var(--bg);
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.18s;
+    }
+    textarea:focus { border-color: var(--accent); }
+
+    /* ===================== 파일 입력 ===================== */
+    .file-drop {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius-s);
+      padding: 32px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.18s, background 0.18s;
+      background: var(--bg);
+    }
+    .file-drop:hover, .file-drop.over {
+      border-color: var(--accent);
+      background: #EBF4FD;
+    }
+    .file-drop input[type="file"] { display: none; }
+    .file-drop-icon { font-size: 2rem; margin-bottom: 8px; }
+    .file-drop p { font-size: 0.88rem; color: var(--text-sub); }
+    .file-drop .file-name {
+      margin-top: 8px;
+      font-size: 0.85rem;
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    /* ===================== 설정 패널 그리드 ===================== */
+    .settings-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 600px) {
+      .settings-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ===================== 레이블 + 폼 요소 ===================== */
+    label.field-label {
+      display: block;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text-sub);
+      margin-bottom: 6px;
+    }
+
+    select, input[type="text"] {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-s);
+      font-family: inherit;
+      font-size: 0.88rem;
+      color: var(--text);
+      background: var(--bg);
+      outline: none;
+      transition: border-color 0.18s;
+    }
+    select:focus, input[type="text"]:focus { border-color: var(--accent); }
+
+    /* ===================== 슬라이더 ===================== */
+    .slider-wrap { display: flex; align-items: center; gap: 10px; }
+    input[type="range"] {
+      flex: 1;
+      -webkit-appearance: none;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--border);
+      outline: none;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 1px 4px rgba(9,132,227,0.4);
+    }
+    .slider-val {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--accent);
+      min-width: 34px;
+      text-align: right;
+    }
+
+    /* ===================== 라디오 그룹 (레퍼런스 음성) ===================== */
+    .radio-group { display: flex; flex-direction: column; gap: 8px; }
+    .radio-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 0.88rem;
+    }
+    .radio-item input[type="radio"] { accent-color: var(--accent); }
+
+    /* ===================== 체크박스 ===================== */
+    .checkbox-group { display: flex; flex-direction: column; gap: 10px; }
+    .checkbox-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.88rem;
+      cursor: pointer;
+    }
+    .checkbox-item input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; }
+
+    /* ===================== 레퍼런스 대본 ===================== */
+    #refTextInput {
+      font-size: 0.82rem;
+      min-height: 72px;
+      resize: vertical;
+    }
+
+    /* ===================== 직접 업로드 박스 ===================== */
+    #customRefWrap {
+      margin-top: 10px;
+      display: none;
+    }
+    #customRefWrap.visible { display: block; }
+    .mini-file-btn {
+      display: inline-block;
+      padding: 6px 14px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      background: var(--bg);
+      color: var(--text);
+      transition: border-color 0.18s;
+    }
+    .mini-file-btn:hover { border-color: var(--accent); color: var(--accent); }
+    #customRefLabel {
+      font-size: 0.8rem;
+      color: var(--text-sub);
+      margin-left: 8px;
+    }
+
+    /* ===================== 실행 버튼 ===================== */
+    .run-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: var(--radius-s);
+      background: var(--accent);
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.18s, transform 0.1s;
+      letter-spacing: 0.2px;
+    }
+    .run-btn:hover:not(:disabled) { background: var(--accent-h); }
+    .run-btn:active:not(:disabled) { transform: scale(0.99); }
+    .run-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    /* 스피너 */
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: none;
+    }
+    .run-btn.loading .spinner { display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ===================== 파이프라인 진행 시각화 ===================== */
+    .pipeline-wrap {
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .pipeline-stages {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      min-width: 560px;
+    }
+    .stage {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+      flex: 1;
+    }
+    .stage-dot {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      background: var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--text-sub);
+      transition: background 0.3s, color 0.3s;
+      position: relative;
+      z-index: 1;
+    }
+    .stage-dot.done   { background: var(--success); color: #fff; }
+    .stage-dot.active { background: var(--accent);  color: #fff; }
+
+    .stage-name {
+      font-size: 0.72rem;
+      color: var(--text-sub);
+      text-align: center;
+      white-space: nowrap;
+    }
+    .stage-time {
+      font-size: 0.68rem;
+      color: var(--accent);
+      font-weight: 700;
+      min-height: 12px;
+    }
+
+    /* 스테이지 사이 연결선 */
+    .stage-connector {
+      flex: 0 0 20px;
+      height: 2px;
+      background: var(--border);
+      margin-bottom: 22px;
+      transition: background 0.3s;
+    }
+    .stage-connector.done { background: var(--success); }
+
+    /* 전체 진행 바 */
+    .progress-bar-wrap {
+      margin-top: 16px;
+    }
+    .progress-bar-bg {
+      height: 6px;
+      border-radius: 3px;
+      background: var(--border);
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      border-radius: 3px;
+      transition: width 0.4s ease;
+    }
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.78rem;
+      color: var(--text-sub);
+      margin-top: 5px;
+    }
+
+    /* ===================== 결과 영역 ===================== */
+    #resultSection { display: none; }
+
+    /* 오디오 플레이어 */
+    audio {
+      width: 100%;
+      margin-bottom: 4px;
+    }
+    .audio-wrap {
+      background: var(--bg);
+      border-radius: var(--radius-s);
+      padding: 14px;
+      border: 1px solid var(--border);
+    }
+
+    /* 메트릭 그리드 */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .metric-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-s);
+      padding: 12px 14px;
+    }
+    .metric-label {
+      font-size: 0.72rem;
+      color: var(--text-sub);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .metric-val {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-top: 2px;
+    }
+    .metric-card.error-card .metric-val { color: var(--error); }
+    .failed-chunks {
+      margin-top: 4px;
+      font-size: 0.78rem;
+      color: var(--error);
+      font-weight: 600;
+    }
+
+    /* 단계별 소요 시간 */
+    .timing-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+      margin-top: 14px;
+    }
+    .timing-table th {
+      text-align: left;
+      padding: 6px 10px;
+      background: var(--bg);
+      color: var(--text-sub);
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--border);
+    }
+    .timing-table td {
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .timing-table tr:last-child td { border-bottom: none; }
+    .timing-bar-cell { width: 50%; }
+    .timing-bar-bg {
+      height: 8px;
+      background: var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .timing-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 4px;
+    }
+
+    /* ===================== 에러 박스 ===================== */
+    .error-box {
+      background: #FFF0F0;
+      border: 1px solid var(--error);
+      border-radius: var(--radius-s);
+      padding: 14px 16px;
+      color: var(--error);
+      font-size: 0.88rem;
+      display: none;
+    }
+    .error-box.visible { display: block; }
+    .error-title {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 0.92rem;
+      font-weight: 700;
+    }
+
+    /* ===================== 다운로드 버튼 ===================== */
+    .download-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 10px;
+      padding: 7px 16px;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--accent);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s, color 0.15s;
+    }
+    .download-btn:hover { background: var(--accent); color: #fff; }
+
+    /* ===================== 반응형 ===================== */
+    @media (max-width: 480px) {
+      .header h1 { font-size: 1.3rem; }
+      .card { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+<div class="page-wrap">
+
+  <!-- ===== 헤더 ===== -->
+  <div class="card header">
+    <h1>TTS V2 오디오북 파이프라인 테스트</h1>
+    <p>Qwen3-TTS × LangGraph 8모듈 파이프라인</p>
+    <span class="badge">서버: http://localhost:8010</span>
+  </div>
+
+  <!-- ===== 입력 영역 ===== -->
+  <div class="card">
+    <div class="section-title">입력 영역</div>
+
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="switchTab('text', this)">텍스트 입력</button>
+      <button class="tab-btn" onclick="switchTab('file', this)">파일 업로드</button>
+    </div>
+
+    <!-- 텍스트 탭 -->
+    <div id="panel-text" class="tab-panel active">
+      <textarea id="textInput" placeholder="합성할 텍스트를 입력하세요...">인공지능은 우리 생활의 많은 부분을 변화시키고 있습니다. 특히 자연어 처리 기술의 발전으로 기계가 사람의 언어를 이해하고 생성하는 능력이 크게 향상되었습니다.
+
+이러한 기술은 교육, 의료, 금융 등 다양한 분야에서 활용되고 있으며, 앞으로 더 많은 가능성을 열어줄 것으로 기대됩니다. 중요한 것은 이 기술을 어떻게 책임감 있게 사용하느냐입니다.</textarea>
+    </div>
+
+    <!-- 파일 탭 -->
+    <div id="panel-file" class="tab-panel">
+      <div class="file-drop" id="fileDrop" onclick="document.getElementById('fileInput').click()">
+        <div class="file-drop-icon">📄</div>
+        <p>클릭하거나 파일을 여기에 드래그하세요</p>
+        <p style="font-size:0.78rem;margin-top:4px;">지원 형식: .txt, .md</p>
+        <input type="file" id="fileInput" accept=".txt,.md" onchange="handleFileSelect(this)" />
+        <div class="file-name" id="selectedFileName"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 설정 패널 ===== -->
+  <div class="card">
+    <div class="section-title">설정 패널</div>
+
+    <div class="settings-grid">
+
+      <!-- 레퍼런스 음성 -->
+      <div>
+        <label class="field-label">레퍼런스 음성</label>
+        <div class="radio-group">
+          <label class="radio-item">
+            <input type="radio" name="refVoice" value="tutor_1" checked onchange="onRefVoiceChange(this)" />
+            고정 튜터 1
+          </label>
+          <label class="radio-item">
+            <input type="radio" name="refVoice" value="tutor_2" onchange="onRefVoiceChange(this)" />
+            고정 튜터 2
+          </label>
+          <label class="radio-item">
+            <input type="radio" name="refVoice" value="custom" onchange="onRefVoiceChange(this)" />
+            직접 업로드
+          </label>
+        </div>
+
+        <!-- 직접 업로드 파일 입력 -->
+        <div id="customRefWrap">
+          <label class="mini-file-btn" for="customRefFile">파일 선택</label>
+          <input type="file" id="customRefFile" accept="audio/*" style="display:none" onchange="handleCustomRef(this)" />
+          <span id="customRefLabel">선택된 파일 없음</span>
+        </div>
+      </div>
+
+      <!-- QC 엔진 + 체크박스 -->
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div>
+          <label class="field-label" for="qcEngine">QC 엔진</label>
+          <select id="qcEngine">
+            <option value="whisperx">WhisperX</option>
+            <option value="v1_asr">V1 ASR</option>
+            <option value="both">둘 다</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">옵션</label>
+          <div class="checkbox-group">
+            <label class="checkbox-item">
+              <input type="checkbox" id="skipPlanner" />
+              LLM 플래너 건너뛰기
+            </label>
+            <label class="checkbox-item">
+              <input type="checkbox" id="skipPostfx" />
+              후처리 건너뛰기
+            </label>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 속도 슬라이더 -->
+    <div style="margin-top:20px;">
+      <label class="field-label">속도</label>
+      <div class="slider-wrap">
+        <span style="font-size:0.8rem;color:var(--text-sub);">0.5×</span>
+        <input type="range" id="speedSlider" min="0.5" max="2.0" step="0.05" value="1.0"
+               oninput="updateSpeedLabel(this.value)" />
+        <span style="font-size:0.8rem;color:var(--text-sub);">2.0×</span>
+        <span class="slider-val" id="speedVal">1.00×</span>
+      </div>
+    </div>
+
+    <!-- 레퍼런스 대본 -->
+    <div style="margin-top:20px;">
+      <label class="field-label" for="refTextInput">레퍼런스 대본</label>
+      <textarea id="refTextInput" placeholder="레퍼런스 음성에 대응하는 대본을 입력하세요."></textarea>
+    </div>
+
+  </div>
+
+  <!-- ===== 실행 버튼 ===== -->
+  <div class="card" style="padding:16px 24px;">
+    <button class="run-btn" id="runBtn" onclick="runSynthesis()">
+      <div class="spinner"></div>
+      <span id="runBtnText">합성 시작</span>
+    </button>
+  </div>
+
+  <!-- ===== 에러 박스 ===== -->
+  <div class="error-box" id="errorBox">
+    <span class="error-title">오류 발생</span>
+    <span id="errorMsg"></span>
+  </div>
+
+  <!-- ===== 파이프라인 진행 상황 ===== -->
+  <div class="card" id="pipelineSection">
+    <div class="section-title">파이프라인 진행 상황</div>
+
+    <div class="pipeline-wrap">
+      <div class="pipeline-stages" id="pipelineStages"></div>
+    </div>
+
+    <div class="progress-bar-wrap">
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="progressFill"></div>
+      </div>
+      <div class="progress-label">
+        <span id="progressStatus">대기 중</span>
+        <span id="progressPct">0%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 결과 영역 ===== -->
+  <div class="card" id="resultSection">
+    <div class="section-title">합성 결과</div>
+
+    <!-- 오디오 플레이어 -->
+    <div class="audio-wrap">
+      <audio id="audioPlayer" controls></audio>
+      <div>
+        <a class="download-btn" id="downloadBtn" href="#" download="tts_output.wav">⬇ WAV 다운로드</a>
+      </div>
+    </div>
+
+    <!-- 품질 메트릭 -->
+    <div class="metrics-grid" id="metricsGrid"></div>
+
+    <!-- 단계별 소요 시간 -->
+    <div style="margin-top:24px;">
+      <div class="section-title">단계별 소요 시간</div>
+      <table class="timing-table">
+        <thead>
+          <tr>
+            <th>단계</th>
+            <th>소요 시간</th>
+            <th class="timing-bar-cell">비율</th>
+          </tr>
+        </thead>
+        <tbody id="timingBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /.page-wrap -->
+
+<script>
+/* ================================================================
+   상수 및 전역 상태
+================================================================ */
+const SERVER = "http://localhost:8010";
+
+/* 파이프라인 단계 정의 */
+const STAGES = [
+  { key: "load_input", label: "입력" },
+  { key: "clean_text", label: "정제" },
+  { key: "planner",    label: "계획" },
+  { key: "chunking",   label: "청킹" },
+  { key: "synthesize", label: "합성" },
+  { key: "postfx",     label: "후처리" },
+  { key: "qc",         label: "QC" },
+  { key: "merge",      label: "병합" },
+];
+
+/* 레퍼런스 음성별 기본 대본 — 모두 리터럴 문자열 (XSS 없음) */
+const REF_SCRIPTS = {
+  tutor_1: "아, 잠깐만요. 방금 그 부분 다시 해볼까요? 네, 거기 헷갈리실 만해요. 많이들 그래요. 자, 같이 볼게요. 네, 맞아요. 바로 그거예요. 천천히 하셔도 되니까 편하게 하세요. 정말 잘하고 계십니다.",
+  tutor_2: "딱 1분만 집중해서 들어봐. 갑자기 길에서 낯선 사람이 길 좀 가르쳐 달라거나, 차 안에 강아지 있는데 같이 구경할래 하면서 아이들을 유괴하는데, 보니 요즘 이런 아동 유괴가 판을 치는 것도 다 사회적인 이유가 있더라고. 경찰청 자료에 따르면 2025년 1월부터 8월까지만 미성년자 유괴 사건이 무려 173건이나 발생했어.",
+  custom: "",
+};
+
+let currentMode = "text";   /* "text" | "file" */
+let selectedFile = null;    /* 업로드된 텍스트 File 객체 */
+let customRefFile = null;   /* 직접 업로드한 레퍼런스 오디오 File 객체 */
+
+/* ================================================================
+   초기화 — 파이프라인 단계 DOM 빌드 (textContent만 사용)
+================================================================ */
+(function initPipeline() {
+  const container = document.getElementById("pipelineStages");
+
+  STAGES.forEach(function(stage, idx) {
+    /* 단계 노드 */
+    const stageEl = document.createElement("div");
+    stageEl.className = "stage";
+    stageEl.id = "stage-" + stage.key;
+
+    const dot = document.createElement("div");
+    dot.className = "stage-dot";
+    dot.id = "dot-" + stage.key;
+    dot.textContent = String(idx + 1);
+
+    const nameEl = document.createElement("div");
+    nameEl.className = "stage-name";
+    nameEl.textContent = stage.label;
+
+    const timeEl = document.createElement("div");
+    timeEl.className = "stage-time";
+    timeEl.id = "time-" + stage.key;
+
+    stageEl.appendChild(dot);
+    stageEl.appendChild(nameEl);
+    stageEl.appendChild(timeEl);
+    container.appendChild(stageEl);
+
+    /* 연결선 (마지막 단계 제외) */
+    if (idx < STAGES.length - 1) {
+      const conn = document.createElement("div");
+      conn.className = "stage-connector";
+      conn.id = "conn-" + stage.key;
+      container.appendChild(conn);
+    }
+  });
+
+  /* 초기 레퍼런스 대본 */
+  document.getElementById("refTextInput").value = REF_SCRIPTS.tutor_1;
+})();
+
+/* ================================================================
+   탭 전환
+================================================================ */
+function switchTab(mode, btn) {
+  currentMode = mode;
+  document.querySelectorAll(".tab-btn").forEach(function(b) { b.classList.remove("active"); });
+  document.querySelectorAll(".tab-panel").forEach(function(p) { p.classList.remove("active"); });
+  btn.classList.add("active");
+  document.getElementById("panel-" + mode).classList.add("active");
+}
+
+/* ================================================================
+   파일 선택 처리
+================================================================ */
+function handleFileSelect(input) {
+  const file = input.files[0];
+  if (!file) return;
+  selectedFile = file;
+  document.getElementById("selectedFileName").textContent = "선택됨: " + file.name;
+}
+
+/* 드래그 앤 드롭 */
+const fileDrop = document.getElementById("fileDrop");
+fileDrop.addEventListener("dragover", function(e) {
+  e.preventDefault();
+  fileDrop.classList.add("over");
+});
+fileDrop.addEventListener("dragleave", function() { fileDrop.classList.remove("over"); });
+fileDrop.addEventListener("drop", function(e) {
+  e.preventDefault();
+  fileDrop.classList.remove("over");
+  const file = e.dataTransfer.files[0];
+  if (file && (file.name.endsWith(".txt") || file.name.endsWith(".md"))) {
+    selectedFile = file;
+    document.getElementById("selectedFileName").textContent = "선택됨: " + file.name;
+  } else {
+    showError("지원하지 않는 파일 형식입니다. .txt 또는 .md 파일만 업로드하세요.");
+  }
+});
+
+/* ================================================================
+   레퍼런스 음성 변경
+================================================================ */
+function onRefVoiceChange(radio) {
+  const val = radio.value;
+  document.getElementById("customRefWrap").classList.toggle("visible", val === "custom");
+  document.getElementById("refTextInput").value = REF_SCRIPTS[val] !== undefined ? REF_SCRIPTS[val] : "";
+  if (val !== "custom") customRefFile = null;
+}
+
+function handleCustomRef(input) {
+  customRefFile = input.files[0] || null;
+  document.getElementById("customRefLabel").textContent = customRefFile ? customRefFile.name : "선택된 파일 없음";
+}
+
+/* ================================================================
+   속도 레이블 업데이트
+================================================================ */
+function updateSpeedLabel(val) {
+  document.getElementById("speedVal").textContent = parseFloat(val).toFixed(2) + "x";
+}
+
+/* ================================================================
+   유틸리티
+================================================================ */
+function showError(msg) {
+  document.getElementById("errorMsg").textContent = msg;
+  document.getElementById("errorBox").classList.add("visible");
+}
+
+function hideError() {
+  document.getElementById("errorBox").classList.remove("visible");
+}
+
+function setLoading(on) {
+  const btn = document.getElementById("runBtn");
+  const spinner = btn.querySelector(".spinner");
+  const label = document.getElementById("runBtnText");
+  btn.disabled = on;
+  btn.classList.toggle("loading", on);
+  spinner.style.display = on ? "block" : "none";
+  label.textContent = on ? "합성 중..." : "합성 시작";
+}
+
+function setProgress(pct, label) {
+  document.getElementById("progressFill").style.width = pct + "%";
+  document.getElementById("progressPct").textContent = pct + "%";
+  document.getElementById("progressStatus").textContent = label;
+}
+
+/* ================================================================
+   파이프라인 단계 상태 업데이트
+================================================================ */
+function resetStages() {
+  STAGES.forEach(function(stage) {
+    document.getElementById("dot-" + stage.key).className = "stage-dot";
+    document.getElementById("time-" + stage.key).textContent = "";
+    const conn = document.getElementById("conn-" + stage.key);
+    if (conn) conn.className = "stage-connector";
+  });
+}
+
+function markStagesDone(timings) {
+  STAGES.forEach(function(stage) {
+    const ms = timings[stage.key];
+    if (ms === undefined || ms === null) return;
+    document.getElementById("dot-" + stage.key).className = "stage-dot done";
+    document.getElementById("time-" + stage.key).textContent = (Number(ms) / 1000).toFixed(1) + "s";
+    const conn = document.getElementById("conn-" + stage.key);
+    if (conn) conn.className = "stage-connector done";
+  });
+}
+
+/* ================================================================
+   결과 렌더링 — DOM API 사용, textContent만으로 값 삽입
+================================================================ */
+function renderResult(data) {
+  /* 오디오 */
+  const src = "data:audio/wav;base64," + (data.audio_base64 || "");
+  document.getElementById("audioPlayer").src = src;
+  document.getElementById("downloadBtn").href = src;
+
+  /* 메트릭 */
+  const failedIds = (data.failed_chunk_ids || []).join(", ") || "없음";
+  const hasFailedIds = (data.failed_chunk_ids || []).length > 0;
+  const failCount = data.failed_chunk_count || 0;
+  const qcReasonCounts = data.qc_reason_counts || {};
+  const qcReasonText = Object.keys(qcReasonCounts).map(function(key) {
+    return key + ": " + qcReasonCounts[key];
+  }).join(", ") || "-";
+
+  const metricsSpec = [
+    { label: "총 길이",   val: (data.total_duration_sec || 0).toFixed(1) + "초",   err: false },
+    { label: "청크 수",   val: (data.chunk_count != null ? data.chunk_count : "-") + "개", err: false },
+    { label: "실패 청크", val: failCount + "개",   extra: hasFailedIds ? failedIds : null, err: failCount > 0 },
+    { label: "평균 CER",  val: data.avg_cer != null ? (data.avg_cer * 100).toFixed(2) + "%" : "-", err: false },
+    { label: "평균 WER",  val: data.avg_wer != null ? (data.avg_wer * 100).toFixed(2) + "%" : "-", err: false },
+    { label: "사용 모델", val: data.model || "-",   err: false },
+    { label: "QC 엔진",   val: data.qc_engine_used || "-", err: false },
+    { label: "QC 사유",   val: qcReasonText, err: qcReasonText.indexOf("repetition") >= 0 || qcReasonText.indexOf("hallucinated") >= 0 },
+  ];
+
+  const metricsGrid = document.getElementById("metricsGrid");
+  /* 기존 카드 제거 */
+  while (metricsGrid.firstChild) metricsGrid.removeChild(metricsGrid.firstChild);
+
+  metricsSpec.forEach(function(m) {
+    const card = document.createElement("div");
+    card.className = "metric-card" + (m.err ? " error-card" : "");
+
+    const lbl = document.createElement("div");
+    lbl.className = "metric-label";
+    lbl.textContent = m.label;
+
+    const valEl = document.createElement("div");
+    valEl.className = "metric-val";
+    valEl.textContent = m.val;
+
+    card.appendChild(lbl);
+    card.appendChild(valEl);
+
+    if (m.extra) {
+      const extra = document.createElement("div");
+      extra.className = "failed-chunks";
+      extra.textContent = m.extra;
+      card.appendChild(extra);
+    }
+
+    metricsGrid.appendChild(card);
+  });
+
+  /* 타이밍 테이블 */
+  const timings = data.timings || {};
+  const timingBody = document.getElementById("timingBody");
+  while (timingBody.firstChild) timingBody.removeChild(timingBody.firstChild);
+
+  /* 단계 키 → 한글 레이블 매핑 */
+  const keyLabel = {};
+  STAGES.forEach(function(s) { keyLabel[s.key] = s.label; });
+
+  const entries = Object.keys(timings).map(function(k) {
+    return { key: k, ms: Number(timings[k]) || 0 };
+  });
+  const maxMs = Math.max.apply(null, entries.map(function(e) { return e.ms; }).concat([1]));
+
+  entries.forEach(function(entry) {
+    const label = keyLabel[entry.key] || entry.key;
+    const sec = (entry.ms / 1000).toFixed(2) + "s";
+    const pct = ((entry.ms / maxMs) * 100).toFixed(1);
+
+    const tr = document.createElement("tr");
+
+    const tdLabel = document.createElement("td");
+    tdLabel.textContent = label;
+
+    const tdMs = document.createElement("td");
+    tdMs.style.fontWeight = "700";
+    tdMs.textContent = sec;
+
+    const tdBar = document.createElement("td");
+    tdBar.className = "timing-bar-cell";
+    const barBg = document.createElement("div");
+    barBg.className = "timing-bar-bg";
+    const barFill = document.createElement("div");
+    barFill.className = "timing-bar-fill";
+    barFill.style.width = pct + "%";
+    barBg.appendChild(barFill);
+    tdBar.appendChild(barBg);
+
+    tr.appendChild(tdLabel);
+    tr.appendChild(tdMs);
+    tr.appendChild(tdBar);
+    timingBody.appendChild(tr);
+  });
+
+  document.getElementById("resultSection").style.display = "block";
+}
+
+/* ================================================================
+   합성 실행 — 텍스트 모드 (JSON POST)
+================================================================ */
+async function runTextMode() {
+  const text = document.getElementById("textInput").value.trim();
+  if (!text) { showError("합성할 텍스트를 입력해주세요."); return null; }
+
+  const refVoice = document.querySelector("input[name='refVoice']:checked").value;
+  const refText  = document.getElementById("refTextInput").value.trim();
+  const speed    = parseFloat(document.getElementById("speedSlider").value);
+  const qcEngine = document.getElementById("qcEngine").value;
+  const skipPlanner = document.getElementById("skipPlanner").checked;
+  const skipPostfx  = document.getElementById("skipPostfx").checked;
+
+  /* 직접 업로드 레퍼런스 오디오 → base64 */
+  let refAudioB64 = null;
+  if (refVoice === "custom" && customRefFile) {
+    refAudioB64 = await fileToBase64(customRefFile);
+  }
+
+  const body = {
+    text: text,
+    language: "ko",
+    speed: speed,
+    skip_planner: skipPlanner,
+    skip_postfx: skipPostfx,
+    qc_engine: qcEngine,
+  };
+  if (refVoice === "custom") {
+    if (!customRefFile) { showError("직접 업로드 레퍼런스 음성 파일을 선택해주세요."); return null; }
+    if (!refText) { showError("직접 업로드 레퍼런스 음성에는 정확한 레퍼런스 대본이 필요합니다."); return null; }
+    if (refText) body.ref_text = refText;
+    if (refAudioB64) body.ref_audio_base64 = refAudioB64;
+  } else {
+    body.voice_profile_id = refVoice;
+  }
+
+  const resp = await fetch(SERVER + "/api/tts-v2", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error("서버 응답 오류 (" + resp.status + "): " + errText);
+  }
+  return resp.json();
+}
+
+/* ================================================================
+   합성 실행 — 파일 모드 (multipart POST)
+================================================================ */
+async function runFileMode() {
+  if (!selectedFile) { showError("업로드할 파일을 선택해주세요."); return null; }
+
+  const refVoice = document.querySelector("input[name='refVoice']:checked").value;
+  const refText  = document.getElementById("refTextInput").value.trim();
+  const speed    = parseFloat(document.getElementById("speedSlider").value);
+  const qcEngine = document.getElementById("qcEngine").value;
+  const skipPlanner = document.getElementById("skipPlanner").checked;
+  const skipPostfx  = document.getElementById("skipPostfx").checked;
+
+  const form = new FormData();
+  form.append("text_file", selectedFile);
+  if (refVoice === "custom") {
+    if (!customRefFile) { showError("직접 업로드 레퍼런스 음성 파일을 선택해주세요."); return null; }
+    if (!refText) { showError("직접 업로드 레퍼런스 음성에는 정확한 레퍼런스 대본이 필요합니다."); return null; }
+    if (customRefFile) form.append("ref_audio", customRefFile);
+    if (refText) form.append("ref_text", refText);
+  } else {
+    form.append("voice_profile_id", refVoice);
+  }
+  form.append("language", "ko");
+  form.append("speed", String(speed));
+  form.append("qc_engine", qcEngine);
+  form.append("skip_planner", String(skipPlanner));
+  form.append("skip_postfx",  String(skipPostfx));
+
+  const resp = await fetch(SERVER + "/api/tts-v2/file", {
+    method: "POST",
+    body: form,
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error("서버 응답 오류 (" + resp.status + "): " + errText);
+  }
+  return resp.json();
+}
+
+/* ================================================================
+   파일 → base64 변환
+================================================================ */
+function fileToBase64(file) {
+  return new Promise(function(resolve, reject) {
+    const reader = new FileReader();
+    reader.onload  = function() { resolve(reader.result.split(",")[1]); };
+    reader.onerror = function() { reject(new Error("파일 읽기 실패")); };
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ================================================================
+   메인 합성 진입점
+================================================================ */
+async function runSynthesis() {
+  hideError();
+  document.getElementById("resultSection").style.display = "none";
+  resetStages();
+  setProgress(0, "요청 전송 중...");
+  setLoading(true);
+
+  /* 동기 API라 응답 전까지 단순 진행 인디케이터 */
+  let animPct = 0;
+  const animInterval = setInterval(function() {
+    animPct = Math.min(animPct + 1, 85);
+    setProgress(animPct, "합성 파이프라인 실행 중... (" + animPct + "%)");
+  }, 400);
+
+  try {
+    let data = null;
+    if (currentMode === "text") {
+      data = await runTextMode();
+    } else {
+      data = await runFileMode();
+    }
+
+    clearInterval(animInterval);
+
+    if (!data) {
+      /* 유효성 검사 실패 — showError는 이미 호출됨 */
+      setProgress(0, "대기 중");
+      return;
+    }
+
+    setProgress(100, "완료");
+    if (data.timings) markStagesDone(data.timings);
+    renderResult(data);
+
+  } catch (err) {
+    clearInterval(animInterval);
+    setProgress(0, "오류 발생");
+    showError(err.message || String(err));
+  } finally {
+    setLoading(false);
+  }
+}
+</script>
+</body>
+</html>

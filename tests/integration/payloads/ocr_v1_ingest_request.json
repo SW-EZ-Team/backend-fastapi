@@ -1,0 +1,8 @@
+{
+  "_comment": "OCR ingest는 multipart/form-data이므로 JSON 페이로드가 아닙니다. 이 파일은 테스트 메타데이터용입니다.",
+  "collection_name": "파이썬_자료구조_교재_2026",
+  "endpoint": "/api/ocr/v1/ingest",
+  "method": "POST",
+  "content_type": "multipart/form-data",
+  "description": "PDF 파일을 form-data로 업로드하는 엔드포인트"
+}

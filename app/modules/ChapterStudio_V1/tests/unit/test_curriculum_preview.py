@@ -2,12 +2,9 @@ from __future__ import annotations
 
 import json
 
-from fastapi.testclient import TestClient
-
 from app.modules.ChapterStudio_V1.ai_connectors.schemas import ChapterAIResponse
 from app.modules.ChapterStudio_V1.app.curriculum_preview import build_curriculum_preview
 from app.modules.ChapterStudio_V1.app.curriculum_preview_types import CurriculumPreviewRequest
-from app.modules.ChapterStudio_V1.app.main import app
 
 
 async def test_curriculum_preview_mock_matches_course_detail_contract() -> None:
@@ -41,15 +38,13 @@ async def test_curriculum_preview_codex_path_validates_json(monkeypatch) -> None
     assert len(preview.lessons) == 10
 
 
-def test_curriculum_preview_endpoint_returns_json() -> None:
-    payload = {"topic": "통계 추론", "title": "통계 과외", "lesson_count": 10, "engine": "mock"}
-    with TestClient(app) as client:
-        response = client.post("/demo/chapter-studio/curriculum/preview", json=payload)
+async def test_curriculum_preview_function_returns_contract() -> None:
+    preview = await build_curriculum_preview(
+        CurriculumPreviewRequest(topic="통계 추론", title="통계 과외", lesson_count=10, engine="mock")
+    )
 
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "CURRICULUM_READY"
-    assert len(data["lessons"]) == 10
+    assert preview.status == "CURRICULUM_READY"
+    assert len(preview.lessons) == 10
 
 
 def _codex_json() -> str:

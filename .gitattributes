@@ -1,0 +1,2 @@
+# OCR 문자 사전은 공백 토큰을 단독 줄로 보존한다.
+ai_connectors/ocr/models/ppocr_keys_v1.txt whitespace=-blank-at-eol,-blank-at-eof

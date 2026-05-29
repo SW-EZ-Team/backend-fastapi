@@ -1,0 +1,47 @@
+plugins {
+  id 'org.springframework.boot' version '3.4.5' apply false
+  id 'io.spring.dependency-management' version '1.1.7'
+  id 'java'
+}
+
+group = 'com.swez'
+version = '0.0.1-handoff'
+
+dependencyManagement {
+  imports {
+    mavenBom org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES
+  }
+}
+
+java {
+  sourceCompatibility = JavaVersion.VERSION_21
+  targetCompatibility = JavaVersion.VERSION_21
+}
+
+dependencies {
+  implementation 'org.springframework.boot:spring-boot-starter-web'
+  implementation 'org.springframework.boot:spring-boot-starter-validation'
+  implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.8'
+
+  compileOnly 'org.projectlombok:lombok'
+  annotationProcessor 'org.projectlombok:lombok'
+
+  testImplementation 'org.springframework.boot:spring-boot-starter-test'
+  testCompileOnly 'org.projectlombok:lombok'
+  testAnnotationProcessor 'org.projectlombok:lombok'
+}
+
+sourceSets {
+  main {
+    java {
+      srcDirs = [
+        'src/main/java',
+        '../../../../../backend-spring/src/main/java'
+      ]
+    }
+  }
+}
+
+tasks.named('test') {
+  useJUnitPlatform()
+}

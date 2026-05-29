@@ -8,9 +8,26 @@ from pydantic import ValidationError
 from app.modules.ChapterStudio_V1.app.frontend_contract import DepthLevel, SourceMode, TeacherId
 from app.modules.ChapterStudio_V1.app.generation_context import GenerationContext
 from app.modules.ChapterStudio_V1.app.reference_books.schemas import ReferenceBookContext
+from app.modules.ChapterStudio_V1.common.config import database_schema
 from app.modules.ChapterStudio_V1.common.errors import ConversionError, StorageError
 
-GENERATION_CONTEXT_SQL = """
+
+class GenerationContextConnection(Protocol):
+    async def fetchrow(self, query: str, *args: object) -> Mapping[str, object] | None:
+        """asyncpg connection과 테스트 대역의 최소 조회 인터페이스다."""
+
+
+async def load_generation_context(conn: GenerationContextConnection, lesson_id: str) -> GenerationContext:
+    """lesson_id 기준으로 ChapterStudio 생성 입력을 DB에서 읽는다."""
+    row = await conn.fetchrow(generation_context_sql(database_schema()), lesson_id)
+    if row is None:
+        raise StorageError(f"강의 생성 입력을 찾을 수 없다: {lesson_id}")
+    return row_to_generation_context(row)
+
+
+def generation_context_sql(schema: str) -> str:
+    """schema 설정을 반영한 생성 입력 조회 SQL을 만든다."""
+    return f"""
 SELECT
     cu.lesson_id,
     cp.tutoring_id,
@@ -24,25 +41,12 @@ SELECT
     cu.learning_goal,
     COALESCE(lgs.requested_slide_count, cu.slide_count) AS slide_count,
     COALESCE(lgs.requested_template, 'auto') AS template,
-    COALESCE(lgs.generation_context, '{}'::jsonb) AS generation_context
-FROM chapter_studio.curriculum_unit cu
-JOIN chapter_studio.curriculum_plan cp ON cp.id = cu.curriculum_plan_id
-LEFT JOIN chapter_studio.lesson_generation_status lgs ON lgs.lesson_id = cu.lesson_id
+    COALESCE(lgs.generation_context, '{{}}'::jsonb) AS generation_context
+FROM {_table(schema, 'curriculum_unit')} cu
+JOIN {_table(schema, 'curriculum_plan')} cp ON cp.id = cu.curriculum_plan_id
+LEFT JOIN {_table(schema, 'lesson_generation_status')} lgs ON lgs.lesson_id = cu.lesson_id
 WHERE cu.lesson_id = $1
 """
-
-
-class GenerationContextConnection(Protocol):
-    async def fetchrow(self, query: str, *args: object) -> Mapping[str, object] | None:
-        """asyncpg connection과 테스트 대역의 최소 조회 인터페이스다."""
-
-
-async def load_generation_context(conn: GenerationContextConnection, lesson_id: str) -> GenerationContext:
-    """lesson_id 기준으로 ChapterStudio 생성 입력을 DB에서 읽는다."""
-    row = await conn.fetchrow(GENERATION_CONTEXT_SQL, lesson_id)
-    if row is None:
-        raise StorageError(f"강의 생성 입력을 찾을 수 없다: {lesson_id}")
-    return row_to_generation_context(row)
 
 
 def row_to_generation_context(row: Mapping[str, object]) -> GenerationContext:
@@ -126,3 +130,10 @@ def _reference_context(value: object) -> ReferenceBookContext | None:
     if not context.has_hits():
         return None
     return context
+
+
+def _table(schema: str, name: str) -> str:
+    return f"{schema}.{name}"
+
+
+GENERATION_CONTEXT_SQL = generation_context_sql("chapter_studio")

@@ -82,6 +82,12 @@ class Assignment(Base):
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     criteria: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     expected_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 과제 난이도: 상/중상/중 등 (서버 기본값 "상" — 하위 호환 마이그레이션용)
+    difficulty_level: Mapped[str] = mapped_column(String(16), nullable=False, server_default="상")
+    # 이 과제가 테스트하는 핵심 개념 목록
+    target_concepts: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default="[]")
+    # 사용자 약점 타겟 요소 목록
+    weakness_focus: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

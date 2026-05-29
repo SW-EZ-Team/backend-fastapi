@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import pytest
 
+from app.modules.ChapterStudio_V1.app.generation_context import GenerationInput
 from app.modules.ChapterStudio_V1.common.errors import ConversionError
-from app.modules.ChapterStudio_V1.pipeline.converters import request_to_initial_state, state_to_db_rows, state_to_response
+from app.modules.ChapterStudio_V1.pipeline.converters import (
+    generation_input_to_initial_state,
+    state_to_db_rows,
+    state_to_response,
+)
 from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState
-from app.modules.ChapterStudio_V1.schemas.request import ChapterRequest
 
 
 def _state() -> ChapterStudioState:
@@ -13,9 +17,13 @@ def _state() -> ChapterStudioState:
         "user_id": "u1",
         "curriculum_id": "c1",
         "chapter_brief": "정렬 알고리즘",
+        "slide_count": 10,
+        "template_key": "concept_code",
+        "generation_model": "test",
         "enriched_brief": "보강 개요",
         "weak_points": "재귀",
         "slide_outline": [{"title": "도입"}],
+        "slide_drafts": [],
         "slides": [{"slide_idx": 0, "html_content": "<section>1</section>"}],
         "quiz_set": [
             {
@@ -34,12 +42,22 @@ def _state() -> ChapterStudioState:
 
 
 def test_request_to_initial_state() -> None:
-    req = ChapterRequest(user_id="u1", curriculum_id="c1", chapter_brief="정렬", slide_count=10)
+    req = GenerationInput(topic="정렬", chapter_brief="정렬", slide_count=10, weak_points="재귀")
 
-    state = request_to_initial_state(req)
+    state = generation_input_to_initial_state(req)
 
-    assert state["user_id"] == "u1"
+    assert state["topic"] == "정렬"
+    assert state["slide_count"] == 10
+    assert state["weak_points"] == "재귀"
     assert state["slides"] == []
+
+
+def test_generation_input_to_initial_state_uses_topic_when_brief_is_empty() -> None:
+    req = GenerationInput(topic="정렬 알고리즘", chapter_brief="", slide_count=10)
+
+    state = generation_input_to_initial_state(req)
+
+    assert state["chapter_brief"] == "정렬 알고리즘"
 
 
 def test_state_to_response_happy_path() -> None:

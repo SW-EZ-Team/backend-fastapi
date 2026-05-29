@@ -79,11 +79,13 @@ LLM이 생성하는 JSON과 프론트엔드 렌더러가 기대하는 구조의 
 
 ---
 
-## 3. concept_map — 개념 맵
+## 3. 관계도 — 관계 지도
+
+개념 간 연결 구조를 노드·엣지로 시각화한다. 이전 `concept_map` 타입을 대체한다.
 
 ```json
 {
-  "spec_type": "concept_map",
+  "spec_type": "관계도",
   "nodes": [
     {"id": "str (필수)", "label": "str (필수)", "size": "int (필수, 노드 크기)"}
   ],
@@ -96,7 +98,7 @@ LLM이 생성하는 JSON과 프론트엔드 렌더러가 기대하는 구조의 
 예시:
 ```json
 {
-  "spec_type": "concept_map",
+  "spec_type": "관계도",
   "nodes": [
     {"id": "n1", "label": "광합성", "size": 40},
     {"id": "n2", "label": "빛에너지", "size": 28},

@@ -1,20 +1,29 @@
 """Telegram_control_module FastAPI 라우터."""
 
+from __future__ import annotations
+
+import hmac
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter
 from fastapi import Header
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
 
+from common.db import get_connection
 from ..config import get_default_bot_token
 from ..config import get_webhook_secret
 from ..parsers.update_parser import extract_telegram_message_summary
 from ..schemas import TelegramSendMessageRequest
 from ..schemas import TelegramSendMessageResult
 from ..schemas import TelegramWebhookAck
+from ..services.command_dispatcher import dispatch_telegram_command
 from ..services.telegram_client import TelegramApiError
 from ..services.telegram_client import TelegramClient
+
+if TYPE_CHECKING:
+    pass
 
 _CONSOLE_PATH = Path(__file__).resolve().parent.parent / "web_console" / "index.html"
 
@@ -55,10 +64,20 @@ def create_router(client: TelegramClient | None = None) -> APIRouter:
         x_telegram_bot_api_secret_token: str | None = Header(default=None),
     ) -> TelegramWebhookAck:
         expected_secret = get_webhook_secret()
-        if expected_secret is not None and x_telegram_bot_api_secret_token != expected_secret:
+        if expected_secret is not None and not hmac.compare_digest(
+            (x_telegram_bot_api_secret_token or "").encode(),
+            expected_secret.encode(),
+        ):
             raise HTTPException(status_code=400, detail="웹훅 secret token이 일치하지 않습니다.")
 
-        extract_telegram_message_summary(update)
+        summary = extract_telegram_message_summary(update)
+        # 공유 풀에서 DB 커넥션을 획득한다 — 풀 미초기화 시 커넥션 없이 진행
+        try:
+            async with get_connection() as db_conn:
+                await dispatch_telegram_command(summary, telegram_client, db_pool=db_conn)
+        except HTTPException:
+            # DB 미설정 시 커넥션 없이 진행
+            await dispatch_telegram_command(summary, telegram_client, db_pool=None)
         return TelegramWebhookAck(ok=True)
 
     return api_router

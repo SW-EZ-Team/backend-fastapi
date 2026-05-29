@@ -1,0 +1,17 @@
+{
+  "topic": "딥러닝 역전파 알고리즘",
+  "source_mode": "topic",
+  "pdf_file_name": "",
+  "duration_days": 30,
+  "depth": "deep",
+  "teacher": "owl",
+  "tone": 40,
+  "pace": 55,
+  "tutor_depth": 80,
+  "socratic": 75,
+  "audience_level": "컴퓨터공학 2학년",
+  "learning_goal": "역전파 알고리즘의 수학적 원리와 구현 방법을 이해한다",
+  "weak_points": "편미분과 연쇄법칙 계산이 어려움",
+  "chapter_title": "역전파: 신경망이 학습하는 방법",
+  "chapter_brief": "경사하강법과 연쇄법칙으로 가중치를 업데이트하는 핵심 알고리즘"
+}

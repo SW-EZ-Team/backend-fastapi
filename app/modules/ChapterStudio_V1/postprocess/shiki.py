@@ -42,13 +42,10 @@ async def _highlight_block(lang: str, code: str) -> tuple[str, str | None]:
     cached = _HIGHLIGHT_CACHE.get(cache_key)
     if cached is not None:
         return cached
-    result: tuple[str, str | None]
     try:
         rendered = await _run_external(["npx", "shiki", "--lang", lang], code, 10.0)
-    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
-        del exc
-        fallback = _language_fallback(lang, code)
-        result = (fallback, None)
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        result: tuple[str, str | None] = (_language_fallback(lang, code), None)
     else:
         if _needs_class_fallback(rendered):
             result = (_language_fallback(lang, code), None)
@@ -81,7 +78,7 @@ def _run_sync(
 
 
 def _needs_class_fallback(rendered: str) -> bool:
-    """인라인 style 기반 결과는 sanitizer 이후 색이 사라져 클래스 테마로 대체한다."""
+    """인라인 style 기반 결과는 sanitizer 후 색이 사라지므로 클래스 테마로 대체한다."""
     lowered = rendered.lower()
     return "style=" in lowered or "color:" in lowered
 
@@ -175,7 +172,6 @@ def _generic_line(line: str, keywords: set[str]) -> str:
     pattern = r"//.*$|#.*$|&quot;.*?&quot;|&#x27;.*?&#x27;|`.*?`|\b\d+\b|\b[A-Za-z_][A-Za-z0-9_]*\b|\s+|."
     return "".join(_generic_token(line, match.end(), match.group(0), keywords) for match in re.finditer(pattern, line))
 
-
 def _generic_token(line: str, end: int, token: str, keywords: set[str]) -> str:
     lowered = token.lower()
     if token.startswith(("//", "#")):
@@ -199,7 +195,6 @@ def _generic_token(line: str, end: int, token: str, keywords: set[str]) -> str:
     if token[:1].isupper():
         return f'<span class="tok-class">{token}</span>'
     return token
-
 
 def _has_prefix(line: str, end: int, token: str, prefix: str) -> bool:
     return line[: end - len(token)].rstrip().endswith(prefix)

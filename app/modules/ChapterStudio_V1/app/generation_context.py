@@ -2,9 +2,33 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.modules.ChapterStudio_V1.app.demo_request import DemoGenerationInput
 from app.modules.ChapterStudio_V1.app.frontend_contract import DepthLevel, SourceMode, TeacherId
 from app.modules.ChapterStudio_V1.app.reference_books.schemas import ReferenceBookContext
+
+
+class GenerationInput(BaseModel):
+    """강의 생성 프롬프트 계층에서 쓰는 입력 DTO다."""
+
+    model_config = ConfigDict(strict=True, frozen=True)
+
+    topic: str = Field(min_length=1, max_length=2000)
+    source_mode: SourceMode = "topic"
+    pdf_file_name: str = ""
+    duration_days: int = 30
+    depth: DepthLevel = "normal"
+    teacher: TeacherId = "owl"
+    tone: int = 50
+    pace: int = 50
+    tutor_depth: int = 50
+    socratic: int = 70
+    audience_level: str = "일반 학습자"
+    learning_goal: str = "핵심 개념 이해와 실습"
+    weak_points: str = ""
+    chapter_title: str = "데모 챕터"
+    chapter_brief: str = Field(default="", max_length=400)
+    template: str = "auto"
+    slide_count: int = Field(default=12, ge=10, le=15)
+    reference_book_context: ReferenceBookContext | None = None
 
 
 class GenerationContext(BaseModel):
@@ -35,9 +59,9 @@ class GenerationContext(BaseModel):
     slide_count: int = Field(default=12, ge=10, le=15)
     reference_book_context: ReferenceBookContext | None = None
 
-    def to_generation_input(self) -> DemoGenerationInput:
-        """현재 demo 생성기와 운영 생성기가 공유하는 입력 모델로 바꾼다."""
-        return DemoGenerationInput(
+    def to_generation_input(self) -> GenerationInput:
+        """DB 스냅샷을 생성 프롬프트 입력 DTO로 축약한다."""
+        return GenerationInput(
             topic=self.topic,
             source_mode=self.source_mode,
             pdf_file_name=self.pdf_file_name,
@@ -53,5 +77,7 @@ class GenerationContext(BaseModel):
             weak_points=self.weak_points,
             chapter_title=self.chapter_title,
             chapter_brief=self.chapter_brief,
+            template=self.template,
+            slide_count=self.slide_count,
             reference_book_context=self.reference_book_context,
         )

@@ -4,9 +4,11 @@ from typing import cast
 
 from pydantic import ValidationError
 
+from app.modules.ChapterStudio_V1.app.generation_context import GenerationInput
+from app.modules.ChapterStudio_V1.app.reference_books.prompt_blocks import reference_context_prompt
 from app.modules.ChapterStudio_V1.common.errors import ConversionError
 from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState, StateRecord, StateRecords
-from app.modules.ChapterStudio_V1.schemas.request import ChapterRequest
+from app.modules.ChapterStudio_V1.pipeline._constants import VALID_DIFFICULTY_VALUES
 from app.modules.ChapterStudio_V1.schemas.response import (
     AssignmentSchema,
     ChapterResponse,
@@ -20,19 +22,38 @@ from app.modules.ChapterStudio_V1.schemas.response import (
 DbRows = dict[str, StateRecords]
 
 
-def request_to_initial_state(req: ChapterRequest) -> ChapterStudioState:
-    """API 요청을 파이프라인 초기 State로 변환한다."""
+def generation_input_to_initial_state(req: GenerationInput) -> ChapterStudioState:
+    """DB generation_context 스냅샷을 파이프라인 초기 State로 변환한다."""
     return {
-        "user_id": req.user_id,
-        "curriculum_id": req.curriculum_id,
-        "chapter_brief": req.chapter_brief,
+        "user_id": "",
+        "curriculum_id": "",
+        "topic": req.topic,
+        "source_mode": req.source_mode,
+        "pdf_file_name": req.pdf_file_name,
+        "duration_days": req.duration_days,
+        "depth": req.depth,
+        "teacher": req.teacher,
+        "tone": req.tone,
+        "pace": req.pace,
+        "tutor_depth": req.tutor_depth,
+        "socratic": req.socratic,
+        "audience_level": req.audience_level,
+        "learning_goal": req.learning_goal,
+        "chapter_brief": req.chapter_brief or req.topic,
+        "slide_count": req.slide_count,
+        "requested_template": req.template,
+        "template_key": "",
+        "generation_model": "",
         "enriched_brief": "",
-        "weak_points": "",
+        "weak_points": req.weak_points,
+        "reference_context_prompt": reference_context_prompt(req.reference_book_context),
         "slide_outline": [],
+        "slide_drafts": [],
         "slides": [],
         "quiz_set": [],
         "core_note": "",
         "assignment_seed": "",
+        "assignment_meta": {},
         "voice_scripts": [],
         "voice_audio_files": [],
     }
@@ -87,13 +108,11 @@ def _optional_records(state: ChapterStudioState, key: str) -> StateRecords:
         return []
     return _records(state, key)
 
-
 def _state_text(state: ChapterStudioState, key: str) -> str:
     value = state.get(key)
     if not isinstance(value, str) or value == "":
         raise ConversionError(f"{key} 문자열이 필요하다.")
     return value
-
 
 def _record_text(record: StateRecord, key: str) -> str:
     value = record.get(key)
@@ -101,13 +120,11 @@ def _record_text(record: StateRecord, key: str) -> str:
         raise ConversionError(f"{key} 문자열이 필요하다.")
     return value
 
-
 def _record_int(record: StateRecord, key: str) -> int:
     value = record.get(key)
     if not isinstance(value, int):
         raise ConversionError(f"{key} 정수가 필요하다.")
     return value
-
 
 def _record_str_list(record: StateRecord, key: str) -> list[str]:
     value = record.get(key)
@@ -198,6 +215,6 @@ def _optional_record_number(record: StateRecord, key: str) -> float | None:
 
 
 def _difficulty(value: str) -> Difficulty:
-    if value not in {"상", "중", "하", "hard", "medium", "easy", "기억", "이해", "적용", "함정 교정", "실전 판단", "오해"}:
+    if value not in VALID_DIFFICULTY_VALUES:
         raise ConversionError("difficulty 값이 허용 범위를 벗어났다.")
     return cast(Difficulty, value)

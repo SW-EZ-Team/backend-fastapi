@@ -155,7 +155,21 @@ def test_slide_score_requires_code_token_theme() -> None:
     result["slides"][0]["iframe_html"] = '<div class="code-card"><code><span class="tok-keyword">def</span> x</code></div>'
     score_with_theme, _ = _score_slides(payload, result)
 
+    assert score_without_theme == 4
     assert score_with_theme > score_without_theme
+
+
+def test_score_slides_scores_doctype_per_slide() -> None:
+    payload: dict[str, object] = {}
+    mixed = {"slides": [{"iframe_html": "<!DOCTYPE html><html></html>"}] + [{"iframe_html": "<section></section>"} for _ in range(4)]}
+    complete = {"slides": [{"iframe_html": "<!DOCTYPE html><html></html>"} for _ in range(5)]}
+
+    mixed_score, mixed_note = _score_slides(payload, mixed)
+    complete_score, complete_note = _score_slides(payload, complete)
+
+    assert mixed_score < complete_score
+    assert "doctype=1" in mixed_note
+    assert "doctype=5" in complete_note
 
 
 def test_visual_gate_requires_per_slide_rendered_slots() -> None:

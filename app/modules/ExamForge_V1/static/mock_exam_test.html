@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MockExam_V1 - AI 모의고사 템플릿 테스트</title>
+    <style>
+        :root {
+            --bg: #F8FAF6;
+            --panel: #FEFCF7;
+            --field: #FBFCF9;
+            --ink: #172126;
+            --muted: #526369;
+            --line: #D8E0D7;
+            --accent: #1F7A4D;
+            --accent-dark: #155E3B;
+            --soft: #E4F3EA;
+            --warn-bg: #FFF3DA;
+            --warn-ink: #7A4D10;
+            --error-bg: #FDECEF;
+            --error-ink: #8D1D32;
+            --shadow: rgba(31, 122, 77, 0.08);
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--ink);
+            font-family: "D2Coding", "Noto Sans KR", -apple-system, BlinkMacSystemFont, sans-serif;
+            line-height: 1.65;
+        }
+        .container { max-width: 1180px; margin: 0 auto; padding: 28px; }
+        header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-end; margin-bottom: 22px; }
+        h1 { margin: 0 0 6px; font-size: 2rem; color: var(--accent-dark); }
+        h2 { margin: 0 0 14px; font-size: 1.15rem; }
+        .summary { color: var(--muted); margin: 0; max-width: 720px; }
+        .grid { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 18px; align-items: start; }
+        .section {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 10px 24px var(--shadow);
+        }
+        label { display: block; margin: 12px 0 6px; font-weight: 800; }
+        input, textarea, select {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            background: var(--field);
+            color: var(--ink);
+            padding: 10px 12px;
+            font: inherit;
+        }
+        textarea { min-height: 220px; resize: vertical; }
+        input:focus, textarea:focus, select:focus {
+            outline: 3px solid var(--soft);
+            border-color: var(--accent);
+        }
+        .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        .template-toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+        .pill {
+            border: 1px solid var(--line);
+            background: var(--field);
+            color: var(--ink);
+            border-radius: 999px;
+            padding: 7px 10px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .pill.active { background: var(--soft); color: var(--accent-dark); border-color: var(--accent); }
+        .template-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+        .template-card {
+            position: relative;
+            border: 1px solid var(--line);
+            background: var(--field);
+            border-radius: 10px;
+            padding: 14px;
+            cursor: pointer;
+            min-height: 168px;
+        }
+        .template-card.selected { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+        .template-card input { position: absolute; top: 14px; right: 14px; width: 20px; height: 20px; margin: 0; }
+        .template-title { font-weight: 900; margin-right: 30px; color: var(--ink); }
+        .template-id { margin-top: 3px; color: var(--muted); font-size: .78rem; word-break: break-all; }
+        .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+        .tag { background: var(--soft); color: var(--accent-dark); border-radius: 999px; padding: 3px 8px; font-size: .76rem; font-weight: 800; }
+        .template-action { color: var(--muted); font-size: .86rem; margin: 8px 0 0; }
+        .template-contract { margin-top: 8px; font-size: .82rem; color: var(--ink); }
+        .primary {
+            width: 100%;
+            margin-top: 16px;
+            border: 0;
+            border-radius: 10px;
+            background: var(--accent);
+            color: var(--panel);
+            padding: 14px 18px;
+            font: inherit;
+            font-weight: 900;
+            cursor: pointer;
+        }
+        .primary:hover { background: var(--accent-dark); }
+        .primary:disabled { background: var(--muted); cursor: wait; }
+        .status { margin-top: 14px; padding: 12px; border-radius: 9px; font-weight: 800; }
+        .status.loading { background: var(--warn-bg); color: var(--warn-ink); }
+        .status.success { background: var(--soft); color: var(--accent-dark); }
+        .status.error { background: var(--error-bg); color: var(--error-ink); }
+        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+        .metric-card { background: var(--field); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+        .metric-card .value { color: var(--accent-dark); font-size: 1.35rem; font-weight: 900; }
+        .metric-card .label { color: var(--muted); font-size: .82rem; }
+        .result-tabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+        .tab {
+            border: 1px solid var(--line);
+            background: var(--field);
+            color: var(--ink);
+            border-radius: 9px;
+            padding: 8px 12px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+        .tab.active { background: var(--accent); color: var(--panel); border-color: var(--accent); }
+        .result-content { border: 1px solid var(--line); background: var(--field); border-radius: 10px; min-height: 320px; padding: 10px; }
+        iframe { width: 100%; height: 680px; border: 0; border-radius: 8px; background: var(--panel); }
+        pre { max-height: 680px; overflow: auto; margin: 0; white-space: pre-wrap; font-size: .82rem; }
+        .hidden { display: none; }
+        @media (max-width: 900px) {
+            .grid { grid-template-columns: 1fr; }
+            header { display: block; }
+            .row { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>AI 모의고사 생성기</h1>
+                <p class="summary">템플릿을 먼저 선택하고, 선택된 계약에 맞춰 시험 계획과 문항 생성을 검증합니다.</p>
+            </div>
+            <p id="templateCount" class="summary">템플릿 불러오는 중</p>
+        </header>
+
+        <main class="grid">
+            <section class="section">
+                <h2>실전 입력</h2>
+                <label for="subject">과목명</label>
+                <input type="text" id="subject" value="Rust 프로그래밍">
+
+                <label for="source_text">학습 자료</label>
+                <textarea id="source_text">Rust는 소유권(ownership), 빌림(borrowing), 수명(lifetime) 규칙을 통해 가비지 컬렉터 없이 메모리 안전성을 보장하는 시스템 프로그래밍 언어이다. 값은 기본적으로 하나의 소유자를 가지며, 소유자가 스코프를 벗어나면 값은 자동으로 해제된다. move가 발생하면 이전 변수는 더 이상 사용할 수 없고, Clone을 사용하면 명시적으로 깊은 복사를 수행할 수 있다.
+
+불변 참조(&T)는 여러 개 만들 수 있지만, 가변 참조(&mut T)는 같은 시점에 하나만 허용된다. 이 규칙은 데이터 레이스를 컴파일 타임에 차단하기 위한 핵심 장치이다. 슬라이스는 컬렉션의 일부를 참조하는 타입이며, 문자열 슬라이스(&str)는 UTF-8 문자열의 일부를 안전하게 참조한다.
+
+Result<T, E>는 복구 가능한 오류를 표현하고, Option<T>는 값이 있을 수도 없을 수도 있는 상황을 표현한다. match 표현식은 모든 가능한 경우를 처리하도록 강제하므로 누락된 분기를 줄인다. 트레이트(trait)는 공통 동작을 정의하며, 제네릭과 함께 사용하면 타입 안정성을 유지하면서 재사용 가능한 코드를 작성할 수 있다.</textarea>
+
+                <div class="row">
+                    <div>
+                        <label for="total_questions">문항 수</label>
+                        <input type="number" id="total_questions" value="10" min="5" max="100">
+                    </div>
+                    <div>
+                        <label for="time_limit">시간 제한</label>
+                        <input type="number" id="time_limit" value="30" min="10" max="300">
+                    </div>
+                    <div>
+                        <label for="passing_score">합격 기준</label>
+                        <input type="number" id="passing_score" value="70" min="0" max="100">
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div>
+                        <label for="locale">언어</label>
+                        <select id="locale">
+                            <option value="ko" selected>한국어</option>
+                            <option value="en">English</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="category">카테고리</label>
+                        <select id="category">
+                            <option value="korean" selected>일반 한국형</option>
+                            <option value="professional">전문자격</option>
+                            <option value="us">US</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="include_explanations">해설</label>
+                        <select id="include_explanations">
+                            <option value="true" selected>포함</option>
+                            <option value="false">미포함</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button id="generateBtn" class="primary">선택 템플릿으로 모의고사 생성</button>
+                <div id="statusMessage" class="status hidden"></div>
+                <p id="timer" class="summary"></p>
+            </section>
+
+            <section class="section">
+                <h2>템플릿 선택</h2>
+                <div class="template-toolbar" id="templateToolbar"></div>
+                <div id="templateGrid" class="template-grid"></div>
+            </section>
+        </main>
+
+        <section id="metricsSection" class="section hidden" style="margin-top:18px;">
+            <h2>품질 지표</h2>
+            <div id="metricsGrid" class="metrics-grid"></div>
+        </section>
+
+        <section id="resultSection" class="section hidden" style="margin-top:18px;">
+            <h2>생성 결과</h2>
+            <div class="result-tabs">
+                <button class="tab active" data-tab="exam">시험지</button>
+                <button class="tab" data-tab="answers">답안/해설</button>
+                <button class="tab" data-tab="json">JSON 원본</button>
+            </div>
+            <div id="resultContent" class="result-content"></div>
+        </section>
+    </div>
+
+    <script>
+        let examData = null;
+        let templateCatalog = [];
+        let selectedTemplates = new Set(['ko_multiple_choice_5', 'ko_short_answer', 'ko_ordering']);
+        let activeFilter = 'all';
+        let timerInterval = null;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('generateBtn').addEventListener('click', generateExam);
+            document.getElementById('locale').addEventListener('change', renderTemplateCards);
+            document.getElementById('category').addEventListener('change', renderTemplateCards);
+            document.querySelectorAll('.tab').forEach(function(btn) {
+                btn.addEventListener('click', function() { showTab(btn.dataset.tab, btn); });
+            });
+            loadTemplates();
+        });
+
+        async function loadTemplates() {
+            try {
+                const response = await fetch('/api/exam-forge/templates');
+                templateCatalog = await response.json();
+                document.getElementById('templateCount').textContent = '등록 템플릿 ' + templateCatalog.length + '개';
+                renderToolbar();
+                renderTemplateCards();
+            } catch (err) {
+                document.getElementById('templateCount').textContent = '템플릿 API 오류';
+                showStatus('템플릿 목록을 불러오지 못했습니다: ' + err.message, 'error');
+            }
+        }
+
+        function renderToolbar() {
+            const toolbar = document.getElementById('templateToolbar');
+            const filters = [
+                ['all', '전체'],
+                ['single_choice', '객관식'],
+                ['short_text', '단답'],
+                ['rubric_text', '서술'],
+                ['ordered_sequence', '순서'],
+                ['pair_matching', '연결']
+            ];
+            toolbar.replaceChildren();
+            filters.forEach(function(item) {
+                const btn = document.createElement('button');
+                btn.className = 'pill' + (item[0] === activeFilter ? ' active' : '');
+                btn.type = 'button';
+                btn.textContent = item[1];
+                btn.addEventListener('click', function() {
+                    activeFilter = item[0];
+                    renderToolbar();
+                    renderTemplateCards();
+                });
+                toolbar.appendChild(btn);
+            });
+        }
+
+        function renderTemplateCards() {
+            const grid = document.getElementById('templateGrid');
+            grid.replaceChildren();
+            currentCategoryTemplates()
+                .filter(function(t) { return activeFilter === 'all' || t.answer_mode === activeFilter; })
+                .forEach(function(t) { grid.appendChild(buildTemplateCard(t)); });
+            if (!grid.children.length) {
+                const empty = document.createElement('p');
+                empty.className = 'summary';
+                empty.textContent = '선택 조건에 맞는 템플릿이 없습니다.';
+                grid.appendChild(empty);
+            }
+        }
+
+        function buildTemplateCard(template) {
+            const card = document.createElement('label');
+            const isSelected = selectedTemplates.has(template.template_id);
+            card.className = 'template-card' + (isSelected ? ' selected' : '');
+            const check = document.createElement('input');
+            check.type = 'checkbox';
+            check.name = 'template';
+            check.value = template.template_id;
+            check.checked = isSelected;
+            check.addEventListener('change', function() {
+                if (check.checked) selectedTemplates.add(template.template_id);
+                else selectedTemplates.delete(template.template_id);
+                card.classList.toggle('selected', check.checked);
+            });
+            card.appendChild(check);
+            appendText(card, 'div', 'template-title', template.display_name);
+            appendText(card, 'div', 'template-id', template.template_id);
+            const tags = document.createElement('div');
+            tags.className = 'tags';
+            [template.answer_mode, template.render_layout].concat(template.preview_tags || []).forEach(function(tag) {
+                appendText(tags, 'span', 'tag', tag);
+            });
+            card.appendChild(tags);
+            appendText(card, 'p', 'template-action', template.student_action);
+            appendText(card, 'p', 'template-contract', (template.must_have || []).slice(0, 2).join(' · '));
+            return card;
+        }
+
+        function appendText(parent, tag, className, text) {
+            const el = document.createElement(tag);
+            el.className = className;
+            el.textContent = text;
+            parent.appendChild(el);
+        }
+
+        async function generateExam() {
+            const allowed = new Set(currentCategoryTemplates().map(function(t) { return t.template_id; }));
+            const selected = Array.from(selectedTemplates).filter(function(id) { return allowed.has(id); });
+            if (document.getElementById('source_text').value.trim().length < 100) {
+                showStatus('학습 자료는 최소 100자 이상이어야 합니다.', 'error');
+                return;
+            }
+            if (!selected.length) {
+                showStatus('최소 1개 템플릿을 선택하세요.', 'error');
+                return;
+            }
+            const request = buildRequest(selected);
+            const btn = document.getElementById('generateBtn');
+            btn.disabled = true;
+            document.getElementById('metricsSection').classList.add('hidden');
+            document.getElementById('resultSection').classList.add('hidden');
+            showStatus('시험 계획 수립 후 템플릿별 문항을 생성하는 중입니다.', 'loading');
+            startTimer();
+            try {
+                const response = await fetch('/api/exam-forge/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(request)
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.detail || 'HTTP ' + response.status);
+                }
+                examData = await response.json();
+                stopTimer('총 소요 시간');
+                showStatus('생성 완료: ' + examData.questions.length + '문항', 'success');
+                displayMetrics(examData.quality_metrics);
+                document.getElementById('metricsSection').classList.remove('hidden');
+                document.getElementById('resultSection').classList.remove('hidden');
+                showTab('exam', document.querySelector('.tab[data-tab="exam"]'));
+            } catch (err) {
+                stopTimer('중단 시점');
+                showStatus('오류: ' + err.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function buildRequest(questionTypes) {
+            return {
+                source_text: document.getElementById('source_text').value,
+                subject: document.getElementById('subject').value,
+                exam_config: {
+                    total_questions: parseInt(document.getElementById('total_questions').value, 10),
+                    time_limit_minutes: parseInt(document.getElementById('time_limit').value, 10),
+                    locale: document.getElementById('locale').value,
+                    category: document.getElementById('category').value,
+                    question_types: questionTypes,
+                    passing_score: parseFloat(document.getElementById('passing_score').value),
+                    include_explanations: document.getElementById('include_explanations').value === 'true',
+                    difficulty_distribution: {1: 0.15, 2: 0.25, 3: 0.35, 4: 0.20, 5: 0.05}
+                }
+            };
+        }
+
+        function currentCategoryTemplates() {
+            const locale = document.getElementById('locale').value;
+            const category = document.getElementById('category').value;
+            return templateCatalog.filter(function(t) { return t.locale === locale && t.category === category; });
+        }
+
+        function displayMetrics(metrics) {
+            const grid = document.getElementById('metricsGrid');
+            const items = [
+                ['정답 정확률', pct(metrics.answer_accuracy_rate)],
+                ['중복 점수', pct(metrics.dedup_score)],
+                ['커버리지', pct(metrics.coverage_score)],
+                ['오답 그럴듯함', pct(metrics.distractor_plausibility_score)],
+                ['길이 분산', pct(metrics.length_variance_ratio)],
+                ['재시도', metrics.retry_count],
+                ['생성 시간', metrics.generation_time_sec.toFixed(1) + '초']
+            ];
+            grid.replaceChildren();
+            items.forEach(function(item) {
+                const card = document.createElement('div');
+                card.className = 'metric-card';
+                appendText(card, 'div', 'value', item[1]);
+                appendText(card, 'div', 'label', item[0]);
+                grid.appendChild(card);
+            });
+        }
+
+        function showTab(tab, button) {
+            document.querySelectorAll('.tab').forEach(function(btn) { btn.classList.remove('active'); });
+            if (button) button.classList.add('active');
+            const content = document.getElementById('resultContent');
+            content.replaceChildren();
+            if (tab === 'exam' && examData && examData.exam_html) appendFrame(content, examData.exam_html);
+            else if (tab === 'answers' && examData && examData.answers_html) appendFrame(content, examData.answers_html);
+            else if (tab === 'json' && examData) {
+                const pre = document.createElement('pre');
+                pre.textContent = JSON.stringify(examData, null, 2);
+                content.appendChild(pre);
+            }
+        }
+
+        function appendFrame(parent, html) {
+            const iframe = document.createElement('iframe');
+            iframe.srcdoc = html;
+            parent.appendChild(iframe);
+        }
+
+        function showStatus(message, type) {
+            const status = document.getElementById('statusMessage');
+            status.className = 'status ' + type;
+            status.textContent = message;
+        }
+
+        function startTimer() {
+            const started = Date.now();
+            timerInterval = setInterval(function() {
+                document.getElementById('timer').textContent = '경과 시간: ' + ((Date.now() - started) / 1000).toFixed(1) + '초';
+            }, 100);
+        }
+
+        function stopTimer(label) {
+            clearInterval(timerInterval);
+            const text = document.getElementById('timer').textContent.replace('경과 시간', label);
+            document.getElementById('timer').textContent = text;
+        }
+
+        function pct(value) {
+            return (Number(value || 0) * 100).toFixed(1) + '%';
+        }
+    </script>
+</body>
+</html>

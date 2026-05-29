@@ -1,0 +1,1 @@
+"""US exam type templates."""

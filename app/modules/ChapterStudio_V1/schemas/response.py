@@ -38,6 +38,12 @@ class AssignmentSchema(BaseModel):
 
     chapter_id: str = Field(min_length=1)
     content: str = Field(min_length=1)
+    # 과제 난이도 (기본값 "상" — 레거시 응답 하위 호환)
+    difficulty_level: str = Field(default="상")
+    # 과제가 테스트하는 핵심 개념 목록
+    target_concepts: list[str] = Field(default_factory=list)
+    # 사용자 약점 보강 요소 목록
+    weakness_focus: list[str] = Field(default_factory=list)
 
 
 class VoiceScriptSchema(BaseModel):

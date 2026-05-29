@@ -18,7 +18,7 @@ EXPECTED_TABLES = {
     },
     "quiz": {"id", "chapter_id", "question", "choices", "answer_idx", "explanation", "depth", "created_at"},
     "note": {"id", "chapter_id", "html", "created_at"},
-    "assignment": {"id", "chapter_id", "prompt", "criteria", "expected_minutes", "created_at"},
+    "assignment": {"id", "chapter_id", "prompt", "criteria", "expected_minutes", "created_at", "target_concepts", "weakness_focus", "difficulty_level"},
     "chapter_audio": {"id", "chapter_id", "merged_audio_url", "duration_sec", "created_at"},
     "voice_script_queue": {"id", "voice_script_id", "status", "enqueued_at", "completed_at"},
 }

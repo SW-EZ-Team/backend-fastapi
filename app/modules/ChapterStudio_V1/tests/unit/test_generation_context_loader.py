@@ -4,7 +4,12 @@ from collections.abc import Mapping
 
 import pytest
 
-from app.modules.ChapterStudio_V1.db.generation_context_loader import GENERATION_CONTEXT_SQL, load_generation_context, row_to_generation_context
+from app.modules.ChapterStudio_V1.db.generation_context_loader import (
+    GENERATION_CONTEXT_SQL,
+    generation_context_sql,
+    load_generation_context,
+    row_to_generation_context,
+)
 from app.modules.ChapterStudio_V1.common.errors import ConversionError, StorageError
 
 
@@ -25,6 +30,14 @@ def test_generation_context_sql_uses_parameterized_lesson_id() -> None:
     assert "{lesson_id}" not in GENERATION_CONTEXT_SQL
 
 
+def test_generation_context_sql_uses_configured_schema() -> None:
+    sql = generation_context_sql("custom_schema")
+
+    assert "FROM custom_schema.curriculum_unit cu" in sql
+    assert "JOIN custom_schema.curriculum_plan cp" in sql
+    assert "LEFT JOIN custom_schema.lesson_generation_status lgs" in sql
+
+
 @pytest.mark.asyncio
 async def test_load_generation_context_reads_db_snapshot() -> None:
     conn = FakeConnection(_row())
@@ -34,6 +47,16 @@ async def test_load_generation_context_reads_db_snapshot() -> None:
     assert context.lesson_id == "lesson-1"
     assert context.template == "statistics_inference"
     assert context.to_generation_input().teacher == "fox"
+
+
+@pytest.mark.asyncio
+async def test_load_generation_context_uses_database_schema_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    conn = FakeConnection(_row())
+    monkeypatch.setenv("DATABASE_SCHEMA", "custom_schema")
+
+    await load_generation_context(conn, "lesson-1")
+
+    assert "FROM custom_schema.curriculum_unit cu" in conn.query
 
 
 @pytest.mark.asyncio

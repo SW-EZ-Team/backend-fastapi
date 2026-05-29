@@ -1,0 +1,24 @@
+{
+  "request_id": "spring-req-20260521-001",
+  "correlation_id": "corr-chapter-studio-20260521",
+  "idempotency_key": "idem-python-list-comp-lesson-001",
+  "module": "chapter_studio_v1",
+  "action": "curriculum_preview",
+  "payload": {
+    "topic": "Python 리스트 컴프리헨션",
+    "source_mode": "topic",
+    "duration_days": 30,
+    "depth": "normal",
+    "teacher": "owl",
+    "tone": 50,
+    "pace": 50,
+    "tutor_depth": 60,
+    "socratic": 70,
+    "audience_level": "프로그래밍 입문자",
+    "learning_goal": "리스트 컴프리헨션의 문법과 활용법을 완전히 이해한다",
+    "weak_points": "for 루프와 조건식 조합이 헷갈림",
+    "chapter_title": "리스트 컴프리헨션 마스터하기",
+    "chapter_brief": "반복문을 한 줄로 압축하는 파이썬의 핵심 문법"
+  },
+  "run_inline": false
+}

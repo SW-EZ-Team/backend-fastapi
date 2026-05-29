@@ -33,8 +33,31 @@ def _required_value(key: str) -> str:
     return value
 
 
+def _float_value(key: str, default: str, min_value: float, max_value: float) -> float:
+    """실수 환경값을 공통 범위 검증으로 읽는다."""
+    raw_value = _optional_value(key) or default
+    try:
+        value = float(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(f"{key}는 숫자여야 한다.") from exc
+    if value < min_value or value > max_value:
+        raise RuntimeError(f"{key}는 {min_value:g}~{max_value:g} 범위여야 한다.")
+    return value
+
+
+def _int_value(key: str, default: str, min_value: int, max_value: int) -> int:
+    """정수 환경값을 공통 범위 검증으로 읽는다."""
+    raw_value = _optional_value(key) or default
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(f"{key}는 정수여야 한다.") from exc
+    if value < min_value or value > max_value:
+        raise RuntimeError(f"{key}는 {min_value}~{max_value} 범위여야 한다.")
+    return value
+
+
 def database_url() -> str:
-    """PostgreSQL 접속 문자열을 반환한다."""
     value = _required_value("DATABASE_URL")
     return value.replace("postgresql+asyncpg://", "postgresql://", 1)
 
@@ -48,76 +71,100 @@ def database_schema() -> str:
 
 
 def anthropic_api_key() -> str | None:
-    """Claude Planner 커넥터 API 키를 반환한다."""
     return _optional_value("ANTHROPIC_API_KEY")
 
 
+def claude_sonnet_api_key() -> str | None:
+    return _optional_value("CLAUDE_SONNET_API_KEY") or anthropic_api_key()
+
+
+def claude_sonnet_model() -> str:
+    return _optional_value("CLAUDE_SONNET_MODEL") or "claude-sonnet-4-5-20250929"
+
+
+def claude_sonnet_timeout_sec() -> float:
+    return _float_value("CLAUDE_SONNET_TIMEOUT_SEC", "300", 30, 1200)
+
+
+def claude_sonnet_max_concurrency() -> int:
+    return _int_value("CLAUDE_SONNET_MAX_CONCURRENCY", "4", 1, 8)
+
+
+def gemini_api_key() -> str | None:
+    return _optional_value("GEMINI_API_KEY")
+
+
 def modal_token_id() -> str | None:
-    """Modal 인증 토큰 ID를 반환한다."""
     return _optional_value("MODAL_TOKEN_ID")
 
 
 def modal_token_secret() -> str | None:
-    """Modal 인증 토큰 secret을 반환한다."""
     return _optional_value("MODAL_TOKEN_SECRET")
 
 
 def active_text_model() -> str:
-    """텍스트 생성 커넥터 이름을 반환한다."""
     return _optional_value("ACTIVE_TEXT_MODEL") or _optional_value("AI_MODEL") or "qwen27b_modal"
 
 
 def active_planner_model() -> str:
-    """Planner 커넥터 이름을 반환한다."""
     return _optional_value("ACTIVE_PLANNER_MODEL") or "opus46"
 
 
 def active_tts_model() -> str:
-    """TTS 커넥터 이름을 반환한다."""
     return _optional_value("ACTIVE_TTS_MODEL") or "tts_v1"
 
 
 def tts_endpoint() -> str | None:
-    """TTS V1 내부 엔드포인트를 반환한다."""
     return _optional_value("TTS_ENDPOINT") or _optional_value("TTS_V1_ENDPOINT")
 
 
 def tts_ref_audio_path() -> Path | None:
-    """WAV 응답형 TTS 엔드포인트에 보낼 기준 음성 경로를 반환한다."""
     value = _optional_value("TTS_REF_AUDIO_PATH")
     return Path(value).expanduser() if value is not None else None
 
 
 def tts_ref_text() -> str | None:
-    """기준 음성의 발화 텍스트를 반환한다."""
     return _optional_value("TTS_REF_TEXT")
 
 
 def tts_output_dir() -> Path:
-    """TTS WAV 응답을 저장할 로컬 출력 폴더를 반환한다."""
     value = _optional_value("TTS_OUTPUT_DIR") or "artifacts/tts_audio"
     return Path(value).expanduser()
 
 
 def tts_timeout_sec() -> float:
-    """장문 과외 대본 합성을 위한 TTS 호출 제한 시간을 반환한다."""
-    raw_value = _optional_value("TTS_TIMEOUT_SEC") or "300"
-    try:
-        value = float(raw_value)
-    except ValueError as exc:
-        raise RuntimeError("TTS_TIMEOUT_SEC는 숫자여야 한다.") from exc
-    if value < 30 or value > 1200:
-        raise RuntimeError("TTS_TIMEOUT_SEC는 30~1200초여야 한다.")
-    return value
+    return _float_value("TTS_TIMEOUT_SEC", "300", 30, 1200)
 
 
 def qwen_app_name() -> str:
-    """Modal에 배포된 Qwen vLLM 앱 이름을 반환한다."""
     return _optional_value("QWEN_APP_NAME") or "chapterstudio-qwen27b"
 
 
+def gemini_cli_model() -> str:
+    return _optional_value("GEMINI_CLI_MODEL") or "gemini-2.5-pro"
+
+
+def gemini_cli_timeout_sec() -> int:
+    return _int_value("GEMINI_CLI_TIMEOUT_SEC", "240", 30, 600)
+
+
+def gemini_cli_max_concurrency() -> int:
+    return _int_value("GEMINI_CLI_MAX_CONCURRENCY", "1", 1, 4)
+
+
+def text_fallback_connector() -> str:
+    return _optional_value("TEXT_FALLBACK_CONNECTOR") or "claude_sonnet"
+
+
+def text_fallback_after_failures() -> int:
+    return _int_value("TEXT_FALLBACK_AFTER_FAILURES", "3", 1, 10)
+
+
+def text_primary_attempt_timeout_sec() -> float:
+    return _float_value("TEXT_PRIMARY_ATTEMPT_TIMEOUT_SEC", "180", 30, 1200)
+
+
 def codex_cli_model() -> str:
-    """로컬 검증용 Codex CLI 모델 이름을 반환한다."""
     return _optional_value("CODEX_CLI_MODEL") or "gpt-5.4"
 
 
@@ -130,19 +177,10 @@ def codex_cli_reasoning_effort() -> str:
 
 
 def codex_cli_timeout_sec() -> int:
-    """Codex CLI 단일 실행 제한 시간을 초 단위로 반환한다."""
-    raw_value = _optional_value("CODEX_CLI_TIMEOUT_SEC") or "180"
-    try:
-        value = int(raw_value)
-    except ValueError as exc:
-        raise RuntimeError("CODEX_CLI_TIMEOUT_SEC는 정수여야 한다.") from exc
-    if value < 30 or value > 600:
-        raise RuntimeError("CODEX_CLI_TIMEOUT_SEC는 30~600초여야 한다.")
-    return value
+    return _int_value("CODEX_CLI_TIMEOUT_SEC", "180", 30, 600)
 
 
 def log_level() -> str:
-    """loguru 출력 레벨을 반환한다."""
     return (_optional_value("LOG_LEVEL") or "INFO").upper()
 
 

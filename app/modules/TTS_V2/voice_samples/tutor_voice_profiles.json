@@ -1,0 +1,35 @@
+{
+  "default_profile_id": "tutor_1",
+  "profiles": [
+    {
+      "profile_id": "tutor_1",
+      "display_name": "고정 튜터 1",
+      "tone": "차분한 존댓말 과외 톤",
+      "ref_audio_path": "tutor_1_ref.wav",
+      "ref_text_path": "tutor_1_ref_transcript.txt",
+      "source_path": "/Users/kimtaekyu/Downloads/SW/Sp1.m4a",
+      "source_sha256": "d1bb042ee9f349ae70ada2722bd0b494fe5ce00668e0393190709dbde6925365",
+      "ref_audio_sha256": "6f767560081fd84aa872d3e75a92954e5d7226c3273229c857771e5dafdc5ec6",
+      "duration_sec": 12.970667,
+      "sample_rate": 24000,
+      "channels": 1,
+      "language": "ko",
+      "notes": "Sp1.m4a는 기존 ref_6.m4a와 동일 파일이지만 기존 ref_6_transcript.txt가 실제 전사와 불일치해 새 transcript를 별도 고정한다."
+    },
+    {
+      "profile_id": "tutor_2",
+      "display_name": "고정 튜터 2",
+      "tone": "빠르고 강한 주의 환기 톤",
+      "ref_audio_path": "tutor_2_ref.wav",
+      "ref_text_path": "tutor_2_ref_transcript.txt",
+      "source_path": "/Users/kimtaekyu/Downloads/SW/Sp2.mp4",
+      "source_sha256": "4c25f31960224ad73d088477fb55cc8efc80b45ba67172aa207e956249bdef54",
+      "ref_audio_sha256": "69a61316f8892323c326ce8d8a4be3ea97ffdd68f53e0c5450d61683eddf2ec7",
+      "duration_sec": 15.210667,
+      "sample_rate": 24000,
+      "channels": 1,
+      "language": "ko",
+      "notes": "Sp2.mp4에서 오디오만 추출했다. 전사는 Whisper Turbo 결과를 주 기준으로 삼고 Qwen3-ASR 결과를 교차 확인해 명백한 오인식만 정제했다."
+    }
+  ]
+}

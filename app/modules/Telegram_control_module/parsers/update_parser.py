@@ -21,12 +21,15 @@ def extract_telegram_message_summary(update: Mapping[str, object]) -> TelegramMe
     if chat_id is None:
         return None
 
+    file_id, file_name = _extract_file_id_and_name(message)
     return TelegramMessageSummary(
         telegram_chat_id=chat_id,
         telegram_msg_id=_to_telegram_msg_id(message.get("message_id")),
         telegram_username=_to_str(chat.get("username")),
         content=_extract_content(message),
         message_type=_extract_message_type(message),
+        file_id=file_id,
+        file_name=file_name,
     )
 
 
@@ -97,3 +100,25 @@ def _extract_message_type(message: Mapping[str, object]) -> str | None:
     if _to_str(message.get("text")) is not None:
         return "text"
     return None
+
+
+def _extract_file_id_and_name(message: Mapping[str, object]) -> tuple[str | None, str | None]:
+    """document 또는 photo에서 file_id와 파일명을 추출한다.
+
+    document는 file_name 필드를 포함할 수 있지만 photo는 없으므로 None으로 둔다.
+    photo는 배열의 마지막 요소가 가장 큰 해상도다.
+    """
+    doc = _as_mapping(message.get("document"))
+    if doc is not None:
+        file_id = _to_str(doc.get("file_id"))
+        file_name = _to_str(doc.get("file_name"))
+        return file_id, file_name
+
+    photos = message.get("photo")
+    if isinstance(photos, list) and photos:
+        largest = _as_mapping(photos[-1])
+        if largest is not None:
+            file_id = _to_str(largest.get("file_id"))
+            return file_id, None
+
+    return None, None

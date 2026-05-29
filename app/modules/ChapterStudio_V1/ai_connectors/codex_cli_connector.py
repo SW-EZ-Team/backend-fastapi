@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from asyncio.subprocess import PIPE
+from asyncio.subprocess import DEVNULL, PIPE
 from typing import TypeAlias, cast
 
 from app.modules.ChapterStudio_V1.ai_connectors.errors import ConnectorError, TimeoutError
@@ -39,7 +39,7 @@ class CodexCLIConnector:
         return await asyncio.gather(*[self.generate(req) for req in reqs])
 
     def supports(self, feature: str) -> bool:
-        return feature in {"codex_oauth", "local_dev", "output_schema"}
+        return feature in {"codex_oauth", "local_dev", "output_schema", "voice_quality_repair"}
 
     def _build_command(self, req: ChapterAIRequest) -> list[str]:
         command = [
@@ -49,6 +49,8 @@ class CodexCLIConnector:
             "--sandbox",
             "read-only",
             "--ephemeral",
+            "--ignore-user-config",
+            "--ignore-rules",
             "--skip-git-repo-check",
             "-c",
             f'model_reasoning_effort="{codex_cli_reasoning_effort()}"',
@@ -65,9 +67,11 @@ class CodexCLIConnector:
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
+                stdin=DEVNULL,
                 stdout=PIPE,
                 stderr=PIPE,
             )
+            # stdin=DEVNULL: CLI가 대화형 입력을 기다리지 않도록 막아 hang을 방지한다
         except OSError as exc:
             raise ConnectorError(f"codex_cli 실행 실패: {exc}") from exc
         return await _communicate(process, codex_cli_timeout_sec())
