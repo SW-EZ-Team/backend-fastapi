@@ -21,9 +21,16 @@ def slides_prompts(brief: str, outline: str, slide_count: int, template_key: str
         + "최상위 키는 slides 하나만 쓴다. "
         f"slides는 정확히 {slide_count}개이고 slide_idx는 0..{slide_count - 1} 완전집합이다. "
         "slides[i] 키는 정확히 slide_idx, title, category, narration, visual, checkpoint 여섯 개다. "
+        "title(제목)은 해당 슬라이드 내용을 구체적으로 요약한 6~16자 명사구다. "
+        "챕터명+번호 형태 금지: '수직선과 정수의 위치 3'처럼 쓰지 말고 '음수끼리의 크기 비교'처럼 핵심 개념을 쓴다. "
+        "few-shot title: bad='수직선과 정수의 위치 3', good='음수끼리의 크기 비교'. "
         "html, css, markdown, mermaid, script, 외부 URL을 절대 생성하지 않는다. "
         "category는 text, diagram, math, chart 중 하나만 쓴다. "
         "narration은 화면 자막용 1~2문장, 45~120자이며 긴 문단을 금지한다. "
+        "여러 슬라이드의 narration·음성대본이 같은 인사말/도입부로 시작하면 실패다. "
+        "'안녕하세요. 오늘 우리가...왜 하필...' 같은 정형 인트로 반복 금지. "
+        "각 슬라이드는 직전 내용에서 자연스럽게 이어지는 서로 다른 도입으로 시작한다. "
+        "인사말은 첫 슬라이드에서만 허용한다. "
         "visual은 {type, data} 객체다. type은 number_line, comparison, step_flow, fraction_bar, concept_map, example_box 중 하나다. "
         "visual.type 선택 가이드: 수의 위치·대소·수직선·절댓값은 number_line, 계산 절차·단계·유도는 step_flow, 두 개념·방법 비교와 오개념 대조는 comparison, 분수·비율은 fraction_bar, 구체 예제+풀이는 example_box, 개념 간 관계 개요는 concept_map이다. "
         "concept_map은 남발 금지이며 단원당 1~2개만 쓴다. 같은 visual.type을 연속 사용하지 말고 한 강의에서 최소 3종 이상을 분포시킨다. "
@@ -122,6 +129,7 @@ def voice_prompt(
     분량(900~1600자)과 4단 구조를 명시해 모델이 충분한 길이를 스스로 지키게 한다.
     """
     personalization = _personalization(weak_points, audience_level, tone, pace, tutor_depth, socratic, learning_goal, weak_rule="음성대본은 약점 개념을 더 천천히·예시 많이 설명하고 오개념을 짚는다.", use_formal_speech=use_formal_speech, use_emoji=use_emoji, tutor_name=tutor_name, tutor_tagline=tutor_tagline)
+    intro_rule = _voice_intro_rule(slide_idx)
     system = (
         "너는 ChapterStudio_V1의 음성대본 생성기다. "
         + _JSON_RULE
@@ -132,6 +140,7 @@ def voice_prompt(
         "③ 구체적 예시·직관(한 번에 이해되는 사례 2~3문장) ④ 마무리 복습(다음 화면 연결·자가점검 1~2문장). "
         "총 8~12문장, 과외 선생님 자연스러운 존댓말 한 문단으로 완성한다. "
         "화면에 없는 깊은 설명·실수하기 쉬운 지점·바로 해볼 미니연습을 포함한다. "
+        "여러 슬라이드가 같은 인사말/도입부로 시작하면 실패다. "
         "900자 미만의 짧은 대본(한두 문장 나열)은 절대 허용되지 않는다. "
         "HTML 태그·markdown·괄호 지시문을 넣지 않는다.\n"
         f"{personalization}"
@@ -141,11 +150,18 @@ def voice_prompt(
         f"대상 슬라이드: slide_idx={slide_idx} / 제목={slide_title} / 초점={slide_focus}\n"
         f"화면 요약: {slide_summary}\n"
         f"{personalization}\n"
+        f"{intro_rule}\n"
         "위 슬라이드의 음성대본을 900~1600자 범위로 만든다. "
         "도입→핵심설명→구체예시→마무리복습 순서를 지킨다. "
         f"slide_idx는 반드시 {slide_idx}로 고정한다."
     )
     return system, user
+
+
+def _voice_intro_rule(slide_idx: int) -> str:
+    if slide_idx == 0:
+        return "첫 슬라이드이므로 짧은 인사말은 가능하지만, 바로 핵심 상황으로 들어간다."
+    return "첫 슬라이드가 아니므로 인사말과 '안녕하세요. 오늘 우리가...왜 하필...'식 정형 도입을 쓰지 말고 직전 흐름을 이어 시작한다."
 
 
 def _personalization(

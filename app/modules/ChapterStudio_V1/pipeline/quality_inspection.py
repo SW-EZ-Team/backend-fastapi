@@ -7,7 +7,11 @@ _CJK_RE = re.compile(r"[一-鿿぀-ヿ]")
 _TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣]+")
 _SENTENCE_RE = re.compile(r"[^.!?。！？]+[.!?。！？]?")
 _QUESTION_RE = re.compile(r"(?P<token>[가-힣]*(?:까요|나요|을까|ㄹ까|까))(?P<tail>[.\s]|$)")
-_SPELLING_FIXES: dict[str, str] = {"절대값": "절댓값"}
+_SPELLING_FIXES: dict[str, str] = {
+    "절대값": "절댓값",
+    "최대값": "최댓값",
+    "최소값": "최솟값",
+}
 _QUESTION_EXCLUDE_SUFFIXES = ("니까", "으니까")
 
 
@@ -52,6 +56,14 @@ def inspect_text(text: str) -> list[TextIssue]:
     issues.extend(_spelling_issues(text))
     issues.extend(_missing_question_mark_issues(text))
     return issues
+
+
+def apply_spelling_fixes(text: str) -> str:
+    """LLM 교정 여부와 무관하게 확정 표기만 규칙 기반으로 치환한다."""
+    fixed = text
+    for wrong, right in _SPELLING_FIXES.items():
+        fixed = re.sub(re.escape(wrong), right, fixed)
+    return fixed
 
 
 def inspect_lesson(
@@ -173,4 +185,12 @@ def _prefix_ratio(left: str, right: str) -> float:
     return same / max(1, limit)
 
 
-__all__ = ["DuplicateIntroGroup", "QualityInspectionReport", "TextIssue", "TextIssueBucket", "inspect_lesson", "inspect_text"]
+__all__ = [
+    "DuplicateIntroGroup",
+    "QualityInspectionReport",
+    "TextIssue",
+    "TextIssueBucket",
+    "apply_spelling_fixes",
+    "inspect_lesson",
+    "inspect_text",
+]

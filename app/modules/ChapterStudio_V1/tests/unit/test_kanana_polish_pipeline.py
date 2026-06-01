@@ -12,14 +12,17 @@ _SLIDE_COUNT = 10
 
 
 @pytest.mark.anyio
-async def test_kanana_polish_disabled_does_not_call_connector(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_kanana_polish_disabled_applies_deterministic_fix_without_connector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("CHAPTERSTUDIO_CONTENT_VERIFY", "false")
     monkeypatch.setenv("KANANA_POLISH_ENABLED", "0")
     monkeypatch.setattr(kanana_polish.registry, "get_polish_connector", _raise_if_called)
 
     result = await content_verify_node(_state(_payload()))
 
-    assert "절대값" in result["voice_scripts"][0]["script_text"]
+    assert "절댓값" in result["voice_scripts"][0]["script_text"]
+    assert "절댓값" in result["slide_drafts"][0]["narration"]
 
 
 @pytest.mark.anyio
@@ -41,7 +44,25 @@ async def test_kanana_polish_enabled_updates_voice_and_slide_narration(monkeypat
 
 
 @pytest.mark.anyio
-async def test_kanana_polish_failure_keeps_original_text(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_kanana_polish_enabled_reapplies_deterministic_fix_after_connector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CHAPTERSTUDIO_CONTENT_VERIFY", "false")
+    monkeypatch.setenv("KANANA_POLISH_ENABLED", "1")
+    monkeypatch.setattr(kanana_polish.registry, "get_polish_connector", lambda: _RegressingPolishConnector())
+
+    result = await content_verify_node(_state(_payload()))
+
+    assert "절댓값" in result["voice_scripts"][0]["script_text"]
+    assert "절대값" not in result["voice_scripts"][0]["script_text"]
+    assert "절댓값" in result["slide_drafts"][0]["narration"]
+    assert "절대값" not in result["slide_drafts"][0]["narration"]
+
+
+@pytest.mark.anyio
+async def test_kanana_polish_failure_keeps_original_text_except_deterministic_fix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("CHAPTERSTUDIO_CONTENT_VERIFY", "false")
     monkeypatch.setenv("KANANA_POLISH_ENABLED", "1")
     monkeypatch.setattr(kanana_polish.registry, "get_polish_connector", lambda: _FailingPolishConnector())
@@ -49,7 +70,7 @@ async def test_kanana_polish_failure_keeps_original_text(monkeypatch: pytest.Mon
     result = await content_verify_node(_state(_payload()))
 
     assert "정수的世界里" in result["voice_scripts"][0]["script_text"]
-    assert "절대값" in result["slide_drafts"][0]["narration"]
+    assert "절댓값" in result["slide_drafts"][0]["narration"]
 
 
 class _FakePolishConnector:
@@ -66,6 +87,11 @@ class _FakePolishConnector:
 class _FailingPolishConnector:
     async def polish(self, text: str, *, tone_hint: str = "") -> str:
         raise RuntimeError("교정 실패")
+
+
+class _RegressingPolishConnector:
+    async def polish(self, text: str, *, tone_hint: str = "") -> str:
+        return text.replace("정수的世界里", "정수의 세계").replace("절댓값", "절대값")
 
 
 def _raise_if_called() -> object:

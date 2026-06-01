@@ -97,6 +97,12 @@ def test_parallel_slide_prompt_requires_structured_visual_spec() -> None:
     assert "최소 3종 이상" in system
     assert "concept_map은 남발 금지이며 단원당 1~2개" in system
     assert "few-shot" in system
+    assert "title(제목)은 해당 슬라이드 내용을 구체적으로 요약한 6~16자 명사구" in system
+    assert "챕터명+번호 형태 금지" in system
+    assert "음수끼리의 크기 비교" in system
+    assert "정형 인트로 반복 금지" in system
+    assert "인사말은 첫 슬라이드에서만" in system
+    assert "안녕하세요. 오늘 우리가...왜 하필" in system
 
 
 def test_single_call_prompt_includes_missing_personalization_fields() -> None:

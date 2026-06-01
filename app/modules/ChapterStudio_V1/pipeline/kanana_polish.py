@@ -7,7 +7,11 @@ from app.modules.ChapterStudio_V1.ai_connectors import registry
 from app.modules.ChapterStudio_V1.common.config import kanana_polish_enabled, kanana_polish_max_concurrency
 from app.modules.ChapterStudio_V1.common.logging import logger
 from app.modules.ChapterStudio_V1.pipeline.payload import GeneratedLessonPayload, GeneratedSlide, GeneratedVoiceScript
-from app.modules.ChapterStudio_V1.pipeline.quality_inspection import QualityInspectionReport, inspect_lesson
+from app.modules.ChapterStudio_V1.pipeline.quality_inspection import (
+    QualityInspectionReport,
+    apply_spelling_fixes,
+    inspect_lesson,
+)
 from app.modules.ChapterStudio_V1.postprocess.visual_renderers import render_visual_slide
 
 
@@ -24,6 +28,7 @@ async def inspect_and_polish_payload(payload: GeneratedLessonPayload, *, tone_hi
         [slide.narration for slide in payload.slides if slide.narration],
     )
     _log_report(report)
+    payload = _apply_deterministic_spelling_payload(payload)
     if not kanana_polish_enabled():
         return payload
     connector = registry.get_polish_connector()
@@ -32,7 +37,8 @@ async def inspect_and_polish_payload(payload: GeneratedLessonPayload, *, tone_hi
         _polish_slides(payload.slides, connector, semaphore, tone_hint),
         _polish_voices(payload.voice_scripts, connector, semaphore, tone_hint),
     )
-    return payload.model_copy(update={"slides": slides, "voice_scripts": voices})
+    polished = payload.model_copy(update={"slides": slides, "voice_scripts": voices})
+    return _apply_deterministic_spelling_payload(polished)
 
 
 async def _polish_slides(
@@ -97,6 +103,34 @@ async def _polish_text(
     except (RuntimeError, TypeError, ValueError, asyncio.TimeoutError) as exc:
         logger.warning("Kanana2 polish pass: {} 교정 실패로 원문 유지: {}", label, exc)
         return text
+
+
+def _apply_deterministic_spelling_payload(payload: GeneratedLessonPayload) -> GeneratedLessonPayload:
+    """Modal 호출 없이 슬라이드 내레이션과 음성대본의 확정 표기를 보정한다."""
+    slides = [_apply_deterministic_spelling_slide(slide) for slide in payload.slides]
+    voices = [_apply_deterministic_spelling_voice(script) for script in payload.voice_scripts]
+    if slides == payload.slides and voices == payload.voice_scripts:
+        return payload
+    return payload.model_copy(update={"slides": slides, "voice_scripts": voices})
+
+
+def _apply_deterministic_spelling_slide(slide: GeneratedSlide) -> GeneratedSlide:
+    if not slide.narration:
+        return slide
+    narration = apply_spelling_fixes(slide.narration)
+    if narration == slide.narration:
+        return slide
+    update = {"narration": narration, "html": _rerender_slide_html(slide, narration)}
+    if slide.focus == slide.narration:
+        update["focus"] = narration
+    return slide.model_copy(update=update)
+
+
+def _apply_deterministic_spelling_voice(script: GeneratedVoiceScript) -> GeneratedVoiceScript:
+    script_text = apply_spelling_fixes(script.script_text)
+    if script_text == script.script_text:
+        return script
+    return script.model_copy(update={"script_text": script_text})
 
 
 def _rerender_slide_html(slide: GeneratedSlide, narration: str) -> str:

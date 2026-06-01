@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from app.modules.ChapterStudio_V1.pipeline.quality_inspection import inspect_lesson, inspect_text
+from app.modules.ChapterStudio_V1.pipeline.quality_inspection import (
+    apply_spelling_fixes,
+    inspect_lesson,
+    inspect_text,
+)
+
+
+def test_apply_spelling_fixes_rewrites_absolute_value_deterministically() -> None:
+    assert apply_spelling_fixes("음수의 절대값이") == "음수의 절댓값이"
 
 
 def test_inspect_text_detects_cjk_spelling_and_missing_question_mark() -> None:
