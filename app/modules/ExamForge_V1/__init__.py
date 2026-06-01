@@ -1,5 +1,9 @@
 """AI 모의고사 생성 모듈."""
 from app.modules.ExamForge_V1.app.routers.exam_forge import router
+from app.modules.ExamForge_V1.app.routers.mock_exam_analysis import (
+    router as mock_exam_analysis_router,
+)
+from app.modules.ExamForge_V1.app.spring_adapter import router as spring_adapter_router
 from app.modules.ExamForge_V1.schemas.request import ExamForgeRequest
 from app.modules.ExamForge_V1.schemas.response import ExamForgeResponse
 
@@ -54,4 +58,11 @@ async def generate_exam_forge(request: ExamForgeRequest) -> ExamForgeResponse:
     return ExamForgeResponse.from_state(attach_answer_key_seal(final_state))
 
 
-__all__ = ["ExamForgeRequest", "ExamForgeResponse", "generate_exam_forge", "router"]
+__all__ = [
+    "ExamForgeRequest",
+    "ExamForgeResponse",
+    "generate_exam_forge",
+    "mock_exam_analysis_router",
+    "router",
+    "spring_adapter_router",
+]

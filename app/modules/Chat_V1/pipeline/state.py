@@ -19,6 +19,12 @@ class ChatState(TypedDict, total=False):
     user_message: str
     system_prompt: str
 
+    # 검증/가드용 메타 (run_chat_pipeline 이 강의 컨텍스트에서 채운다)
+    # slide_count: 실제 슬라이드 수 — format_response 의 슬라이드 인용 상한 검증에 쓴다.
+    # lecture_keywords: 강의 자료 키워드 — 환각 경량 가드의 매칭 대상이다.
+    slide_count: int
+    lecture_keywords: list[str]
+
     # 중간 결과 (generate_answer 노드가 채운다)
     raw_answer: str
 

@@ -33,6 +33,7 @@ def test_state_has_phase2_fields() -> None:
         "weak_points",
         "reference_context_prompt",
         "slide_outline",
+        "lesson_payload",
         "slide_drafts",
         "slides",
         "quiz_set",

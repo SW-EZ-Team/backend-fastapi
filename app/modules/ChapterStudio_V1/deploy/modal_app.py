@@ -68,7 +68,8 @@ def response_schema(slide_count: int = 5) -> dict[str, Any]:
                             "type": "string",
                             "enum": ["기억", "이해", "적용", "함정 교정", "실전 판단", "오해"],
                         },
-                        "explanation": {"type": "string", "minLength": 1, "maxLength": 720},
+                        # Pydantic GeneratedQuiz.explanation(min_length=30)과 정합화한 품질 하한.
+                        "explanation": {"type": "string", "minLength": 30, "maxLength": 720},
                     },
                 },
             },
@@ -123,11 +124,69 @@ def response_schema(slide_count: int = 5) -> dict[str, Any]:
                     "required": ["slide_idx", "script_text"],
                     "properties": {
                         "slide_idx": {"type": "integer", "minimum": 0, "maximum": bounded_count - 1},
-                        "script_text": {"type": "string", "minLength": 1, "maxLength": 2400},
+                        # Pydantic GeneratedVoiceScript.script_text(min_length=40)과 정합화한 품질 하한.
+                        # 본격 목표(900~1600자)는 self-check + targeted-repair가 채운다.
+                        "script_text": {"type": "string", "minLength": 40, "maxLength": 2400},
                     },
                 },
             },
         },
+    }
+
+
+def slides_schema(slide_count: int = 5) -> dict[str, Any]:
+    """슬라이드 배열만 생성하는 작은 guided JSON 스키마다(컴포넌트 병렬 생성용).
+
+    큰 lesson 스키마에서 xgrammar가 뒤쪽 배열을 적게 강제하던 문제를 피하려고, slides만
+    단일 목적으로 떼어 정확히 slide_count개를 강제한다. 각 item 구조는 lesson 스키마의
+    slide 정의를 그대로 재사용해 계약을 일치시킨다.
+    """
+    bounded_count = max(5, min(15, slide_count))
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["slides"],
+        "properties": {"slides": response_schema(bounded_count)["properties"]["slides"]},
+    }
+
+
+def quizzes_schema(slide_count: int = 5) -> dict[str, Any]:
+    """퀴즈 배열만 생성하는 작은 guided JSON 스키마다(컴포넌트 병렬 생성용).
+
+    정확히 slide_count개를 강제하며, item 구조는 lesson 스키마의 quiz 정의를 재사용한다.
+    """
+    bounded_count = max(5, min(15, slide_count))
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["quizzes"],
+        "properties": {"quizzes": response_schema(bounded_count)["properties"]["quizzes"]},
+    }
+
+
+def note_schema(slide_count: int = 5) -> dict[str, Any]:
+    """note_blocks(정확히 4개/각 bullets 3개)만 생성하는 작은 guided JSON 스키마다."""
+    bounded_count = max(5, min(15, slide_count))
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["note_blocks"],
+        "properties": {"note_blocks": response_schema(bounded_count)["properties"]["note_blocks"]},
+    }
+
+
+def assignment_schema(slide_count: int = 5) -> dict[str, Any]:
+    """assignment 객체만 생성하는 작은 guided JSON 스키마다(steps/rubric은 반드시 배열).
+
+    Qwen이 큰 스키마에서 rubric을 dict로 내던 실측 오류를 작은 단일목적 스키마로 강제해
+    방지한다. steps/rubric은 lesson 스키마와 동일하게 string 배열로 고정한다.
+    """
+    bounded_count = max(5, min(15, slide_count))
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["assignment"],
+        "properties": {"assignment": response_schema(bounded_count)["properties"]["assignment"]},
     }
 
 
@@ -174,6 +233,28 @@ def supporting_materials_schema(slide_count: int = 15) -> dict[str, Any]:
     }
 
 
+# schema_kind → 작은 단일목적 guided JSON 스키마 빌더 매핑.
+# 컴포넌트 병렬 생성 경로(slides/quizzes/note/assignment)는 작은 스키마를 써서 xgrammar가
+# 배열 개수·타입을 확실히 강제하게 한다. lesson/supporting_materials/voice 계열은 기존 유지.
+_SCHEMA_BUILDERS: dict[str, Any] = {
+    "slides": slides_schema,
+    "quizzes": quizzes_schema,
+    "note": note_schema,
+    "assignment": assignment_schema,
+    "voice_script": voice_script_schema,
+    "voice_segment": voice_segment_schema,
+    "supporting_materials": supporting_materials_schema,
+}
+
+
+def _select_guided_schema(schema_kind: str, slide_count: int) -> dict[str, Any]:
+    """schema_kind에 맞는 guided JSON 스키마를 고른다(미지정/lesson은 전체 lesson 스키마)."""
+    builder = _SCHEMA_BUILDERS.get(schema_kind)
+    if builder is None:
+        return response_schema(slide_count)
+    return builder(slide_count)
+
+
 RESPONSE_SCHEMA: dict[str, Any] = response_schema()
 
 app = modal.App(APP_NAME)
@@ -214,7 +295,9 @@ image = (
         "/root/.cache/vllm": vllm_cache,
     },
     timeout=30 * MINUTES,
-    scaledown_window=2 * MINUTES,
+    # 서버리스 idle 비용 최소화 — 작업 완료 후(또는 커넥터 shutdown() 후) 빠르게 컨테이너를
+    # 회수하도록 짧게 둔다. 환경변수로 조절 가능(기본 30초).
+    scaledown_window=int(os.environ.get("CHAPTERSTUDIO_MODAL_SCALEDOWN_SEC", "30")),
 )
 @modal.concurrent(max_inputs=8)
 class Qwen27BServer:
@@ -306,14 +389,7 @@ class Qwen27BServer:
         raise TimeoutError("vLLM health check timed out")
 
     def _chat(self, system: str, user: str, max_tokens: int, temperature: float, seed: int, slide_count: int, schema_kind: str) -> dict[str, Any]:
-        if schema_kind == "voice_script":
-            guided_schema = voice_script_schema(slide_count)
-        elif schema_kind == "voice_segment":
-            guided_schema = voice_segment_schema(slide_count)
-        elif schema_kind == "supporting_materials":
-            guided_schema = supporting_materials_schema(slide_count)
-        else:
-            guided_schema = response_schema(slide_count)
+        guided_schema = _select_guided_schema(schema_kind, slide_count)
         payload: dict[str, Any] = {
             "model": MODEL_ALIAS,
             "messages": [

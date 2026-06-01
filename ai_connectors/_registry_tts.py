@@ -12,6 +12,7 @@ from typing import Callable
 
 from .base import TTSConnector
 from .errors import ModelNotFoundError
+from .tts.gemini_tts_connector import GeminiTTSConnector
 from .tts.mlx_audio_qwen3_tts_connector import MLXAudioQwen3TTSConnector
 from .tts.qwen3_tts_modal_connector import Qwen3TTSModalConnector
 
@@ -19,6 +20,7 @@ _LOG = logging.getLogger(__name__)
 
 # TTS 커넥터 팩토리 맵 (TTSConnector 구현체)
 TTS_CONNECTORS: dict[str, Callable[[], TTSConnector]] = {
+    "gemini-tts": lambda: GeminiTTSConnector(),
     "mlx-audio-qwen3-tts": lambda: MLXAudioQwen3TTSConnector(),
     "qwen3-tts-modal": lambda: Qwen3TTSModalConnector(),
 }

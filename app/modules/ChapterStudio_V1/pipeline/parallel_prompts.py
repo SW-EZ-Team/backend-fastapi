@@ -1,0 +1,199 @@
+"""컴포넌트 병렬 생성용 프롬프트 빌더와 응답 파서."""
+from __future__ import annotations
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from app.modules.ChapterStudio_V1.ai_connectors.schemas import ChapterAIRequest
+from app.modules.ChapterStudio_V1.pipeline.normalize import normalize_assignment_value
+from app.modules.ChapterStudio_V1.pipeline.parallel_prompt_text import (
+    assignment_prompts,
+    clean_raw_voice_text as _clean_raw_voice_text,
+    note_prompts,
+    quizzes_prompts,
+    slides_prompts,
+    voice_prompt,
+)
+from app.modules.ChapterStudio_V1.pipeline.parallel_inputs import PersonalizationArgs
+from app.modules.ChapterStudio_V1.pipeline.payload import (
+    GeneratedAssignment,
+    GeneratedNoteBlock,
+    GeneratedQuiz,
+    GeneratedSlide,
+    GeneratedVoiceScript,
+)
+from common.llm_output import extract_json_block, loads_lenient, strip_thinking
+
+# 컴포넌트별 토큰 상한 — 작은 단일목적 응답에 맞춰 여유 있게 잡는다.
+_SLIDES_MAX_TOKENS = 16000
+_QUIZZES_MAX_TOKENS = 9000
+_NOTE_MAX_TOKENS = 4000
+_ASSIGNMENT_MAX_TOKENS = 4000
+_VOICE_MAX_TOKENS = 4000
+
+
+class _SlidesResult(BaseModel):
+    """slides 스키마 응답 — slides 배열만 담는다."""
+
+    model_config = ConfigDict(strict=True)
+
+    slides: list[GeneratedSlide] = Field(min_length=1, max_length=15)
+
+
+class _QuizzesResult(BaseModel):
+    """quizzes 스키마 응답 — quizzes 배열만 담는다."""
+
+    model_config = ConfigDict(strict=True)
+
+    quizzes: list[GeneratedQuiz] = Field(max_length=15)
+
+
+class _NoteResult(BaseModel):
+    """note 스키마 응답 — note_blocks 배열만 담는다."""
+
+    model_config = ConfigDict(strict=True)
+
+    note_blocks: list[GeneratedNoteBlock] = Field(min_length=3, max_length=5)
+
+
+class _AssignmentResult(BaseModel):
+    """assignment 스키마 응답 — assignment 객체만 담는다."""
+
+    model_config = ConfigDict(strict=True)
+
+    assignment: GeneratedAssignment
+
+
+def build_slides_request(
+    brief: str, outline: str, slide_count: int, template_key: str, personalization: PersonalizationArgs
+) -> ChapterAIRequest:
+    """슬라이드 배열만 생성하는 요청을 만든다(schema_kind=slides)."""
+    system, user = slides_prompts(brief, outline, slide_count, template_key, **_prompt_kwargs(personalization))
+    return _request(system, user, _SLIDES_MAX_TOKENS, 0.35, slide_count, "slides", template_key)
+
+
+def build_quizzes_request(
+    brief: str, outline: str, slide_count: int, template_key: str, personalization: PersonalizationArgs
+) -> ChapterAIRequest:
+    """퀴즈 배열만 생성하는 요청을 만든다(schema_kind=quizzes)."""
+    system, user = quizzes_prompts(brief, outline, slide_count, **_prompt_kwargs(personalization))
+    return _request(system, user, _QUIZZES_MAX_TOKENS, 0.3, slide_count, "quizzes", template_key)
+
+
+def build_note_request(
+    brief: str, outline: str, slide_count: int, template_key: str, personalization: PersonalizationArgs
+) -> ChapterAIRequest:
+    """핵심 노트(note_blocks)만 생성하는 요청을 만든다(schema_kind=note)."""
+    system, user = note_prompts(brief, outline, **_prompt_kwargs(personalization))
+    return _request(system, user, _NOTE_MAX_TOKENS, 0.3, slide_count, "note", template_key)
+
+
+def build_assignment_request(
+    brief: str, outline: str, slide_count: int, template_key: str, personalization: PersonalizationArgs
+) -> ChapterAIRequest:
+    """과제(assignment)만 생성하는 요청을 만든다(schema_kind=assignment)."""
+    system, user = assignment_prompts(brief, outline, **_prompt_kwargs(personalization))
+    return _request(system, user, _ASSIGNMENT_MAX_TOKENS, 0.3, slide_count, "assignment", template_key)
+
+
+def build_voice_request(
+    brief: str,
+    slide_title: str,
+    slide_focus: str,
+    slide_summary: str,
+    slide_idx: int,
+    slide_count: int,
+    personalization: PersonalizationArgs,
+) -> ChapterAIRequest:
+    """슬라이드 1개의 음성대본만 생성하는 요청을 만든다(schema_kind=voice_script)."""
+    system, user = voice_prompt(brief, slide_title, slide_focus, slide_summary, slide_idx, **_prompt_kwargs(personalization))
+    return ChapterAIRequest(
+        system=system,
+        user=user,
+        max_tokens=_VOICE_MAX_TOKENS,
+        temperature=0.3,
+        extra={"schema": "voice_script", "slide_count": slide_count, "slide_idx": slide_idx},
+    )
+
+
+def parse_slides(text: str) -> list[GeneratedSlide]:
+    """slides 응답에서 slides 배열을 strict 검증해 꺼낸다."""
+    return _SlidesResult.model_validate(_loaded(text)).slides
+
+
+def parse_quizzes(text: str) -> list[GeneratedQuiz]:
+    """quizzes 응답에서 quizzes 배열을 strict 검증해 꺼낸다."""
+    return _QuizzesResult.model_validate(_loaded(text)).quizzes
+
+
+def parse_note(text: str) -> list[GeneratedNoteBlock]:
+    """note 응답에서 note_blocks 배열을 strict 검증해 꺼낸다."""
+    return _NoteResult.model_validate(_loaded(text)).note_blocks
+
+
+def parse_assignment(text: str) -> GeneratedAssignment:
+    """assignment 응답을 strict 검증해 꺼낸다(steps/rubric dict는 사전 정규화)."""
+    data = _loaded(text)
+    if isinstance(data, dict) and isinstance(data.get("assignment"), dict):
+        data = {**data, "assignment": normalize_assignment_value(data["assignment"])}
+    return _AssignmentResult.model_validate(data).assignment
+
+
+def parse_voice(text: str, slide_idx: int) -> GeneratedVoiceScript:
+    """voice JSON을 파싱하고 raw 대본 반환 케이스는 slide_idx를 유지해 폴백한다."""
+    from app.modules.ChapterStudio_V1.common.logging import logger  # 지역 import — 순환 방지
+    try:
+        return GeneratedVoiceScript.model_validate(_loaded(text))
+    except (ValueError, ValidationError) as exc:
+        # Qwen이 guided_json 대신 대본만 반환한 경우에도 호출부의 slide_idx를 보존한다.
+        script_text = _clean_raw_voice_text(text)
+        logger.warning(
+            "parse_voice: JSON 파싱 실패(slide_idx={}) → raw 텍스트 폴백 사용 "
+            "({}자, 원인: {})",
+            slide_idx,
+            len(script_text),
+            exc,
+        )
+        return GeneratedVoiceScript(slide_idx=slide_idx, script_text=script_text)
+
+
+def _loaded(text: str) -> object:
+    """모델 응답에서 JSON 블록을 꺼내 관용 파싱한다(think·fence 제거 후)."""
+    return loads_lenient(extract_json_block(strip_thinking(text)))
+
+
+def _request(
+    system: str, user: str, max_tokens: int, temperature: float, slide_count: int, schema: str, template_key: str
+) -> ChapterAIRequest:
+    return ChapterAIRequest(
+        system=system,
+        user=user,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        extra={"schema": schema, "slide_count": slide_count, "template_key": template_key},
+    )
+
+
+def _prompt_kwargs(personalization: PersonalizationArgs) -> dict[str, str | int]:
+    return {
+        "weak_points": personalization.weak_points,
+        "audience_level": personalization.audience_level,
+        "tone": personalization.tone,
+        "pace": personalization.pace,
+        "tutor_depth": personalization.tutor_depth,
+        "socratic": personalization.socratic,
+        "learning_goal": personalization.learning_goal,
+    }
+
+
+__all__ = [
+    "build_assignment_request",
+    "build_note_request",
+    "build_quizzes_request",
+    "build_slides_request",
+    "build_voice_request",
+    "parse_assignment",
+    "parse_note",
+    "parse_quizzes",
+    "parse_slides",
+    "parse_voice",
+]

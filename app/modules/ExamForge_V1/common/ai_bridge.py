@@ -3,7 +3,7 @@
 개별 커넥터 구현은 _connector_*.py에 격리한다.
 외부 모듈은 이 파일만 임포트하면 된다.
 
-Gemini 계열 커넥터는 테스트 전용이다. GEMINI_CLI_ENABLED=true 환경변수 없이
+Gemini CLI 계열 커넥터는 테스트 전용이다. GEMINI_CLI_ENABLED=true 환경변수 없이
 선택하면 RuntimeError를 발생시켜 프로덕션 선택을 차단한다.
 """
 from __future__ import annotations
@@ -11,11 +11,6 @@ from __future__ import annotations
 import contextvars
 import logging
 import os
-
-_LOG = logging.getLogger(__name__)
-
-# Gemini 선택을 막는 모델 이름 집합 (테스트 전용)
-_GEMINI_MODEL_NAMES: frozenset[str] = frozenset({"gemini_cli_flash", "gemini_2_5_flash"})
 
 from app.modules.ExamForge_V1.common._ai_schemas import (
     AIConnector,
@@ -33,6 +28,11 @@ from app.modules.ExamForge_V1.common.config import (
     active_text_model,
     active_verifier_model,
 )
+
+_LOG = logging.getLogger(__name__)
+
+# Gemini CLI 선택을 막는 모델 이름 집합 (테스트 전용)
+_GEMINI_MODEL_NAMES: frozenset[str] = frozenset({"gemini_cli_flash", "gemini_2_5_flash"})
 
 # Anthropic 모델 이름 → 모델 ID 매핑
 _ANTHROPIC_MODEL_MAP: dict[str, str] = {
@@ -69,7 +69,7 @@ def get_current_budget() -> LLMBudgetCounter | None:
 def get_connector(name: str) -> AIConnector:
     """이름으로 커넥터 인스턴스를 반환한다 (캐싱).
 
-    Gemini 계열 커넥터는 테스트 전용이다. GEMINI_CLI_ENABLED=true 없이 선택하면
+    Gemini CLI 커넥터는 테스트 전용이다. GEMINI_CLI_ENABLED=true 없이 선택하면
     RuntimeError를 발생시켜 프로덕션 선택을 차단한다.
     """
     if name in _CONNECTOR_CACHE:
@@ -94,6 +94,8 @@ def get_connector(name: str) -> AIConnector:
     if name == "codex_cli":
         # Codex CLI 커넥터는 API 키 없이 ChatGPT OAuth를 사용한다
         connector = CodexCliConnector()
+    elif name == "gemini_flash":
+        connector = _build_gemini_genai_connector()
     elif name in _ANTHROPIC_MODEL_MAP:
         connector = AnthropicConnector(_ANTHROPIC_MODEL_MAP[name], name)
     elif name in _GEMINI_CLI_MODEL_MAP:
@@ -103,6 +105,15 @@ def get_connector(name: str) -> AIConnector:
 
     _CONNECTOR_CACHE[name] = connector
     return connector
+
+
+def _build_gemini_genai_connector() -> AIConnector:
+    """google-genai SDK 커넥터는 선택 시점에만 로드한다."""
+    from app.modules.ExamForge_V1.common._connector_gemini_genai import (
+        GeminiGenAIConnector,
+    )
+
+    return GeminiGenAIConnector()
 
 
 def get_text_connector() -> AIConnector:

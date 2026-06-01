@@ -9,7 +9,7 @@ from app.modules.ExamForge_V1.pipeline.state import ExamForgeState
 from app.modules.ExamForge_V1.schemas.question import QuestionDraft
 from app.modules.ExamForge_V1.templates.registry import get_template
 from app.modules.ExamForge_V1.prompts.distractor_gen import get_distractor_system
-from app.modules.ExamForge_V1.common.config import generation_concurrency
+from app.modules.ExamForge_V1.common.config import generation_concurrency, distractor_rewrite_enabled
 from app.modules.ExamForge_V1.common.ai_bridge import get_text_connector, ChapterAIRequest
 from app.modules.ExamForge_V1.common.logger import get_logger
 
@@ -58,7 +58,9 @@ async def generate_distractors_node(state: ExamForgeState) -> dict:
         semaphore = asyncio.Semaphore(generation_concurrency())
         connector = get_text_connector()
         system_prompt = get_distractor_system(locale)
-        skip_rewrite_for_cli = connector.supports("cli")
+        # 모델별 supports("cli") 휴리스틱(감사 A-2: gemini만 스킵되던 문제) 대신
+        # 명시 환경 플래그로 오답 재작성 켜짐/꺼짐을 결정한다.
+        rewrite_disabled = not distractor_rewrite_enabled()
     except Exception as exc:
         logger.error("오답 생성 커넥터 초기화 실패: %s — 원본 유지", exc)
         return {
@@ -69,7 +71,7 @@ async def generate_distractors_node(state: ExamForgeState) -> dict:
 
     async def _improve_distractors(q: dict) -> dict:
         async with semaphore:
-            if skip_rewrite_for_cli or _has_code_heavy_options(q):
+            if rewrite_disabled or _has_code_heavy_options(q):
                 q_copy = q.copy()
                 q_copy.setdefault(
                     "distractor_rationale",

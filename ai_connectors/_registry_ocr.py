@@ -18,6 +18,16 @@ _LOG = logging.getLogger(__name__)
 OCR_CONNECTORS: dict[str, Callable[[], OCRConnector]] = {}
 
 try:
+    from .ocr.gemini_ocr_connector import GeminiOCRConnector
+    OCR_CONNECTORS["gemini-ocr"] = lambda: GeminiOCRConnector()
+except ImportError as _gemini_ocr_import_err:
+    _LOG.warning(
+        "Gemini OCR 커넥터 등록 건너뜀 (ImportError: %s). "
+        "`uv pip install google-genai` 실행 필요",
+        _gemini_ocr_import_err,
+    )
+
+try:
     from .ocr.paddleocr_vl_mlx_connector import PaddleOCRVLMlxConnector
     OCR_CONNECTORS["paddleocr-vl-mlx"] = lambda: PaddleOCRVLMlxConnector()
 except ImportError as _vl_import_err:
@@ -62,6 +72,7 @@ _OCR_ALIASES: dict[str, str] = {
     "paddleocr_ppv4": "paddleocr-ppv4",
     "paddleocr-pp-v4": "paddleocr-ppv4",
     "pp-ocrv4": "paddleocr-ppv4",
+    "gemini_ocr": "gemini-ocr",
 }
 
 

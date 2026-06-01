@@ -31,6 +31,12 @@ from app.modules.OCR_v1 import search_router as ocr_search_router
 from app.modules.Telegram_control_module import router as telegram_control_router
 from app.modules.ASR_V1.app.routers.asr_v1 import router as asr_v1_router
 from app.modules.Chat_V1.app.router import router as chat_v1_router
+from app.modules.ChapterStudio_V1.app.routers.curriculum import router as curriculum_router
+from app.modules.ChapterStudio_V1.app.routers.lessons import router as lessons_router
+from app.modules.ChapterStudio_V1.app.routers.tutor_preview import router as tutor_preview_router
+from app.modules.Chat_V1.app.spring_adapter import router as chat_spring_adapter_router
+from app.modules.ExamForge_V1 import spring_adapter_router as mock_exam_adapter_router
+from app.modules.ExamForge_V1 import mock_exam_analysis_router
 
 _LOG = logging.getLogger(__name__)
 
@@ -117,6 +123,12 @@ app.include_router(ocr_ingest_router, prefix="/api/ocr/v1")
 app.include_router(ocr_search_router, prefix="/api/ocr/v1")
 app.include_router(asr_v1_router)
 app.include_router(chat_v1_router)
+app.include_router(curriculum_router)
+app.include_router(lessons_router)
+app.include_router(tutor_preview_router)
+app.include_router(chat_spring_adapter_router)
+app.include_router(mock_exam_adapter_router)
+app.include_router(mock_exam_analysis_router)
 
 
 @app.get("/health")

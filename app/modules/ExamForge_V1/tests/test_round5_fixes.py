@@ -424,3 +424,52 @@ class TestGeminiCliJsonOutput:
         raw = "Warning: Basic terminal detected\n[{\"ok\": true}]"
 
         assert _GeminiCliConnector._clean_output(raw) == '[{"ok": true}]'
+
+
+class TestDistractorRewriteFlag:
+    """오답 재작성 명시 플래그(감사 A-2: supports('cli') 휴리스틱 제거) 검증."""
+
+    def test_default_enabled(self) -> None:
+        """환경 변수 미설정 시 기본 활성화(True)."""
+        from app.modules.ExamForge_V1.common import config
+        with patch.object(config, "_optional", return_value=None):
+            assert config.distractor_rewrite_enabled() is True
+
+    def test_explicit_false_disables(self) -> None:
+        """false/0/no/off는 비활성화로 해석한다."""
+        from app.modules.ExamForge_V1.common import config
+        for raw in ("false", "0", "no", "off", "FALSE", " Off "):
+            with patch.object(config, "_optional", return_value=raw):
+                assert config.distractor_rewrite_enabled() is False, raw
+
+    def test_truthy_values_enable(self) -> None:
+        """true/1 등은 활성화로 해석한다."""
+        from app.modules.ExamForge_V1.common import config
+        for raw in ("true", "1", "yes", "on"):
+            with patch.object(config, "_optional", return_value=raw):
+                assert config.distractor_rewrite_enabled() is True, raw
+
+
+class TestAnalysisPromptStructured:
+    """AI 총평 구조화 검증(E6 갭3): 학생이 고른 보기 인용 + 근거 + 연습 구조."""
+
+    def test_instruction_cites_selected_option(self) -> None:
+        """총평 지침이 '내가 고른 보기' 텍스트 인용을 요구한다."""
+        from app.modules.ExamForge_V1.app._analysis_prompt import _INSTRUCTION_WITH_WEAKNESS
+        # 학생이 선택한 보기를 참조하도록 지시
+        assert "내가 고른 보기" in _INSTRUCTION_WITH_WEAKNESS
+
+    def test_instruction_requires_misconception_label(self) -> None:
+        """총평 지침이 오개념 라벨 부여를 요구한다."""
+        from app.modules.ExamForge_V1.app._analysis_prompt import _INSTRUCTION_WITH_WEAKNESS
+        assert "오개념 라벨" in _INSTRUCTION_WITH_WEAKNESS
+
+    def test_instruction_requires_next_practice(self) -> None:
+        """총평 지침이 다음 연습 제안을 요구한다."""
+        from app.modules.ExamForge_V1.app._analysis_prompt import _INSTRUCTION_WITH_WEAKNESS
+        assert "다음 연습" in _INSTRUCTION_WITH_WEAKNESS
+
+    def test_perfect_score_instruction_unchanged(self) -> None:
+        """만점 케이스 지침은 심화 제안 유지(변경 없음)."""
+        from app.modules.ExamForge_V1.app._analysis_prompt import _INSTRUCTION_PERFECT
+        assert "심화" in _INSTRUCTION_PERFECT and "만점" in _INSTRUCTION_PERFECT

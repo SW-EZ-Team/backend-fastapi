@@ -348,8 +348,8 @@ class TestStateImmutability:
         )
 
     @pytest.mark.asyncio
-    async def test_generate_distractors_skips_cli_connector(self) -> None:
-        """Gemini CLI 테스트 커넥터에서는 오답 재작성 호출을 건너뛴다."""
+    async def test_generate_distractors_skips_when_flag_disabled(self) -> None:
+        """EXAMFORGE_DISTRACTOR_REWRITE=false면 모델과 무관하게 오답 재작성을 건너뛴다."""
         from unittest.mock import AsyncMock, patch
         from app.modules.ExamForge_V1.pipeline.nodes.generate_distractors_node import generate_distractors_node
 
@@ -365,9 +365,63 @@ class TestStateImmutability:
                 {"label": "5", "text": "보기5", "is_correct": False},
             ],
         }
+        # supports("cli")=True를 반환해도, 명시 플래그가 꺼져 있으면 스킵돼야 한다
+        # (감사 A-2: 모델별 휴리스틱 분기 제거 검증)
         class _CliConnector:
             def __init__(self) -> None:
                 self.generate = AsyncMock()
+
+            def supports(self, feature: str) -> bool:
+                return feature == "cli"
+
+        connector = _CliConnector()
+
+        with patch(
+            "app.modules.ExamForge_V1.pipeline.nodes.generate_distractors_node.get_text_connector",
+            return_value=connector,
+        ), patch(
+            "app.modules.ExamForge_V1.pipeline.nodes.generate_distractors_node.distractor_rewrite_enabled",
+            return_value=False,
+        ):
+            result = await generate_distractors_node({
+                "questions": [question],
+                "locale": "ko",
+            })
+
+        assert connector.generate.await_count == 0
+        assert result["questions_with_distractors"][0]["options"] == question["options"]
+
+    @pytest.mark.asyncio
+    async def test_generate_distractors_runs_for_cli_when_flag_enabled(self) -> None:
+        """supports('cli')=True여도 플래그가 켜져 있으면(기본값) 오답 재작성을 수행한다."""
+        from unittest.mock import AsyncMock, patch
+        from app.modules.ExamForge_V1.pipeline.nodes.generate_distractors_node import generate_distractors_node
+
+        question = {
+            "draft_id": "d1", "template_id": "ko_multiple_choice_5",
+            "topic": "A", "difficulty": 3, "bloom_level": "이해",
+            "stem": "테스트?",
+            "options": [
+                {"label": "1", "text": "보기1", "is_correct": True},
+                {"label": "2", "text": "보기2", "is_correct": False},
+                {"label": "3", "text": "보기3", "is_correct": False},
+                {"label": "4", "text": "보기4", "is_correct": False},
+                {"label": "5", "text": "보기5", "is_correct": False},
+            ],
+        }
+        mock_resp = AsyncMock()
+        mock_resp.text = (
+            '{"options": [{"label": "1", "text": "보기1", "is_correct": true},'
+            '{"label": "2", "text": "보기2", "is_correct": false},'
+            '{"label": "3", "text": "보기3", "is_correct": false},'
+            '{"label": "4", "text": "보기4", "is_correct": false},'
+            '{"label": "5", "text": "보기5", "is_correct": false}],'
+            '"distractor_rationale": "근거"}'
+        )
+
+        class _CliConnector:
+            def __init__(self) -> None:
+                self.generate = AsyncMock(return_value=mock_resp)
 
             def supports(self, feature: str) -> bool:
                 return feature == "cli"
@@ -383,8 +437,9 @@ class TestStateImmutability:
                 "locale": "ko",
             })
 
-        assert connector.generate.await_count == 0
-        assert result["questions_with_distractors"][0]["options"] == question["options"]
+        # 플래그 기본 활성 → cli 모델이라도 재작성 호출이 일어난다
+        assert connector.generate.await_count == 1
+        assert result["pipeline_status"] == "answering"
 
 
 class TestAnswerRepair:
@@ -462,3 +517,103 @@ class TestAnswerRepair:
         answered = result["answered_questions"][0]
         assert answered["code_snippet"] == question["code_snippet"]
         assert answered["distractor_rationale"] == question["distractor_rationale"]
+
+
+class _StubResponse:
+    """ChapterAIResponse 호환 최소 응답 스텁 (mock 라이브러리 미사용)."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _StubConnector:
+    """고정 텍스트를 반환하는 교정용 커넥터 스텁."""
+
+    name = "stub"
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+        self.calls = 0
+
+    async def generate(self, req: object) -> _StubResponse:
+        self.calls += 1
+        return _StubResponse(self._text)
+
+    def supports(self, feature: str) -> bool:
+        return False
+
+
+class TestTargetedRepair:
+    """fix_instructions 소비 표적 교정 노드 검증."""
+
+    @pytest.mark.asyncio
+    async def test_repair_preserves_ids_and_routes_reverify(self) -> None:
+        """교정 성공 시 식별자를 보존하고 reverify 경로로 라우팅한다."""
+        from unittest.mock import patch
+        from app.modules.ExamForge_V1.pipeline.nodes.repair_questions_node import (
+            repair_questions_node,
+            route_after_repair,
+        )
+
+        # 검증자가 정답 2번이라고 지적한 실패 문항 1건
+        repaired_json = (
+            '{"stem":"교정된 발문","correct_answer":"2",'
+            '"explanation":"교정 근거","question_id":"HACK","draft_id":"HACK"}'
+        )
+        stub = _StubConnector(repaired_json)
+        state = {
+            "source_text": "원본 자료 " * 30,
+            "answered_questions": [{
+                "question_id": "q1", "draft_id": "d1",
+                "template_id": "ko_multiple_choice_5",
+                "correct_answer": "1", "stem": "원래 발문",
+            }],
+            "verified_questions": [{
+                "question_id": "q1", "draft_id": "d1",
+                "template_id": "ko_multiple_choice_5",
+                "correct_answer": "1", "stem": "원래 발문",
+                "_verification": {
+                    "passed": False,
+                    "issues": ["정답이 자료와 불일치"],
+                    "fix_instructions": "정답을 2번으로 교정하시오.",
+                },
+            }],
+            "failed_question_ids": ["d1"],
+        }
+        with patch(
+            "app.modules.ExamForge_V1.pipeline.nodes.repair_questions_node.get_connector",
+            return_value=stub,
+        ):
+            result = await repair_questions_node(state)
+
+        assert result["repair_applied"] is True
+        assert stub.calls == 1
+        merged = result["answered_questions"][0]
+        # 식별자/템플릿은 보존되고 content만 교체된다
+        assert merged["question_id"] == "q1" and merged["draft_id"] == "d1"
+        assert merged["template_id"] == "ko_multiple_choice_5"
+        assert merged["correct_answer"] == "2" and merged["stem"] == "교정된 발문"
+        # 재검증 강제를 위해 이전 검증 결과는 제거된다
+        assert "_verification" not in merged
+        assert route_after_repair(result) == "reverify"
+
+    @pytest.mark.asyncio
+    async def test_no_fix_instructions_falls_back_to_regenerate(self) -> None:
+        """수정 지시가 없으면 교정하지 않고 blind 재생성으로 폴백한다."""
+        from app.modules.ExamForge_V1.pipeline.nodes.repair_questions_node import (
+            repair_questions_node,
+            route_after_repair,
+        )
+
+        state = {
+            "source_text": "원본 자료 " * 30,
+            "answered_questions": [{"question_id": "q1", "draft_id": "d1"}],
+            "verified_questions": [{
+                "question_id": "q1", "draft_id": "d1",
+                "_verification": {"passed": False, "issues": ["X"], "fix_instructions": ""},
+            }],
+            "failed_question_ids": ["d1"],
+        }
+        result = await repair_questions_node(state)
+        assert result["repair_applied"] is False
+        assert route_after_repair(result) == "regenerate"

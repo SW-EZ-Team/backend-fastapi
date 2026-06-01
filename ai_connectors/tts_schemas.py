@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-_TEXT_MAX_LEN = 800
+_TEXT_MAX_LEN = 1600
 _REF_TEXT_MAX_LEN = 500
 
 

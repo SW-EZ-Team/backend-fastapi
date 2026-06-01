@@ -44,14 +44,22 @@ async def run_chat_pipeline(request: ChatRequest) -> ChatState:
     그래프에 위임한다. build_system_prompt는 service.py에 있으므로
     순환 참조를 피하기 위해 service import만 지연한다.
     """
-    from app.modules.Chat_V1.app.service import build_system_prompt
+    from app.modules.Chat_V1.app.service import (
+        build_lecture_keywords,
+        build_system_prompt,
+    )
 
     system_prompt = build_system_prompt(request)
+    # 슬라이드 상한 검증·환각 가드에 쓸 메타를 컨텍스트에서 미리 뽑아 상태에 담는다.
+    slide_count = len(request.lecture_context.slides)
+    lecture_keywords = build_lecture_keywords(request)
 
     initial_state: ChatState = {
         "session_id": request.session_id,
         "user_message": request.user_message,
         "system_prompt": system_prompt,
+        "slide_count": slide_count,
+        "lecture_keywords": lecture_keywords,
         "error_message": None,
         "pipeline_status": "init",
     }

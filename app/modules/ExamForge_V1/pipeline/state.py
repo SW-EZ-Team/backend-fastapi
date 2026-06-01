@@ -89,6 +89,9 @@ class ExamForgeState(TypedDict, total=False):
     max_retries: int
     pipeline_status: str
     error_message: str | None
+    # repair_questions 노드가 표적 교정을 적용했는지 여부.
+    # True면 재검증(verify) 경로로, False면 기존 blind 재생성 경로로 라우팅한다.
+    repair_applied: bool
     # LLM 호출 예산 서킷 브레이커 (P0 DoS 방지)
     llm_call_count: int
     llm_budget_exceeded: bool

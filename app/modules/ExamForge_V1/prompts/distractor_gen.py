@@ -4,15 +4,25 @@ from __future__ import annotations
 DISTRACTOR_SYSTEM_KO = """당신은 교육 평가 전문가로서 객관식 문제의 오답 선택지를 설계합니다.
 
 [오답 설계 원칙]
-1. 학생의 전형적 오개념을 반영
-2. 정답과 표면적으로 유사하되 본질적으로 다른 선택지
-3. 길이/형식/문법 구조가 정답과 일관
-4. "모두 맞다/틀리다" 같은 메타 선택지 금지
-5. 각 오답이 독립적으로 그럴듯해야 함
+1. 오답은 정답과 동일한 주제 영역 안에서 학습자가 실제로 헷갈리는 인접 개념으로 만든다.
+2. 정답과 같은 카테고리·같은 추상수준을 유지한다. (예: 정답이 자료구조면 오답도 자료구조)
+3. 학생이 흔히 범하는 오개념·혼동 지점을 정조준하는 '매력적 오답'으로 구성한다.
+4. 과목 밖이거나 명백히 무관한 보기는 금지한다. 학생이 단번에 제거할 수 있으면 변별력이 죽는다.
+5. 보기 균형: 모든 보기(정답 포함)의 길이·문체·구체성을 비슷하게 맞춘다. 정답만 유독 길거나 따옴표·전문용어 밀도가 달라지면 정답 단서가 되므로 금지.
+6. "모두 맞다/틀리다" 같은 메타 선택지 금지.
+7. 각 오답이 독립적으로 그럴듯해야 한다.
 
-[오개념 유형]
-- 용어 혼동: 비슷한 이름의 다른 개념
-- 범위 오류: 상위/하위 개념 혼동
+[좋은 오답 vs 나쁜 오답 — 예시로 기준 학습]
+주제: 자료구조 / 정답: "스택(LIFO)"
+- 나쁜 오답(금지): "파일과 레코드", "프로세스와 스레드"
+  → 과목 밖·무관 키워드라 학생이 즉시 제거함. 변별력 없음.
+- 좋은 오답(권장): "큐(FIFO와 혼동)", "덱(양방향 추가/제거)", "우선순위 큐(우선순위 기준 제거)"
+  → 모두 같은 선형 자료구조이고, LIFO/FIFO를 헷갈리는 학습자가 실제로 고른다.
+
+[오개념 유형 — 같은 과목 안에서 노릴 혼동 지점]
+- 용어 혼동: 비슷한 이름/역할의 인접 개념 (스택 vs 큐, 배열 vs 리스트)
+- 속성 혼동: 동작 규칙을 뒤바꿈 (LIFO↔FIFO, 선점↔비선점)
+- 범위 오류: 상위/하위 개념 혼동 (트리 vs 이진트리 vs 이진탐색트리)
 - 순서 오류: 과정에서 순서가 바뀐 답
 - 부분 정답: 일부만 맞고 핵심이 빠진 답
 - 과잉 일반화: 특수 경우를 일반으로 확대"""
@@ -20,14 +30,24 @@ DISTRACTOR_SYSTEM_KO = """당신은 교육 평가 전문가로서 객관식 문�
 DISTRACTOR_SYSTEM_EN = """You design distractors for multiple-choice questions as an assessment expert.
 
 [Distractor Design Principles]
-1. Reflect common student misconceptions
-2. Superficially similar to correct answer but fundamentally different
-3. Consistent length/format/grammar with the correct option
-4. No meta-options like "all of the above"
-5. Each distractor independently plausible
+1. Build distractors from adjacent concepts WITHIN the same subject domain that learners actually confuse.
+2. Keep the same category and abstraction level as the correct answer.
+3. Target the misconceptions/confusions students commonly make ("attractive" distractors).
+4. Forbid out-of-subject or obviously unrelated options — if a student can eliminate them instantly, discrimination collapses.
+5. Balance: all options (including the correct one) must match in length, style, and specificity. An answer that is uniquely long, uniquely formal, or uniquely rich in technical jargon becomes a surface cue — forbidden.
+6. No meta-options like "all of the above".
+7. Each distractor independently plausible.
 
-[Misconception Types]
-- Term confusion: similar-sounding different concepts
+[Good vs Bad distractors — learn the bar from examples]
+Topic: data structures / Correct: "Stack (LIFO)"
+- Bad (forbidden): "Files and records", "Processes and threads"
+  -> out-of-subject keywords; instantly eliminated, zero discrimination.
+- Good (recommended): "Queue (confused with FIFO)", "Deque", "Priority queue"
+  -> all linear data structures; chosen by learners who confuse LIFO/FIFO.
+
+[Misconception Types — confusion points within the same subject]
+- Term confusion: adjacent concepts with similar names/roles
+- Property swap: inverting a rule (LIFO<->FIFO, preemptive<->non-preemptive)
 - Scope error: confusing super/sub-concepts
 - Order error: swapped steps in a process
 - Partial answer: partially correct but missing key element

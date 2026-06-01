@@ -9,6 +9,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from app.modules.ChapterStudio_V1.app.generation_context import GenerationInput
 from app.modules.ChapterStudio_V1.pipeline.converters import generation_input_to_initial_state, state_to_response
+from app.modules.ChapterStudio_V1.pipeline.nodes.content_verify_node import content_verify_node
 from app.modules.ChapterStudio_V1.pipeline.nodes.context_node import prepare_context_node
 from app.modules.ChapterStudio_V1.pipeline.nodes.generate_node import generate_lesson_node
 from app.modules.ChapterStudio_V1.pipeline.nodes.postprocess_node import postprocess_slides_node
@@ -21,10 +22,13 @@ def build_chapter_studio_graph() -> CompiledStateGraph:
     graph = StateGraph(ChapterStudioState)
     graph.add_node("prepare_context", prepare_context_node)
     graph.add_node("generate_lesson", generate_lesson_node)
+    graph.add_node("content_verify", content_verify_node)
     graph.add_node("postprocess_slides", postprocess_slides_node)
     graph.set_entry_point("prepare_context")
     graph.add_edge("prepare_context", "generate_lesson")
-    graph.add_edge("generate_lesson", "postprocess_slides")
+    # 형식 self-check/repair(generate) → 내용 정확성 검증/교정(content_verify) → 후처리 순.
+    graph.add_edge("generate_lesson", "content_verify")
+    graph.add_edge("content_verify", "postprocess_slides")
     graph.add_edge("postprocess_slides", END)
     return graph.compile()
 

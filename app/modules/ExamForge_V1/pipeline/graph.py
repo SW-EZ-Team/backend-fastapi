@@ -15,6 +15,7 @@ from .nodes.generate_answers_node import generate_answers_node
 from .nodes.verify_answers_node import verify_answers_node
 from .nodes.validate_node import validate_node
 from .nodes.retry_router_node import retry_router_node, route_after_validation
+from .nodes.repair_questions_node import repair_questions_node, route_after_repair
 from .nodes.calibrate_difficulty_node import calibrate_difficulty_node
 from .nodes.format_output_node import format_output_node
 
@@ -31,6 +32,7 @@ def build_exam_forge_graph() -> CompiledStateGraph:
     graph.add_node("verify_answers", verify_answers_node)
     graph.add_node("validate", validate_node)
     graph.add_node("retry_router", retry_router_node)
+    graph.add_node("repair_questions", repair_questions_node)
     graph.add_node("calibrate_difficulty", calibrate_difficulty_node)
     graph.add_node("format_output", format_output_node)
 
@@ -44,13 +46,25 @@ def build_exam_forge_graph() -> CompiledStateGraph:
     graph.add_edge("verify_answers", "validate")
     graph.add_edge("validate", "retry_router")
 
+    # retry 경로는 먼저 표적 교정(repair_questions)을 거친다. blind 재생성은
+    # 교정 불가/실패 시의 폴백으로만 동작한다 (기존 동작 보존).
     graph.add_conditional_edges(
         "retry_router",
         route_after_validation,
         {
             "passed": "calibrate_difficulty",
-            "retry": "generate_questions",
+            "retry": "repair_questions",
             "exhausted": "calibrate_difficulty",
+        },
+    )
+
+    # 교정 적용 시 재검증(verify)으로, 미적용 시 기존 blind 재생성으로 분기한다.
+    graph.add_conditional_edges(
+        "repair_questions",
+        route_after_repair,
+        {
+            "reverify": "verify_answers",
+            "regenerate": "generate_questions",
         },
     )
 

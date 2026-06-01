@@ -55,6 +55,9 @@ allow-direct-references = true
 [tool.pytest.ini_options]
 # importlib 모드: 각 테스트 파일을 독립 모듈로 로드해 패키지 __init__.py 체인 실행을 방지
 addopts = "--import-mode=importlib"
+# backend-fastapi 루트를 sys.path에 명시 고정. 이렇게 하면 어느 디렉터리에서 수집해도
+# 루트의 common/ 패키지(common.llm_output 등)와 app/ 패키지가 일관되게 import된다.
+pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [

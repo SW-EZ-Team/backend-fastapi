@@ -331,19 +331,32 @@ def paper_template_contract(template_id: str) -> str:
     """LLM 프롬프트에 넣을 실전 시험지 문항 계약을 만든다."""
     frame = question_frame(template_id)
     if template_id.startswith("us_"):
+        # 구역 안내 라벨(section heading)은 시험지 인쇄용일 뿐,
+        # 개별 stem 앞에 그대로 복사해 붙이는 접두사가 아님을 명시한다.
         return (
             f"- Exam section: {frame.section_title}\n"
-            f"- Question direction: {frame.stem_label}\n"
+            f"- Section heading (paper layout only, do NOT prepend to any stem): "
+            f"{frame.stem_label}\n"
             f"- Answer area: {frame.answer_space} ({frame.answer_label})\n"
             f"- Student instruction: {frame.instruction}\n"
-            f"- Scoring rule: {frame.scoring_rule}"
+            f"- Scoring rule: {frame.scoring_rule}\n"
+            "- Stem rule: write a complete, natural, real-exam-style question. "
+            "Vary the phrasing across items and never start every stem with the "
+            "same fixed direction sentence."
         )
+    # 구역 안내 라벨(stem_label)은 시험지 상단에 한 번 인쇄되는 헤딩이지
+    # 각 문항 stem에 반복해서 붙이는 접두사가 아니다. 이 점을 분명히 지시해
+    # 모든 stem이 동일 보일러플레이트로 시작하는 현상을 막는다.
     return (
         f"- 시험지 구역: {frame.section_title}\n"
-        f"- 문항 지시문: {frame.stem_label}\n"
+        f"- 구역 안내 라벨(시험지 인쇄용, 개별 stem 앞에 복사 금지): "
+        f"{frame.stem_label}\n"
         f"- 답안란: {frame.answer_space} ({frame.answer_label})\n"
         f"- 응시자 지시: {frame.instruction}\n"
-        f"- 채점 기준: {frame.scoring_rule}"
+        f"- 채점 기준: {frame.scoring_rule}\n"
+        "- stem 작성 규칙: 각 문항은 그 자체로 완결된 실전 시험형 발문으로 쓴다. "
+        "발문 표현을 문항마다 다양하게 바꾸고, 모든 stem을 동일한 고정 지시 문장으로 "
+        "시작하지 않는다."
     )
 
 

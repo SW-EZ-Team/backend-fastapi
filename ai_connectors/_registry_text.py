@@ -29,6 +29,17 @@ except ImportError as _claude_import_err:
         _claude_import_err,
     )
 
+# Gemini Flash — google-genai 미설치 환경에서도 다른 커넥터는 정상 동작하도록 보호
+try:
+    from .text.gemini_connector import GeminiGenAIConnector
+    CONNECTORS["gemini_flash"] = lambda: GeminiGenAIConnector()
+except ImportError as _gemini_import_err:
+    _LOG.warning(
+        "Gemini Flash 커넥터 등록 건너뜀 (ImportError: %s). "
+        "`uv pip install google-genai` 실행 필요",
+        _gemini_import_err,
+    )
+
 # Codex CLI — codex 바이너리가 없는 환경에서도 다른 커넥터는 정상 동작하도록 보호
 try:
     from .text.codex_cli_connector import CodexCLIConnector
@@ -57,6 +68,7 @@ def get_text_connector(model_name: str | None = None) -> AIConnector:
 
     ACTIVE_TEXT_MODEL=claude_sonnet  → ClaudeSonnetConnector
     ACTIVE_TEXT_MODEL=codex_cli      → CodexCLIConnector
+    ACTIVE_TEXT_MODEL=gemini_flash   → GeminiGenAIConnector
     기본값: claude_sonnet
 
     관리자가 .env 값 하나만 바꾸면 즉시 커넥터가 교체된다.
@@ -66,6 +78,6 @@ def get_text_connector(model_name: str | None = None) -> AIConnector:
         raise ModelNotFoundError(
             f"Unknown text model: {name}. "
             f"Registered: {list(CONNECTORS.keys())}. "
-            f"ACTIVE_TEXT_MODEL 환경변수와 anthropic 패키지 설치를 확인하세요."
+            f"ACTIVE_TEXT_MODEL 환경변수와 커넥터 의존성 설치를 확인하세요."
         )
     return CONNECTORS[name]()

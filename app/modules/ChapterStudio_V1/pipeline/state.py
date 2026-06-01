@@ -31,6 +31,10 @@ class ChapterStudioState(TypedDict, total=False):
     weak_points: str
     reference_context_prompt: str
     slide_outline: StateRecords
+    # 생성 노드가 검증한 payload를 그대로 담아 content_verify 노드로 넘기는 중간 버킷.
+    # 다운스트림 records(slide_drafts/quiz_set/voice_scripts 등)는 content_verify 노드가
+    # 단 한 번 emit한다(add reducer 중복 방지).
+    lesson_payload: StateRecord
     slide_drafts: StateRecords
     slides: Annotated[StateRecords, add]
     quiz_set: StateRecords

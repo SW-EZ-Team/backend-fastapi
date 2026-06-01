@@ -45,6 +45,8 @@ def register_fake_connector(monkeypatch: pytest.MonkeyPatch) -> None:
     registry.clear_cache()
     monkeypatch.setitem(registry._REGISTRY, "test_chapterstudio", FakeTextConnector)
     monkeypatch.setenv("ACTIVE_TEXT_MODEL", "test_chapterstudio")
+    # 이 테스트는 엔드포인트·영속화 배선을 검증한다. self-repair는 전용 단위 테스트에서 다룬다.
+    monkeypatch.setenv("CHAPTERSTUDIO_LESSON_SELF_REPAIR", "false")
     monkeypatch.setattr(chapter_studio, "get_connection", fake_get_connection)
     yield
     registry.clear_cache()
@@ -144,9 +146,27 @@ def _lesson_payload(slide_count: int) -> dict[str, object]:
         "slides": [_slide(idx) for idx in range(slide_count)],
         "quizzes": [_quiz(idx) for idx in range(slide_count)],
         "note_blocks": [
-            {"heading": "핵심", "bullets": ["리스트 컴프리헨션은 반복과 조건을 한 줄로 표현합니다."]},
-            {"heading": "주의", "bullets": ["복잡한 조건이 많으면 일반 for 문이 더 읽기 쉽습니다."]},
-            {"heading": "복습", "bullets": ["입력, 반복 변수, 조건, 출력식을 순서대로 확인합니다."]},
+            {
+                "heading": "핵심",
+                "bullets": [
+                    "리스트 컴프리헨션은 반복과 조건을 한 줄로 표현해 코드를 간결하게 만듭니다.",
+                    "출력식, 반복 변수, 조건의 순서를 정확히 구분하는 것이 가장 중요합니다.",
+                ],
+            },
+            {
+                "heading": "주의",
+                "bullets": [
+                    "복잡한 조건이 여러 개 겹치면 오히려 일반 for 문이 더 읽기 쉽습니다.",
+                    "한 줄에 억지로 몰아넣으면 가독성이 떨어지므로 적절히 풀어 쓰는 판단이 필요합니다.",
+                ],
+            },
+            {
+                "heading": "복습",
+                "bullets": [
+                    "입력, 반복 변수, 조건, 출력식을 순서대로 짚으며 동작을 머릿속으로 따라갑니다.",
+                    "작은 예시를 손으로 돌려 보면서 결과 리스트가 어떻게 만들어지는지 확인합니다.",
+                ],
+            },
         ],
         "assignment": {
             "title": "리스트 컴프리헨션 변환 과제",
@@ -156,7 +176,10 @@ def _lesson_payload(slide_count: int) -> dict[str, object]:
             "rubric": ["동작이 같다.", "조건식이 정확하다.", "설명이 충분하다."],
         },
         "voice_scripts": [
-            {"slide_idx": idx, "script_text": f"{idx + 1}번 슬라이드는 핵심 흐름을 과외식으로 설명합니다."}
+            {
+                "slide_idx": idx,
+                "script_text": f"{idx + 1}번 슬라이드에서는 리스트 컴프리헨션의 핵심 흐름을 과외식으로 차근차근 설명합니다.",
+            }
             for idx in range(slide_count)
         ],
     }
@@ -181,5 +204,5 @@ def _quiz(idx: int) -> dict[str, object]:
         "choices": ["출력식", "파일명", "패키지 버전", "운영체제"],
         "answer_idx": 0,
         "difficulty": "이해",
-        "explanation": "출력식이 새 리스트의 원소를 결정하므로 먼저 확인해야 합니다.",
+        "explanation": "출력식이 새 리스트의 각 원소를 결정하므로 가장 먼저 확인해야 합니다. 조건식부터 보면 흐름을 놓치기 쉽습니다.",
     }

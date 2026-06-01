@@ -23,18 +23,19 @@ def validate_input(state: ChatState) -> ChatState:
 
 
 async def generate_answer(state: ChatState) -> ChatState:
-    """Claude Sonnet을 호출해 raw_answer를 채운다.
+    """활성 텍스트 모델을 호출해 raw_answer를 채운다.
 
+    벤더 중립 커넥터(get_text_connector)를 거치므로 모델이 바뀌어도 동일하다.
     오류 발생 시 error_message에 기록하고 파이프라인 상태를 failed로 설정한다.
     """
     if state.get("error_message"):
         # 이전 노드에서 오류가 났으면 그대로 통과
         return state
 
-    from app.modules.Chat_V1.app.service import call_claude_sonnet
+    from app.modules.Chat_V1.app.service import call_text_model
 
     try:
-        raw = await call_claude_sonnet(
+        raw = await call_text_model(
             system_prompt=state["system_prompt"],
             user_message=state["user_message"],
         )
@@ -45,8 +46,12 @@ async def generate_answer(state: ChatState) -> ChatState:
 
 
 def format_response(state: ChatState) -> ChatState:
-    """raw_answer에서 슬라이드 참조를 추출하고 최종 answer를 확정한다.
+    """raw_answer를 정제해 최종 answer·슬라이드 참조를 확정한다.
 
+    처리 순서:
+      1) strip_thinking — Qwen 류의 <think> reasoning 이 채팅에 노출되지 않게 제거.
+      2) 환각 경량 가드 — 강의 자료와 전혀 겹치지 않으면 거절문으로 폴백.
+      3) 슬라이드 인용 추출 — slide_count 상한까지 검증해 없는 슬라이드 참조를 버린다.
     오류 상태이면 answer에 안내 문구를 설정해 사용자가 빈 응답을 받지 않도록 한다.
     """
     if state.get("error_message"):
@@ -57,8 +62,24 @@ def format_response(state: ChatState) -> ChatState:
             "pipeline_status": "error_handled",
         }
 
-    from app.modules.Chat_V1.app.service import extract_referenced_slides
+    from common.llm_output import strip_thinking
+
+    from app.modules.Chat_V1.app.service import (
+        apply_hallucination_guard,
+        extract_referenced_slides,
+    )
 
     raw = state.get("raw_answer", "")
-    refs = extract_referenced_slides(raw)
-    return {**state, "answer": raw, "referenced_slides": refs, "pipeline_status": "done"}
+    # 1) reasoning 블록 제거 — 모델이 바뀌어도 <think> 가 답변에 새지 않게 한다.
+    answer = strip_thinking(raw)
+
+    # 2) 환각 경량 가드 — 강의 키워드와 전혀 매칭 안 되고 거절문도 아니면 폴백.
+    answer, guarded = apply_hallucination_guard(
+        answer, state.get("lecture_keywords", [])
+    )
+
+    # 3) 슬라이드 인용 추출 + 상한 검증. 폴백된 거절문엔 인용이 없으므로 자연히 [].
+    slide_count = state.get("slide_count")
+    refs = extract_referenced_slides(answer, slide_count)
+    status = "guarded" if guarded else "done"
+    return {**state, "answer": answer, "referenced_slides": refs, "pipeline_status": status}

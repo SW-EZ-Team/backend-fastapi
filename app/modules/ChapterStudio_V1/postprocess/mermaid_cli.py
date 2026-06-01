@@ -16,6 +16,16 @@ _EDGE_RE = re.compile(
     r"(?P<src>[A-Za-z0-9_]+)(?:\[(?P<src_label>[^\]]+)\]|\{(?P<src_brace>[^}]+)\})?\s*-+>"
     r"(?:\|[^|]*\|)?\s*(?P<dst>[A-Za-z0-9_]+)(?:\[(?P<dst_label>[^\]]+)\]|\{(?P<dst_brace>[^}]+)\})?"
 )
+_NODE_LABEL_START_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9_]*\[")
+_EDGE_LABEL_RE = re.compile(r"(?P<connector>(?:-\.+->|-\.+-|={2,}>?|-{2,}>?|~~~)\s*)\|(?P<label>[^\n|]*)\|")
+_UNQUOTED_LABEL_SPECIAL_RE = re.compile(r"[:(){}]")
+_EDGE_LABEL_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+    ("<=>", "⇔"),
+    ("<->", "↔"),
+    ("->", "→"),
+    ("<-", "←"),
+    ("=>", "⇒"),
+)
 _TIMEOUT_SEC = 10.0
 _MERMAID_CACHE: dict[str, tuple[str, str | None]] = {}
 
@@ -37,25 +47,115 @@ async def mermaid_render(source_html: str) -> tuple[str, list[str]]:
 
 
 async def _render_mermaid_block(source: str) -> tuple[str, str | None]:
-    cached = _MERMAID_CACHE.get(source)
+    sanitized_source = _sanitize_mermaid_source(source)
+    cached = _MERMAID_CACHE.get(sanitized_source)
     if cached is not None:
         return cached
     tmp_in = Path(f"/tmp/chapterstudio-mmd-{uuid.uuid4()}.mmd")
     tmp_out = Path(f"/tmp/chapterstudio-mmd-{uuid.uuid4()}.svg")
     result: tuple[str, str | None]
     try:
-        tmp_in.write_text(source, encoding="utf-8")
+        tmp_in.write_text(sanitized_source, encoding="utf-8")
         await _run_external(_cmd(tmp_in, tmp_out), _TIMEOUT_SEC)
         if not tmp_out.exists():
             raise RuntimeError("SVG 출력 파일이 없다.")
         result = (tmp_out.read_text(encoding="utf-8"), None)
     except (OSError, RuntimeError, TimeoutError, subprocess.SubprocessError):
-        result = (_mermaid_fallback(source), None)
+        result = (_mermaid_fallback(sanitized_source), None)
     finally:
         tmp_in.unlink(missing_ok=True)
         tmp_out.unlink(missing_ok=True)
-    _MERMAID_CACHE[source] = result
+    _MERMAID_CACHE[sanitized_source] = result
     return result
+
+
+def _sanitize_mermaid_labels(source: str) -> str:
+    """노드 라벨만 정제해 mermaid-cli 파싱 실패 가능성을 낮춘다."""
+    parts: list[str] = []
+    cursor = 0
+    for match in _NODE_LABEL_START_RE.finditer(source):
+        if match.start() < cursor or _is_inside_edge_label(source, match.start()):
+            continue
+        label_start = match.end()
+        label_end = _find_node_label_end(source, label_start)
+        if label_end is None:
+            continue
+        parts.append(source[cursor:label_start])
+        parts.append(_sanitize_node_label(source[label_start:label_end]))
+        parts.append("]")
+        cursor = label_end + 1
+    parts.append(source[cursor:])
+    return "".join(parts)
+
+
+def _sanitize_mermaid_source(source: str) -> str:
+    """노드 라벨과 edge 라벨을 렌더링 전에 한 번에 정제한다."""
+    return _sanitize_mermaid_edge_labels(_sanitize_mermaid_labels(source))
+
+
+def _sanitize_mermaid_edge_labels(source: str) -> str:
+    """edge 라벨 내부 예약 화살표만 바꾸고 edge 연결자는 그대로 둔다."""
+    return _EDGE_LABEL_RE.sub(_sanitize_edge_label_match, source)
+
+
+def _sanitize_edge_label_match(match: re.Match[str]) -> str:
+    label = _sanitize_edge_label(match.group("label"))
+    return f'{match.group("connector")}|{label}|'
+
+
+def _sanitize_edge_label(label: str) -> str:
+    safe_label = _collapse_label_line(label)
+    for unsafe, replacement in _EDGE_LABEL_REPLACEMENTS:
+        safe_label = safe_label.replace(unsafe, replacement)
+    return safe_label
+
+
+def _is_inside_edge_label(source: str, index: int) -> bool:
+    line_start = source.rfind("\n", 0, index) + 1
+    line_end = source.find("\n", index)
+    if line_end == -1:
+        line_end = len(source)
+    return source[line_start:index].count("|") % 2 == 1 and "|" in source[index:line_end]
+
+
+def _find_node_label_end(source: str, label_start: int) -> int | None:
+    depth = 1
+    for index in range(label_start, len(source)):
+        char = source[index]
+        if char == "\n":
+            return None
+        if char == "[":
+            depth += 1
+        elif char == "]":
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
+def _sanitize_node_label(label: str) -> str:
+    if _is_quoted_label(label):
+        return label
+    one_line_label = _collapse_label_line(label)
+    bracket_safe_label = one_line_label.replace("[", "(").replace("]", ")")
+    if _UNQUOTED_LABEL_SPECIAL_RE.search(bracket_safe_label):
+        return f'"{_escape_label_quotes(bracket_safe_label)}"'
+    return bracket_safe_label
+
+
+def _is_quoted_label(label: str) -> bool:
+    stripped = label.strip()
+    if len(stripped) < 2:
+        return False
+    return (stripped[0] == stripped[-1] == '"') or (stripped[0] == stripped[-1] == "'")
+
+
+def _collapse_label_line(label: str) -> str:
+    return " ".join(label.replace("\r", "\n").splitlines())
+
+
+def _escape_label_quotes(label: str) -> str:
+    return label.replace("\\", "\\\\").replace('"', '\\"')
 
 
 async def _run_external(cmd: list[str], timeout_sec: float) -> str:
@@ -96,7 +196,17 @@ def _parse_flowchart(source: str) -> tuple[dict[str, str], list[str]]:
 
 
 def _label(match: re.Match[str], side: str) -> str | None:
-    return match.group(f"{side}_label") or match.group(f"{side}_brace")
+    label = match.group(f"{side}_label") or match.group(f"{side}_brace")
+    if label is None:
+        return None
+    return _display_label(label)
+
+
+def _display_label(label: str) -> str:
+    stripped = label.strip()
+    if _is_quoted_label(stripped):
+        return stripped[1:-1].replace('\\"', '"')
+    return label
 
 
 def _add_node(nodes: dict[str, str], order: list[str], node_id: str, label: str | None) -> None:

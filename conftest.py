@@ -5,8 +5,16 @@ config·validator·fallback 테스트가 실행될 수 있도록 sys.modules에
 더미 모듈을 미리 등록한다.
 실제 운영 코드는 변경하지 않으며, 테스트 컬렉션 시점에만 적용된다.
 """
+import importlib
 import sys
 import types
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent
+if not sys.path or sys.path[0] != str(_ROOT):
+    # ChapterStudio_V1/ai_connectors가 루트 ai_connectors를 가리는 수집 순서 방지.
+    sys.path.insert(0, str(_ROOT))
+importlib.import_module("ai_connectors")
 
 
 def _make_dummy(name: str) -> types.ModuleType:

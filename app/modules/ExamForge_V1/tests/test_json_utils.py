@@ -84,6 +84,31 @@ class TestRobustJsonExtraction:
         assert unwrap_json_array(wrapped) == inner
 
 
+class TestThinkStripping:
+    """모델 스왑(Qwen <think>) 대비 reasoning 제거 후 JSON 추출 테스트."""
+
+    def test_extract_json_drops_closed_think_block(self) -> None:
+        """닫힌 <think> 블록 뒤의 본문 JSON을 정확히 추출한다."""
+        raw = (
+            "<think>\n5지선다. is_correct는 정확히 1개만 True여야 함.\n</think>\n"
+            '[{"stem":"OS 정의?","options":'
+            '[{"label":"1","text":"A","is_correct":true}]}]'
+        )
+        parsed = parse_llm_json(raw)
+        assert parsed[0]["options"][0]["is_correct"] is True
+
+    def test_extract_json_truncated_think_does_not_break(self) -> None:
+        """본문 JSON 뒤에 닫히지 않은 <think>가 잘려 붙어도 JSON만 살린다."""
+        raw = '[{"stem":"본문"}]\n<think>스트림이 여기서 끊김... 정답 추론 중'
+        parsed = parse_llm_json(raw)
+        assert parsed == [{"stem": "본문"}]
+
+    def test_extract_json_no_think_is_noop(self) -> None:
+        """think가 없는 codex류 출력은 회귀 없이 그대로 파싱된다."""
+        raw = '[{"stem":"평이","label":"1"}]'
+        assert parse_llm_json(raw) == [{"stem": "평이", "label": "1"}]
+
+
 class TestNormalizeQuestionFields:
     """normalize_question_fields 필드명 정규화 테스트."""
 

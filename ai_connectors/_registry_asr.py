@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
+from .asr.gemini_asr_connector import GeminiASRConnector
 from .asr.mlx_qwen3_asr_connector import MLXQwen3ASRConnector
 from .asr.qwen3_asr_modal_connector import Qwen3ASRModalConnector
 from .base import ASRConnector
@@ -19,6 +20,7 @@ _LOG = logging.getLogger(__name__)
 
 # ASR 커넥터 팩토리 맵 (ASRConnector 구현체)
 ASR_CONNECTORS: dict[str, Callable[[], ASRConnector]] = {
+    "gemini-asr": lambda: GeminiASRConnector(),
     "mlx-qwen3-asr": lambda: MLXQwen3ASRConnector(),
     "qwen3-asr-modal": lambda: Qwen3ASRModalConnector(),
 }

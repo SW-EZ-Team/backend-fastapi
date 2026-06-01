@@ -94,6 +94,16 @@ def gemini_api_key() -> str | None:
     return _optional_value("GEMINI_API_KEY")
 
 
+def google_api_key() -> str | None:
+    """Google AI Studio API 키를 반환한다."""
+    return _optional_value("GOOGLE_API_KEY")
+
+
+def gemini_text_model() -> str:
+    """google-genai 텍스트 커넥터의 모델 ID를 반환한다."""
+    return _optional_value("GEMINI_TEXT_MODEL") or "gemini-3.5-flash"
+
+
 def modal_token_id() -> str | None:
     return _optional_value("MODAL_TOKEN_ID")
 
@@ -108,6 +118,15 @@ def active_text_model() -> str:
 
 def active_planner_model() -> str:
     return _optional_value("ACTIVE_PLANNER_MODEL") or "opus46"
+
+
+def active_verifier_model() -> str | None:
+    """내용 정확성 검증 패스에 쓸 커넥터 이름을 반환한다(미설정이면 None).
+
+    None이면 registry가 활성 텍스트 커넥터로 폴백한다. 검증을 더 강한/독립 모델로
+    돌리고 싶을 때만 ACTIVE_VERIFIER_MODEL을 명시한다.
+    """
+    return _optional_value("ACTIVE_VERIFIER_MODEL")
 
 
 def active_tts_model() -> str:
@@ -138,6 +157,20 @@ def tts_timeout_sec() -> float:
 
 def qwen_app_name() -> str:
     return _optional_value("QWEN_APP_NAME") or "chapterstudio-qwen27b"
+
+
+def modal_teardown_enabled() -> bool:
+    """Modal 앱을 완전히 un-deploy(decommission)할지 여부를 반환한다(기본 false).
+
+    [중요] 비용 통제 목적으로 이 값을 true로 설정하면 안 된다.
+    Modal은 running 컨테이너 시간만 과금하므로, 배포된 앱이 0 컨테이너 상태(scale-to-zero)면
+    idle 비용이 0이다. 비용 통제는 scaledown_window=30초(deploy/modal_app.py)가 이미 담당한다.
+
+    이 스위치는 순전히 "서비스 전체를 영구 폐기할 때"(decommission) 쓰는 것이다.
+    true로 설정하면 modal app stop 으로 배포 자체가 내려가 다음 요청이 App not found로 깨진다.
+    라이브 서비스 환경에서 true로 설정하는 것은 절대 금지다.
+    """
+    return _bool_value("CHAPTERSTUDIO_MODAL_TEARDOWN", False)
 
 
 def gemini_cli_model() -> str:
@@ -178,6 +211,67 @@ def codex_cli_reasoning_effort() -> str:
 
 def codex_cli_timeout_sec() -> int:
     return _int_value("CODEX_CLI_TIMEOUT_SEC", "180", 30, 600)
+
+
+def _bool_value(key: str, default: bool) -> bool:
+    """불리언 환경값을 읽는다(미설정이면 기본값)."""
+    raw_value = _optional_value(key)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def lesson_self_repair_enabled() -> bool:
+    """강의 생성 self-check + targeted-repair 활성 여부를 반환한다(기본 ON).
+
+    회귀 격리·비용 절감이 필요할 때 CHAPTERSTUDIO_LESSON_SELF_REPAIR=false로 끈다.
+    """
+    return _bool_value("CHAPTERSTUDIO_LESSON_SELF_REPAIR", True)
+
+
+def lesson_content_verify_enabled() -> bool:
+    """강의 내용 정확성(사실·논리) 검증 패스 활성 여부를 반환한다(기본 ON).
+
+    형식/분량 self-repair와 별개의, LLM 1회(+교정 시 1회) 검증 장치다. 비용·지연
+    절감이나 회귀 격리가 필요할 때 CHAPTERSTUDIO_CONTENT_VERIFY=false로 끈다.
+    """
+    return _bool_value("CHAPTERSTUDIO_CONTENT_VERIFY", True)
+
+
+def lesson_parallel_verify_enabled() -> bool:
+    """2차 내용 검증·교정을 병렬로 수행할지 여부를 반환한다(기본 ON).
+
+    슬라이드·퀴즈·음성을 동시에 검증하고 이슈가 있는 컴포넌트만 동시에 교정한다. 직렬
+    검증으로 회귀 격리하려면 CHAPTERSTUDIO_PARALLEL_VERIFY=false로 끈다(직렬 경로 폴백).
+    """
+    return _bool_value("CHAPTERSTUDIO_PARALLEL_VERIFY", True)
+
+
+def verify_max_rounds() -> int:
+    """병렬 검증·교정 최대 라운드 수를 반환한다(기본 2).
+
+    1라운드 후 잔존 오류가 있으면 최대 이 값까지 추가 교정을 반복한다. 비용·속도 절감이
+    필요하면 CHAPTERSTUDIO_VERIFY_MAX_ROUNDS=1 로 줄인다(기존 1라운드 동작 복원).
+    """
+    return _int_value("CHAPTERSTUDIO_VERIFY_MAX_ROUNDS", "2", 1, 4)
+
+
+def voice_length_gate_enabled() -> bool:
+    """voice_script 결정적 길이 게이트(len() 기준 900자 미달 → 교정 강제) 활성 여부(기본 ON).
+
+    LLM 판단 없이 len()으로 미달 항목을 찾아 확장 교정에 포함한다. 비용 절감·회귀 격리
+    시 CHAPTERSTUDIO_VOICE_LENGTH_GATE=false로 끈다(미달 허용, 검증기 판단에만 의존).
+    """
+    return _bool_value("CHAPTERSTUDIO_VOICE_LENGTH_GATE", True)
+
+
+def voice_min_chars() -> int:
+    """voice_script 최소 문자 수를 반환한다(기본 900).
+
+    이 값 미만인 voice_script는 길이 게이트 교정 대상에 강제 포함된다. 환경 변수
+    CHAPTERSTUDIO_VOICE_MIN_CHARS로 조절(허용 범위 400~1600).
+    """
+    return _int_value("CHAPTERSTUDIO_VOICE_MIN_CHARS", "900", 400, 1600)
 
 
 def log_level() -> str:

@@ -1,0 +1,166 @@
+"""강의(lessons) 생성 오케스트레이션 — Spring confirmCurriculum 이후 호출.
+
+흐름: 커리큘럼 확정된 course의 모든 chapter(=curriculum_unit, lesson_id별)를 순회하며
+기존 ChapterStudio 생성 파이프라인(load_generation_context → generate_chapter_state →
+persist_chapter_state)을 적용하고, 각 강의 완료 시 public.chapter의 total_slides·status를
+갱신해 Spring이 학습 가능 상태(AVAILABLE)를 조회할 수 있게 한다.
+
+음성(TTS)은 persist 단계에서 voice_script_queue로 분리 적재되므로 여기서는 텍스트 생성만 한다.
+"""
+from __future__ import annotations
+
+import logging
+import re
+from typing import Protocol
+
+from app.modules.ChapterStudio_V1.app.generation_context import GenerationContext
+from app.modules.ChapterStudio_V1.db.generation_context_loader import load_generation_context
+from app.modules.ChapterStudio_V1.db.persistence import persist_chapter_state
+from app.modules.ChapterStudio_V1.db.persistence_status import mark_chapter_failed
+from app.modules.ChapterStudio_V1.db.weakness_aggregator import aggregate_weak_points
+from app.modules.ChapterStudio_V1.pipeline.converters import state_to_response
+from app.modules.ChapterStudio_V1.pipeline.graph import generate_chapter_state
+from common.db import get_connection
+
+_LOG = logging.getLogger(__name__)
+_CHAPTER_ID_SAFE = re.compile(r"[^A-Za-z0-9_-]+")
+
+
+class ExecuteConnection(Protocol):
+    async def execute(self, query: str, *args: object) -> object:
+        """상태 갱신 쿼리를 실행한다."""
+
+
+def _chapter_id(lesson_id: str) -> str:
+    """ChapterStudio 저장 키 규칙과 동일하게 lesson_id 기반 chapter_id를 만든다."""
+    return f"chapter_{_CHAPTER_ID_SAFE.sub('_', lesson_id).strip('_') or 'lesson'}"
+
+
+async def generate_lessons_for_course(course_id: str) -> None:
+    """course의 모든 강의를 순차 생성한다. 강의별 실패는 격리하고 다음 강의로 진행한다."""
+    lesson_ids = await _course_lesson_ids(course_id)
+    if not lesson_ids:
+        _LOG.error("[lessons] 생성할 chapter 없음 — courseId=%s", course_id)
+        return
+
+    _LOG.info("[lessons] 시작 — courseId=%s, 강의 %d개", course_id, len(lesson_ids))
+    # 비용 통제 주석: Modal은 running 컨테이너 시간만 과금한다. 마지막 요청이 끝나면
+    # scaledown_window(30초, deploy/modal_app.py)가 컨테이너를 자동 종료해 비용이 0이 된다.
+    # un-deploy(modal app stop)는 배포 자체를 내리므로 여기서 호출하지 않는다.
+    # decommission이 필요하면 CHAPTERSTUDIO_MODAL_TEARDOWN=true를 설정하고 수동 실행한다.
+    done = 0
+    for lesson_id in lesson_ids:
+        if await _generate_one(lesson_id):
+            done += 1
+    _LOG.info("[lessons] 완료 — courseId=%s, 성공 %d/%d", course_id, done, len(lesson_ids))
+
+
+async def _course_lesson_ids(course_id: str) -> list[str]:
+    """public.chapter에서 강의 id를 order_index 순으로 읽는다 (= curriculum_unit.lesson_id)."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT id FROM public.chapter WHERE course_id = $1 ORDER BY order_index",
+            course_id,
+        )
+    return [row["id"] for row in rows]
+
+
+async def _generate_one(lesson_id: str) -> bool:
+    """강의 1개를 생성·저장하고 public.chapter 상태를 AVAILABLE로 갱신한다."""
+    try:
+        async with get_connection() as conn:
+            context = await load_generation_context(conn, lesson_id)
+        return await _generate_loaded_context(context)
+    except Exception as exc:
+        _LOG.error("[lessons] 강의 실패 — lesson_id=%s, stage=load_generation_context, error=%s", lesson_id, exc)
+        return False
+
+
+async def generate_lesson_for_chapter(
+    course_id: str,
+    lesson_id: str,
+    *,
+    audience_level: str | None = None,
+    learning_goal: str | None = None,
+    tone: int | None = None,
+    pace: int | None = None,
+    tutor_depth: int | None = None,
+    socratic: int | None = None,
+) -> bool:
+    """완료된 이전 강의 약점을 주입해 강의 1개를 progressive로 생성한다."""
+    try:
+        async with get_connection() as conn:
+            weak_points = await aggregate_weak_points(conn, course_id, lesson_id)
+            context = await load_generation_context(conn, lesson_id)
+        personalized = _personalized_context(
+            context,
+            weak_points=weak_points,
+            audience_level=audience_level,
+            learning_goal=learning_goal,
+            tone=tone,
+            pace=pace,
+            tutor_depth=tutor_depth,
+            socratic=socratic,
+        )
+        return await _generate_loaded_context(personalized)
+    except Exception as exc:
+        _LOG.error("[lessons] 단건 강의 실패 — courseId=%s, lessonId=%s, error=%s", course_id, lesson_id, exc)
+        return False
+
+
+async def _generate_loaded_context(context: GenerationContext) -> bool:
+    """로드된 생성 컨텍스트를 공통 생성·저장 경로로 실행한다."""
+    chapter_id = _chapter_id(context.lesson_id)
+    stage = "generate_chapter_state"
+    try:
+        state = await generate_chapter_state(context.to_generation_input())
+        stage = "state_to_response"
+        response = state_to_response(state, chapter_id)
+        stage = "persist_chapter_state"
+        async with get_connection() as conn:
+            await persist_chapter_state(conn, context, chapter_id, state)
+            await _mark_public_chapter_available(conn, context.lesson_id, len(response.slides))
+        _LOG.info("[lessons] 강의 완료 — lesson_id=%s, 슬라이드 %d", context.lesson_id, len(response.slides))
+        return True
+    except Exception as exc:
+        await _record_generation_failure(context, chapter_id, stage, exc)
+        return False
+
+
+async def _mark_public_chapter_available(conn: ExecuteConnection, lesson_id: str, slide_count: int) -> None:
+    await conn.execute(
+        "UPDATE public.chapter SET total_slides = $2, status = 'AVAILABLE', updated_at = NOW() WHERE id = $1",
+        lesson_id,
+        slide_count,
+    )
+
+
+async def _record_generation_failure(context: GenerationContext, chapter_id: str, stage: str, exc: Exception) -> None:
+    _LOG.error("[lessons] 강의 실패 — lesson_id=%s, stage=%s, error=%s", context.lesson_id, stage, exc)
+    try:
+        async with get_connection() as conn:
+            await mark_chapter_failed(conn, context, chapter_id, stage, exc)
+    except Exception as failure_exc:
+        _LOG.error("[lessons] 실패 상태 기록 실패 — lesson_id=%s, error=%s", context.lesson_id, failure_exc)
+
+
+def _personalized_context(
+    context: GenerationContext,
+    *,
+    weak_points: str,
+    audience_level: str | None,
+    learning_goal: str | None,
+    tone: int | None,
+    pace: int | None,
+    tutor_depth: int | None,
+    socratic: int | None,
+) -> GenerationContext:
+    updates: dict[str, object] = {"weak_points": weak_points}
+    if audience_level is not None:
+        updates["audience_level"] = audience_level
+    if learning_goal is not None:
+        updates["learning_goal"] = learning_goal
+    for key, value in {"tone": tone, "pace": pace, "tutor_depth": tutor_depth, "socratic": socratic}.items():
+        if value is not None:
+            updates[key] = value
+    return context.model_copy(update=updates)

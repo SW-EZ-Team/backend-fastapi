@@ -5,17 +5,15 @@ from typing import Any
 import re
 
 from app.modules.ExamForge_V1.common.json_yaml_fallback import parse_yaml_jsonish
+# 루트 common/ 패키지 재사용 (모델 스왑 시 think 블록 파싱 붕괴를 한 곳에서 차단).
+from common.llm_output import strip_thinking
 
 # JSON 표준에서 유효한 이스케이프 시퀀스 패턴
 _VALID_ESCAPES = re.compile(r'\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})')
 
 
 def _fix_unescaped_backslashes(text: str) -> str:
-    r"""유효한 JSON 이스케이프를 제외한 백슬래시를 이중 처리한다.
-
-    LaTeX(\psi, \frac) 또는 코드(\n이 아닌 것들)에서 발생하는
-    잘못된 이스케이프 시퀀스를 안전하게 이중 백슬래시로 변환한다.
-    """
+    r"""유효한 JSON 이스케이프를 제외한 백슬래시를 이중 처리한다(LaTeX \psi 등 교정)."""
     result: list[str] = []
     i = 0
     while i < len(text):
@@ -36,7 +34,12 @@ def _fix_unescaped_backslashes(text: str) -> str:
 
 
 def extract_json(text: str) -> str:
-    """AI 응답에서 JSON 부분만 추출한다."""
+    """AI 응답에서 JSON 부분만 추출한다.
+
+    진입부에서 reasoning(<think>, 잘린 think 포함)을 제거해 ExamForge 전 노드를
+    한 번에 보호한다. codex 출력엔 think가 없어 no-op이므로 회귀가 없다.
+    """
+    text = strip_thinking(text)
     if "```" in text:
         try:
             start = text.index("```") + 3
@@ -163,11 +166,7 @@ def _trim_to_first_json(text: str) -> str:
 def _find_matching_close(
     text: str, start: int, open_char: str, close_char: str
 ) -> int:
-    """괄호 깊이를 추적해 outermost 닫는 괄호 위치를 반환한다.
-
-    문자열 리터럴 내부의 괄호는 무시한다.
-    찾지 못하면 -1을 반환한다.
-    """
+    """괄호 깊이를 추적해 outermost 닫는 괄호 위치를 반환한다(문자열 내부 무시, 없으면 -1)."""
     depth = 0
     in_string = False
     escape_next = False

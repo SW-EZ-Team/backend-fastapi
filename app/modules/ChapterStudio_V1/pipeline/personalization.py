@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+
+def personalization_contract(
+    *,
+    weak_points: str,
+    audience_level: str,
+    tone: int,
+    pace: int,
+    tutor_depth: int,
+    socratic: int,
+    learning_goal: str,
+    component_rule: str = "",
+    weak_component_rule: str = "",
+) -> str:
+    """프롬프트에 넣을 개인화 계약을 한곳에서 만든다."""
+    level = audience_level.strip() or "일반 학습자"
+    goal = learning_goal.strip() or "핵심 개념 이해와 실습"
+    lines = [
+        "개인화 계약:",
+        f"학습자 수준 {level}에 맞춰 난이도·용어·예시 조정. 학습 목표 {goal}.",
+        _tutor_control_line(tone, pace, tutor_depth, socratic),
+    ]
+    weak_line = _weak_points_line(weak_points)
+    if weak_line:
+        lines.append(weak_line)
+        if weak_component_rule:
+            lines.append(weak_component_rule)
+    if component_rule:
+        lines.append(component_rule)
+    return "\n".join(lines)
+
+
+def _tutor_control_line(tone: int, pace: int, tutor_depth: int, socratic: int) -> str:
+    return (
+        f"말투는 {_tone_label(tone)}로 유지하고, 설명 속도는 {_pace_label(pace)}로 조절한다. "
+        f"튜터 깊이는 {_depth_label(tutor_depth)}로 맞추며, 질문 스타일은 {_socratic_label(socratic)}로 둔다."
+    )
+
+
+def _weak_points_line(weak_points: str) -> str:
+    cleaned = weak_points.strip()
+    if not cleaned:
+        return ""
+    return f"학습자 약점 개념: {cleaned} — 이 개념들을 집중 보강·반복 노출하고 흔한 오개념을 교정한다."
+
+
+def _tone_label(value: int) -> str:
+    score = _clamp(value)
+    if score <= 33:
+        return "차분하고 간결한 말투"
+    if score <= 66:
+        return "친절하고 균형 잡힌 과외 말투"
+    return "격려가 많고 부드러운 과외 말투"
+
+
+def _pace_label(value: int) -> str:
+    score = _clamp(value)
+    if score <= 33:
+        return "천천히, 단계 사이 복습을 넣는 방식"
+    if score <= 66:
+        return "보통 속도로 핵심과 예시를 균형 있게 설명하는 방식"
+    return "빠르게 핵심을 압축하되 약점 부분은 놓치지 않는 방식"
+
+
+def _depth_label(value: int) -> str:
+    score = _clamp(value)
+    if score <= 33:
+        return "기초 용어와 직관을 먼저 세우는 수준"
+    if score <= 66:
+        return "원리와 적용 예시를 함께 다루는 수준"
+    return "원리, 예외, 실전 함정까지 짚는 심화 수준"
+
+
+def _socratic_label(value: int) -> str:
+    score = _clamp(value)
+    if score <= 33:
+        return "직접 설명 중심, 확인 질문은 최소화"
+    if score <= 66:
+        return "중간중간 짧은 자가점검 질문 포함"
+    return "소크라테스식 질문과 오개념 점검을 자주 포함"
+
+
+def _clamp(value: int) -> int:
+    if value < 0:
+        return 0
+    if value > 100:
+        return 100
+    return value
+
+
+__all__ = ["personalization_contract"]

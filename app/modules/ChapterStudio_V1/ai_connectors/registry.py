@@ -6,11 +6,6 @@ from typing import Protocol, runtime_checkable
 
 from app.modules.ChapterStudio_V1.ai_connectors.base import AIConnector, TTSConnector
 
-_LOG = logging.getLogger(__name__)
-
-# Gemini는 테스트 전용 커넥터다 — 프로덕션 레지스트리에서 선택되려면
-# 반드시 GEMINI_CLI_ENABLED=true 환경변수가 설정되어야 한다.
-_GEMINI_CONNECTORS: frozenset[str] = frozenset({"gemini_cli"})
 from app.modules.ChapterStudio_V1.ai_connectors.claude_sonnet_connector import ClaudeSonnetConnector
 from app.modules.ChapterStudio_V1.ai_connectors.codex_cli_connector import CodexCLIConnector
 from app.modules.ChapterStudio_V1.ai_connectors.failover_connector import FailoverAIConnector
@@ -23,10 +18,16 @@ from app.modules.ChapterStudio_V1.common.config import (
     active_planner_model,
     active_text_model,
     active_tts_model,
+    active_verifier_model,
     text_fallback_after_failures,
-    text_fallback_connector,
     text_primary_attempt_timeout_sec,
 )
+
+_LOG = logging.getLogger(__name__)
+
+# Gemini CLI는 테스트 전용 커넥터다 — 프로덕션 레지스트리에서 선택되려면
+# 반드시 GEMINI_CLI_ENABLED=true 환경변수가 설정되어야 한다.
+_GEMINI_CONNECTORS: frozenset[str] = frozenset({"gemini_cli"})
 
 Connector = AIConnector | TTSConnector
 
@@ -85,14 +86,23 @@ def _build_mlx_qwen3_connector() -> AIConnector:
     return MlxQwen3LocalConnector()
 
 
+def _build_gemini_genai_connector() -> AIConnector:
+    """google-genai SDK 커넥터는 선택 시점에만 로드한다."""
+    from app.modules.ChapterStudio_V1.ai_connectors.gemini_genai_connector import (
+        GeminiGenAIConnector,
+    )
+    return GeminiGenAIConnector()
+
+
 # 폴백 래퍼는 팩토리 함수를 등록한다
 _REGISTRY["qwen27b_sonnet_fallback"] = _build_failover_connector
+_REGISTRY["gemini_flash"] = _build_gemini_genai_connector
 
 
 def get_connector(name: str) -> Connector:
     """커넥터 인스턴스를 한 번만 생성해 노드 호출 비용을 줄인다.
 
-    Gemini 계열 커넥터는 테스트 전용이다. GEMINI_CLI_ENABLED=true 환경변수 없이
+    Gemini CLI 커넥터는 테스트 전용이다. GEMINI_CLI_ENABLED=true 환경변수 없이
     선택하면 ModelNotFoundError를 발생시켜 프로덕션 선택을 차단한다.
     """
     if name in _CACHE:
@@ -127,6 +137,18 @@ def get_text_connector() -> AIConnector:
 def get_planner_connector() -> AIConnector:
     """Planner는 Opus 계열 커넥터만 AIConnector로 노출한다."""
     return _as_ai_connector(get_connector(active_planner_model()))
+
+
+def get_verifier_connector() -> AIConnector:
+    """내용 정확성 검증용 커넥터를 반환한다.
+
+    ACTIVE_VERIFIER_MODEL이 설정돼 있으면 그 커넥터를, 없으면 활성 텍스트 커넥터를
+    그대로 쓴다(별도 검증 모델을 강제하지 않는다).
+    """
+    name = active_verifier_model()
+    if name is None:
+        return get_text_connector()
+    return _as_ai_connector(get_connector(name))
 
 
 def get_tts_connector() -> TTSConnector:
@@ -165,4 +187,5 @@ __all__ = [
     "get_planner_connector",
     "get_text_connector",
     "get_tts_connector",
+    "get_verifier_connector",
 ]

@@ -8,7 +8,7 @@ import time
 
 from app.modules.ExamForge_V1.pipeline.state import ExamForgeState
 from app.modules.ExamForge_V1.prompts.verification import VERIFICATION_SYSTEM, build_verification_prompt
-from app.modules.ExamForge_V1.common.config import active_verifier_model, verification_concurrency
+from app.modules.ExamForge_V1.common.config import active_verifier_model, verification_concurrency, verifier_max_tokens
 from app.modules.ExamForge_V1.common.ai_bridge import get_connector, ChapterAIRequest
 from app.modules.ExamForge_V1.common.logger import get_logger
 
@@ -63,7 +63,8 @@ async def verify_answers_node(state: ExamForgeState) -> dict:
             req = ChapterAIRequest(
                 system=VERIFICATION_SYSTEM,
                 user=prompt,
-                max_tokens=1000,
+                # reasoning 모델이면 <think> 토큰 여유 확보, codex/claude면 1000 그대로(비용 불변)
+                max_tokens=verifier_max_tokens(1000),
                 temperature=0.2,
             )
             try:

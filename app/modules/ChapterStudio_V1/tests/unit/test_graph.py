@@ -37,6 +37,10 @@ def fake_connector(monkeypatch: pytest.MonkeyPatch) -> None:
     get_compiled_graph.cache_clear()
     monkeypatch.setitem(registry._REGISTRY, "unit_fake", FakeTextConnector)
     monkeypatch.setenv("ACTIVE_TEXT_MODEL", "unit_fake")
+    # 이 테스트는 그래프 배선만 검증한다. self-repair·content-verify는 각 전용 테스트
+    # (test_generate_repair / test_content_verify)에서 다루므로 여기서는 끈다.
+    monkeypatch.setenv("CHAPTERSTUDIO_LESSON_SELF_REPAIR", "false")
+    monkeypatch.setenv("CHAPTERSTUDIO_CONTENT_VERIFY", "false")
     yield
     registry.clear_cache()
     get_compiled_graph.cache_clear()
@@ -59,7 +63,7 @@ def _payload(slide_count: int) -> dict[str, object]:
     return {
         "slides": [_slide(idx) for idx in range(slide_count)],
         "quizzes": [_quiz(idx) for idx in range(slide_count)],
-        "note_blocks": [{"heading": "핵심", "bullets": ["핵심을 짧게 복습합니다."]}],
+        "note_blocks": [_note(idx) for idx in range(3)],
         "assignment": {
             "title": "실습 과제",
             "assignment_format": "서술형",
@@ -67,8 +71,23 @@ def _payload(slide_count: int) -> dict[str, object]:
             "steps": ["개념을 설명합니다."],
             "rubric": ["근거를 확인합니다."],
         },
-        "voice_scripts": [{"slide_idx": idx, "script_text": "설명 대본입니다."} for idx in range(slide_count)],
+        "voice_scripts": [
+            {"slide_idx": idx, "script_text": _voice_text()} for idx in range(slide_count)
+        ],
     }
+
+
+def _note(idx: int) -> dict[str, object]:
+    return {
+        "heading": f"핵심 {idx}",
+        "bullets": ["핵심 개념을 한 문장으로 다시 정리해 복습합니다.", "실수하기 쉬운 경계 조건을 직접 점검합니다."],
+    }
+
+
+def _voice_text() -> str:
+    # self-check 하한(700자/7문장)을 넘기는 충분히 풍부한 과외 말투 대본이다.
+    sentence = "자, 이번 화면에서는 핵심 개념을 왜 이렇게 봐야 하는지 직관부터 차근차근 풀어서 설명해 보겠습니다."
+    return " ".join(sentence for _ in range(9))
 
 
 def _slide(idx: int) -> dict[str, object]:
@@ -78,7 +97,12 @@ def _slide(idx: int) -> dict[str, object]:
         "focus": "핵심 흐름",
         "checkpoint": "자가점검",
         "category": "text",
-        "html": "<section><h2>핵심</h2><p>설명 문장입니다.</p></section>",
+        "html": (
+            "<section><h2>핵심 개념을 한 화면에서 정리합니다.</h2>"
+            "<p>먼저 이 개념이 왜 중요한지 배경을 설명합니다.</p>"
+            "<p>다음으로 실제 동작 방식을 예시와 함께 살펴봅니다.</p>"
+            "<p>마지막으로 자주 틀리는 지점을 짚고 넘어갑니다.</p></section>"
+        ),
         "css": "",
     }
 
@@ -90,5 +114,5 @@ def _quiz(idx: int) -> dict[str, object]:
         "choices": ["A", "B", "C", "D"],
         "answer_idx": 0,
         "difficulty": "이해",
-        "explanation": "해설입니다.",
+        "explanation": "정답은 A이며 나머지 보기는 핵심 개념을 잘못 적용한 흔한 오답 함정입니다.",
     }

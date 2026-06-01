@@ -22,7 +22,8 @@ def test_codex_cli_raises_on_failed_turn() -> None:
         _extract_agent_text(stdout)
 
 
-def test_codex_cli_command_uses_schema_and_read_only() -> None:
+def test_codex_cli_command_uses_schema_and_read_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CODEX_CLI_REASONING_EFFORT", raising=False)
     req = ChapterAIRequest(
         user="테스트",
         max_tokens=100,

@@ -39,6 +39,17 @@ def claude_sonnet_timeout_sec() -> float:
     return value
 
 
+def google_api_key() -> str | None:
+    """Google AI Studio API 키를 반환한다. 빈 문자열이면 None."""
+    value = os.getenv("GOOGLE_API_KEY", "").strip()
+    return value if value else None
+
+
+def gemini_text_model() -> str:
+    """google-genai 텍스트 커넥터가 사용할 Gemini 모델 ID를 반환한다."""
+    return os.getenv("GEMINI_TEXT_MODEL", "gemini-3.5-flash").strip() or "gemini-3.5-flash"
+
+
 def claude_sonnet_max_concurrency() -> int:
     """Claude Sonnet 배치 호출 병렬 상한을 반환한다."""
     raw = os.getenv("CLAUDE_SONNET_MAX_CONCURRENCY", "4").strip()
