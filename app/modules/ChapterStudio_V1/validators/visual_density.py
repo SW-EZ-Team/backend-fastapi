@@ -6,7 +6,9 @@ _VISUAL_PATTERNS = (
     "rendered-chart", "chart-box", "mermaid-fallback", "mermaid-node", "code-card",
     "formula", "<details", "tag-", "<table", "<svg", "metric-card", "flow-strip",
     "comparison-table", "timeline", "step-grid", "linked-list", "graph-map",
-    "graph-node", "node-link-visual",
+    "graph-node", "node-link-visual", "visual-slide", "number-line-visual",
+    "comparison-visual", "step-flow-visual", "fraction-bar-visual",
+    "concept-map-visual", "example-box-visual",
 )
 
 

@@ -4,12 +4,19 @@ from __future__ import annotations
 def visual_theme_css() -> str:
     """강의 시각 블록의 기본 대비와 구조를 보장한다."""
     return "".join((
-        ":root{--visual-paper:#FFFDF7;--visual-wash:#F3F7FB;--visual-ink:#1F2A30;"
+        ":root{--lesson-bg:#F8F8F6;--lesson-offwhite:#FFFDF7;--visual-paper:#FFFDF7;--visual-wash:#F3F7FB;--visual-ink:#1F2A30;"
         "--visual-muted:#4F6068;--visual-line:#C9D5C4;--visual-accent:#207B4C;"
-        "--visual-accent-2:#2A5C7A;--visual-warn:#7A6518;--visual-danger:#A33A3A}",
-        "section{max-width:100%;min-height:100%;padding:36px 40px;background:var(--visual-wash);"
+        "--visual-accent-soft:#DFF3E7;--visual-accent-2:#2A5C7A;--visual-warn:#7A6518;--visual-danger:#A33A3A}",
+        "section{max-width:100%;min-height:100%;padding:36px 40px;background:var(--lesson-bg);"
         "color:var(--visual-ink);font-family:Pretendard,Inter,system-ui,-apple-system,sans-serif}",
         "h1,h2,h3{color:var(--visual-ink);letter-spacing:0;line-height:1.22}p,li,dd,dt{color:var(--visual-ink);line-height:1.72}",
+        ".visual-slide{display:grid;gap:18px;background:var(--lesson-bg)}.visual-slide header{display:grid;gap:8px}"
+        ".visual-slide h2{font-size:clamp(24px,3vw,34px);margin:0}.visual-slide header p{max-width:760px;margin:0;color:var(--visual-muted)}"
+        ".visual-slide svg{display:block;width:100%;max-width:860px;height:auto;margin:0 auto}.visual-verdict,.visual-answer{font-weight:850;color:var(--visual-accent)}",
+        ".comparison-visual,.step-flow-visual,.fraction-bar-visual,.example-box-visual{background:var(--visual-paper);"
+        "border:1px solid var(--visual-line);border-radius:8px;padding:16px}.comparison-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}"
+        ".comparison-card{background:#F8FBF5;border:1px solid var(--visual-line);border-radius:8px;padding:14px}.comparison-card h3{margin-top:0}"
+        ".example-box-visual{display:grid;grid-template-columns:120px 1fr;gap:16px;align-items:start}",
         ".metric-card{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;"
         "background:var(--visual-paper);border:1px solid var(--visual-line);border-radius:8px;padding:16px}",
         ".metric-card>*{min-height:74px;border-left:5px solid var(--visual-accent);background:#F8FBF5;"
