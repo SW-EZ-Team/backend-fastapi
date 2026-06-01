@@ -534,9 +534,11 @@ class _StubConnector:
     def __init__(self, text: str) -> None:
         self._text = text
         self.calls = 0
+        self.requests: list[object] = []
 
     async def generate(self, req: object) -> _StubResponse:
         self.calls += 1
+        self.requests.append(req)
         return _StubResponse(self._text)
 
     def supports(self, feature: str) -> bool:
@@ -617,3 +619,43 @@ class TestTargetedRepair:
         result = await repair_questions_node(state)
         assert result["repair_applied"] is False
         assert route_after_repair(result) == "regenerate"
+
+    @pytest.mark.asyncio
+    async def test_list_fix_instructions_does_not_crash(self) -> None:
+        """검증 모델이 list 지시를 줘도 문자열로 합쳐 교정 프롬프트에 넣는다."""
+        from unittest.mock import patch
+        from app.modules.ExamForge_V1.pipeline.nodes.repair_questions_node import (
+            repair_questions_node,
+        )
+
+        repaired_json = '{"stem":"교정된 발문","correct_answer":"2"}'
+        stub = _StubConnector(repaired_json)
+        state = {
+            "source_text": "원본 자료 " * 30,
+            "answered_questions": [{
+                "question_id": "q1", "draft_id": "d1",
+                "template_id": "ko_multiple_choice_5",
+                "correct_answer": "1", "stem": "원래 발문",
+            }],
+            "verified_questions": [{
+                "question_id": "q1", "draft_id": "d1",
+                "template_id": "ko_multiple_choice_5",
+                "correct_answer": "1", "stem": "원래 발문",
+                "_verification": {
+                    "passed": False,
+                    "issues": ["정답 불일치"],
+                    "fix_instructions": ["정답을 2번으로 교정", "해설 근거 추가"],
+                },
+            }],
+            "failed_question_ids": ["d1"],
+        }
+        with patch(
+            "app.modules.ExamForge_V1.pipeline.nodes.repair_questions_node.get_connector",
+            return_value=stub,
+        ):
+            result = await repair_questions_node(state)
+
+        assert result["repair_applied"] is True
+        assert stub.calls == 1
+        captured_user = getattr(stub.requests[0], "user", "")
+        assert "정답을 2번으로 교정 해설 근거 추가" in captured_user

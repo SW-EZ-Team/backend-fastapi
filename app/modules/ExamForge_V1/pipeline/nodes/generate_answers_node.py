@@ -9,7 +9,11 @@ from app.modules.ExamForge_V1.schemas.question import QuestionDraft
 from app.modules.ExamForge_V1.templates.registry import get_template
 from app.modules.ExamForge_V1.prompts.answer_gen import get_answer_system
 from app.modules.ExamForge_V1.common.config import generation_concurrency
-from app.modules.ExamForge_V1.common.ai_bridge import get_text_connector, ChapterAIRequest
+from app.modules.ExamForge_V1.common.ai_bridge import (
+    ChapterAIRequest,
+    get_text_connector,
+    run_connector_tasks,
+)
 from app.modules.ExamForge_V1.common.errors import ParseError
 from app.modules.ExamForge_V1.common.logger import get_logger
 
@@ -17,7 +21,7 @@ logger = get_logger(__name__)
 
 
 async def generate_answers_node(state: ExamForgeState) -> dict:
-    """각 문제의 정답과 해설을 병렬 생성한다."""
+    """각 문제의 정답과 해설을 문항 단위로 생성한다."""
     # 상위 노드에서 오류가 발생한 경우 즉시 반환해 오류 전파를 막는다
     if state.get("pipeline_status") == "error":
         return {}
@@ -72,10 +76,11 @@ async def generate_answers_node(state: ExamForgeState) -> dict:
                     logger.warning("정답 생성 실패(%d차): %s", attempt + 1, e)
             return _empty_answer(q)
 
-    results = await asyncio.gather(
-        *[_generate_answer(q) for q in questions],
-        return_exceptions=True,
-    )
+    task_factories = [
+        lambda question=question: _generate_answer(question)
+        for question in questions
+    ]
+    results = await run_connector_tasks(task_factories, connector)
 
     answered: list[dict] = []
     for i, r in enumerate(results):

@@ -43,6 +43,15 @@ _REPAIRABLE_FIELDS: tuple[str, ...] = (
 )
 
 
+def _normalize_fix_instructions(value: object) -> str:
+    """검증 모델이 str/list/None 어느 타입을 줘도 교정 지시 문자열로 맞춘다."""
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return " ".join(str(item) for item in value).strip()
+    return str(value).strip()
+
+
 def _select_repair_targets(state: ExamForgeState) -> list[dict]:
     """fix_instructions가 있는 검증 실패 문항만 교정 대상으로 추린다."""
     failed_ids = set(state.get("failed_question_ids", []))
@@ -54,7 +63,7 @@ def _select_repair_targets(state: ExamForgeState) -> list[dict]:
         draft_id = q.get("draft_id", q.get("question_id", ""))
         if draft_id not in failed_ids:
             continue
-        fix = (verification.get("fix_instructions") or "").strip()
+        fix = _normalize_fix_instructions(verification.get("fix_instructions"))
         if not fix:
             # 구체 지시가 없으면 표적 교정 불가 → blind 재생성에 맡긴다.
             continue
@@ -164,7 +173,7 @@ async def _repair_one(
     """단일 문항을 교정한다. 실패하면 None을 반환해 폴백을 유도한다."""
     async with semaphore:
         verification = q.get("_verification", {})
-        fix = (verification.get("fix_instructions") or "").strip()
+        fix = _normalize_fix_instructions(verification.get("fix_instructions"))
         issues = verification.get("issues", [])
         issues_text = "; ".join(str(i) for i in issues) if issues else "(상세 없음)"
         # 검증 메타데이터를 제거한 문항만 모델에 전달한다.
