@@ -22,7 +22,7 @@ class CurriculumPreviewRequest(BaseModel):
     difficulty: CurriculumDifficulty = "medium"
     lesson_count: int = Field(default=10, ge=10, le=15)
     teacher: TeacherId = "owl"
-    engine: CurriculumEngine = "mock"
+    engine: CurriculumEngine = "codex_cli"
 
 
 class CurriculumLesson(BaseModel):

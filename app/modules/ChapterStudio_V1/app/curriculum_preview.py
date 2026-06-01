@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -46,6 +47,8 @@ async def _codex_preview(req: CurriculumPreviewRequest) -> CurriculumPreview:
 
 
 def _mock_preview(req: CurriculumPreviewRequest) -> CurriculumPreview:
+    if not _allow_mock_preview():
+        raise RuntimeError("mock curriculum preview는 ALLOW_MOCK_PREVIEW=true에서만 허용된다.")
     lessons = [_lesson(req, index) for index in range(req.lesson_count)]
     total = sum(item.estimated_minutes for item in lessons)
     return CurriculumPreview(
@@ -59,6 +62,11 @@ def _mock_preview(req: CurriculumPreviewRequest) -> CurriculumPreview:
             recommended_prerequisites=["기본 용어", "대표 사례 1개", "질문 기록 습관"],
         ),
     )
+
+
+def _allow_mock_preview() -> bool:
+    """운영 경로에서 mock preview가 실수로 실행되지 않게 환경변수로 잠근다."""
+    return os.getenv("ALLOW_MOCK_PREVIEW", "").lower() in {"1", "true", "yes"}
 
 
 def _lesson(req: CurriculumPreviewRequest, index: int) -> CurriculumLesson:

@@ -29,6 +29,7 @@ _PLANNER_SYSTEM = (
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 _SPRING_COMMIT_RETRY_ATTEMPTS = 5
 _SPRING_COMMIT_RETRY_DELAY_SEC = 1.0
+_COURSE_FAILED_STATUS = "CURRICULUM_FAILED"
 
 
 async def generate_and_store_curriculum(
@@ -37,22 +38,46 @@ async def generate_and_store_curriculum(
     lesson_count: int,
     source_type: str,
 ) -> None:
-    """커리큘럼을 생성·저장한다. 실패는 로깅하고 삼키지 않는다(상태는 GENERATING 유지)."""
-    course = await _load_course_after_spring_commit(course_id)
-    if course is None:
-        _LOG.error("[curriculum] course 없음 — courseId=%s", course_id)
-        return
+    """커리큘럼을 생성·저장하고 실패 시 course 상태를 실패로 전이한다."""
+    try:
+        course = await _load_course_after_spring_commit(course_id)
+        if course is None:
+            _LOG.error("[curriculum] course 없음 — courseId=%s", course_id)
+            await mark_course_curriculum_failed(course_id, "course not found")
+            return
 
-    lessons = await _plan_lessons(course, subject, max(1, lesson_count))
-    if not lessons:
-        _LOG.error("[curriculum] planner가 유효한 강의를 만들지 못함 — courseId=%s", course_id)
-        return
+        lessons = await _plan_lessons(course, subject, max(1, lesson_count))
+        if not lessons:
+            _LOG.error("[curriculum] planner가 유효한 강의를 만들지 못함 — courseId=%s", course_id)
+            await mark_course_curriculum_failed(course_id, "planner returned empty lessons")
+            return
 
-    async with get_connection() as conn:
-        saved = await persist_curriculum(
-            conn, course=course, lessons=lessons, planner_model=active_planner_model()
+        async with get_connection() as conn:
+            saved = await persist_curriculum(
+                conn, course=course, lessons=lessons, planner_model=active_planner_model()
+            )
+        _LOG.info("[curriculum] 저장 완료 — courseId=%s, 강의 %d개", course_id, saved)
+    except Exception as exc:
+        _LOG.error("[curriculum] 생성 실패 — courseId=%s, error=%s", course_id, exc, exc_info=True)
+        await mark_course_curriculum_failed(course_id, str(exc))
+
+
+async def mark_course_curriculum_failed(course_id: str, reason: str) -> None:
+    """침묵 실패를 막기 위해 public.course 상태를 실패로 전이한다."""
+    try:
+        async with get_connection() as conn:
+            await conn.execute(
+                "UPDATE public.course SET status = $2, updated_at = NOW() WHERE id = $1",
+                course_id,
+                _COURSE_FAILED_STATUS,
+            )
+    except Exception as exc:
+        _LOG.error(
+            "[curriculum] 실패 상태 기록 실패 — courseId=%s, reason=%s, error=%s",
+            course_id,
+            reason,
+            exc,
         )
-    _LOG.info("[curriculum] 저장 완료 — courseId=%s, 강의 %d개", course_id, saved)
 
 
 async def _load_course_after_spring_commit(course_id: str) -> dict | None:

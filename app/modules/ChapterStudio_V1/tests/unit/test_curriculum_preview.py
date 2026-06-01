@@ -7,9 +7,10 @@ from app.modules.ChapterStudio_V1.app.curriculum_preview import build_curriculum
 from app.modules.ChapterStudio_V1.app.curriculum_preview_types import CurriculumPreviewRequest
 
 
-async def test_curriculum_preview_mock_matches_course_detail_contract() -> None:
+async def test_curriculum_preview_mock_matches_course_detail_contract(monkeypatch) -> None:
+    monkeypatch.setenv("ALLOW_MOCK_PREVIEW", "true")
     preview = await build_curriculum_preview(
-        CurriculumPreviewRequest(topic="통계 추론", title="통계 과외", lesson_count=10)
+        CurriculumPreviewRequest(topic="통계 추론", title="통계 과외", lesson_count=10, engine="mock")
     )
 
     assert preview.status == "CURRICULUM_READY"
@@ -38,7 +39,8 @@ async def test_curriculum_preview_codex_path_validates_json(monkeypatch) -> None
     assert len(preview.lessons) == 10
 
 
-async def test_curriculum_preview_function_returns_contract() -> None:
+async def test_curriculum_preview_function_returns_contract(monkeypatch) -> None:
+    monkeypatch.setenv("ALLOW_MOCK_PREVIEW", "true")
     preview = await build_curriculum_preview(
         CurriculumPreviewRequest(topic="통계 추론", title="통계 과외", lesson_count=10, engine="mock")
     )
