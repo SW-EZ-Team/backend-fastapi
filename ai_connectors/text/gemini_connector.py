@@ -53,7 +53,7 @@ class GeminiGenAIConnector:
     def __init__(self) -> None:
         api_key = google_api_key()
         if api_key is None:
-            raise AuthError("GOOGLE_API_KEY가 설정되지 않았다.")
+            raise AuthError("GOOGLE_API_KEY 또는 GEMINI_API_KEY가 설정되지 않았다.")
         self._client: _GenAIClient = genai.Client(api_key=api_key)
         self._model = gemini_text_model()
 

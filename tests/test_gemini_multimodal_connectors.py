@@ -168,12 +168,24 @@ def test_ocr_passes_image_config_and_parses_markdown(monkeypatch: pytest.MonkeyP
 def test_missing_google_api_key_is_auth_error(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_genai(monkeypatch, SimpleNamespace(text="unused"))
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     with pytest.raises(AuthError):
         asyncio.run(GeminiTTSConnector().synthesize(TTSRequest(text="안녕", ref_audio_bytes=b"x")))
     with pytest.raises(AuthError):
         asyncio.run(GeminiASRConnector().generate(ASRRequest(audio_bytes=_wav_bytes())))
     with pytest.raises(AuthError):
         asyncio.run(GeminiOCRConnector().recognize(OCRRequest(image_bytes=b"png")))
+
+
+def test_gemini_api_key_alias_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    models, fake_genai = _patch_genai(monkeypatch, _tts_response(struct.pack("<h", 0)))
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+
+    asyncio.run(GeminiTTSConnector().synthesize(TTSRequest(text="안녕", ref_audio_bytes=b"x")))
+
+    assert fake_genai.api_keys == ["gemini-key"]
+    assert models.calls[0]["model"] == "gemini-3.1-flash-tts-preview"
 
 
 def test_vendor_errors_are_inference_error(monkeypatch: pytest.MonkeyPatch) -> None:

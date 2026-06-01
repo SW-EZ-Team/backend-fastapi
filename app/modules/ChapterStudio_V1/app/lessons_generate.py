@@ -9,11 +9,13 @@ persist_chapter_state)을 적용하고, 각 강의 완료 시 public.chapter의 
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Protocol
 
 from app.modules.ChapterStudio_V1.app.generation_context import GenerationContext
+from app.modules.ChapterStudio_V1.common.errors import StorageError
 from app.modules.ChapterStudio_V1.db.generation_context_loader import load_generation_context
 from app.modules.ChapterStudio_V1.db.persistence import persist_chapter_state
 from app.modules.ChapterStudio_V1.db.persistence_status import mark_chapter_failed
@@ -24,6 +26,8 @@ from common.db import get_connection
 
 _LOG = logging.getLogger(__name__)
 _CHAPTER_ID_SAFE = re.compile(r"[^A-Za-z0-9_-]+")
+_SPRING_COMMIT_RETRY_ATTEMPTS = 5
+_SPRING_COMMIT_RETRY_DELAY_SEC = 1.0
 
 
 class ExecuteConnection(Protocol):
@@ -38,7 +42,7 @@ def _chapter_id(lesson_id: str) -> str:
 
 async def generate_lessons_for_course(course_id: str) -> None:
     """course의 모든 강의를 순차 생성한다. 강의별 실패는 격리하고 다음 강의로 진행한다."""
-    lesson_ids = await _course_lesson_ids(course_id)
+    lesson_ids = await _course_lesson_ids_after_spring_commit(course_id)
     if not lesson_ids:
         _LOG.error("[lessons] 생성할 chapter 없음 — courseId=%s", course_id)
         return
@@ -65,11 +69,30 @@ async def _course_lesson_ids(course_id: str) -> list[str]:
     return [row["id"] for row in rows]
 
 
+async def _course_lesson_ids_after_spring_commit(course_id: str) -> list[str]:
+    """Spring chapter INSERT 커밋 직후 호출되는 경우를 위해 빈 조회를 짧게 재확인한다."""
+    for attempt in range(1, _SPRING_COMMIT_RETRY_ATTEMPTS + 1):
+        lesson_ids = await _course_lesson_ids(course_id)
+        if lesson_ids:
+            return lesson_ids
+        if attempt < _SPRING_COMMIT_RETRY_ATTEMPTS:
+            _LOG.info(
+                "[lessons] chapter 커밋 대기 — courseId=%s, retry=%d/%d",
+                course_id,
+                attempt,
+                _SPRING_COMMIT_RETRY_ATTEMPTS,
+            )
+            await asyncio.sleep(_SPRING_COMMIT_RETRY_DELAY_SEC)
+    return []
+
+
 async def _generate_one(lesson_id: str) -> bool:
     """강의 1개를 생성·저장하고 public.chapter 상태를 AVAILABLE로 갱신한다."""
     try:
-        async with get_connection() as conn:
-            context = await load_generation_context(conn, lesson_id)
+        context = await _load_generation_context_after_spring_commit(lesson_id)
+        if context is None:
+            _LOG.error("[lessons] 강의 생성 입력 없음 — lesson_id=%s", lesson_id)
+            return False
         return await _generate_loaded_context(context)
     except Exception as exc:
         _LOG.error("[lessons] 강의 실패 — lesson_id=%s, stage=load_generation_context, error=%s", lesson_id, exc)
@@ -91,7 +114,10 @@ async def generate_lesson_for_chapter(
     try:
         async with get_connection() as conn:
             weak_points = await aggregate_weak_points(conn, course_id, lesson_id)
-            context = await load_generation_context(conn, lesson_id)
+        context = await _load_generation_context_after_spring_commit(lesson_id)
+        if context is None:
+            _LOG.error("[lessons] 단건 강의 생성 입력 없음 — courseId=%s, lessonId=%s", course_id, lesson_id)
+            return False
         personalized = _personalized_context(
             context,
             weak_points=weak_points,
@@ -106,6 +132,28 @@ async def generate_lesson_for_chapter(
     except Exception as exc:
         _LOG.error("[lessons] 단건 강의 실패 — courseId=%s, lessonId=%s, error=%s", course_id, lesson_id, exc)
         return False
+
+
+async def _load_generation_context_after_spring_commit(lesson_id: str) -> GenerationContext | None:
+    """Spring chapter/curriculum_unit 커밋 지연으로 인한 일시적 미조회 상태를 재확인한다."""
+    for attempt in range(1, _SPRING_COMMIT_RETRY_ATTEMPTS + 1):
+        context: GenerationContext | None = None
+        async with get_connection() as conn:
+            try:
+                return await load_generation_context(conn, lesson_id)
+            except StorageError:
+                context = None
+        if context is not None:
+            return context
+        if attempt < _SPRING_COMMIT_RETRY_ATTEMPTS:
+            _LOG.info(
+                "[lessons] 생성 입력 커밋 대기 — lessonId=%s, retry=%d/%d",
+                lesson_id,
+                attempt,
+                _SPRING_COMMIT_RETRY_ATTEMPTS,
+            )
+            await asyncio.sleep(_SPRING_COMMIT_RETRY_DELAY_SEC)
+    return None
 
 
 async def _generate_loaded_context(context: GenerationContext) -> bool:

@@ -117,9 +117,43 @@ async def test_root_gemini_generate_passes_model_temperature_system(
 
 def test_root_gemini_rejects_empty_google_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GOOGLE_API_KEY", "")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
     with pytest.raises(RootAuthError):
         root_gemini.GeminiGenAIConnector()
+
+
+def test_root_gemini_accepts_gemini_api_key_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+    monkeypatch.setenv("GEMINI_TEXT_MODEL", "gemini-test")
+    _patch_client(monkeypatch, root_gemini)
+
+    connector = root_gemini.GeminiGenAIConnector()
+
+    assert connector.name == "gemini_flash"
+    assert _FakeClient.last is not None
+    assert _FakeClient.last.api_key == "gemini-key"
+
+
+def test_module_gemini_connectors_accept_gemini_api_key_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GOOGLE_API_KEY", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+    monkeypatch.setenv("GEMINI_TEXT_MODEL", "gemini-test")
+
+    _patch_client(monkeypatch, chapter_gemini)
+    chapter_connector = chapter_gemini.GeminiGenAIConnector()
+    assert chapter_connector.name == "gemini_flash"
+    assert _FakeClient.last is not None
+    assert _FakeClient.last.api_key == "gemini-key"
+
+    _patch_client(monkeypatch, exam_gemini)
+    exam_connector = exam_gemini.GeminiGenAIConnector()
+    assert exam_connector.name == "gemini_flash"
+    assert _FakeClient.last is not None
+    assert _FakeClient.last.api_key == "gemini-key"
 
 
 @pytest.mark.asyncio

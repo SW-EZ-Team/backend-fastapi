@@ -83,6 +83,12 @@ def qdrant_url() -> str:
     return os.environ.get("OCR_V1_QDRANT_URL", "http://localhost:6333")
 
 
+def qdrant_api_key() -> str | None:
+    """Qdrant 인증 키 (env: QDRANT_API_KEY 또는 OCR_V1_QDRANT_API_KEY). 미설정이면 None — 인증 없는 Qdrant/인메모리에서 정상."""
+    key = os.environ.get("OCR_V1_QDRANT_API_KEY") or os.environ.get("QDRANT_API_KEY")
+    return key or None
+
+
 def qdrant_collection() -> str:
     """기본 Qdrant 컬렉션명 (env: OCR_V1_QDRANT_COLLECTION)."""
     return os.environ.get("OCR_V1_QDRANT_COLLECTION", "ocr_v1_chunks")

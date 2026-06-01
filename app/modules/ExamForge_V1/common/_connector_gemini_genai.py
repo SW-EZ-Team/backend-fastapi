@@ -51,7 +51,7 @@ class GeminiGenAIConnector:
     def __init__(self, model_id: str | None = None, connector_name: str = "gemini_flash") -> None:
         api_key = google_api_key()
         if api_key is None:
-            raise AuthError(f"{connector_name}: GOOGLE_API_KEY 필요")
+            raise AuthError(f"{connector_name}: GOOGLE_API_KEY 또는 GEMINI_API_KEY 필요")
         self._client: _GenAIClient = genai.Client(api_key=api_key)
         self._model = model_id or gemini_text_model()
         self.name = connector_name

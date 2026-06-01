@@ -40,9 +40,12 @@ def claude_sonnet_timeout_sec() -> float:
 
 
 def google_api_key() -> str | None:
-    """Google AI Studio API 키를 반환한다. 빈 문자열이면 None."""
+    """Google AI Studio API 키를 반환한다. GEMINI_API_KEY를 대체 키로 허용한다."""
     value = os.getenv("GOOGLE_API_KEY", "").strip()
-    return value if value else None
+    if value:
+        return value
+    fallback = os.getenv("GEMINI_API_KEY", "").strip()
+    return fallback if fallback else None
 
 
 def gemini_text_model() -> str:

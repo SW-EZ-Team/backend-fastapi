@@ -14,13 +14,12 @@ from .errors import AuthError, InferenceError, ModelLoadError
 
 
 def google_api_key() -> str:
-    """GOOGLE_API_KEY 를 반환하고 누락/빈 값은 AuthError 로 정규화한다."""
-    try:
-        key = os.environ["GOOGLE_API_KEY"].strip()
-    except KeyError as exc:
-        raise AuthError("GOOGLE_API_KEY 가 설정되지 않았습니다.") from exc
+    """GOOGLE_API_KEY를 우선 쓰고 없으면 GEMINI_API_KEY를 공유한다."""
+    key = os.getenv("GOOGLE_API_KEY", "").strip()
     if not key:
-        raise AuthError("GOOGLE_API_KEY 가 비어 있습니다.")
+        key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not key:
+        raise AuthError("GOOGLE_API_KEY 또는 GEMINI_API_KEY 가 설정되지 않았습니다.")
     return key
 
 

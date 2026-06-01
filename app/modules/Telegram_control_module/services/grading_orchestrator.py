@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from app.core.weakness_service import WeaknessConnection
@@ -21,28 +22,22 @@ from .telegram_client import TelegramClient
 
 # 과제 조회 쿼리 — 해당 사용자의 가장 최근 미완료 과제를 찾는다
 _FIND_ASSIGNMENT_SQL = """
-SELECT a.id, a.prompt, a.criteria, a.difficulty_level, a.target_concepts
+SELECT a.id, a.title, a.description, a.questions
 FROM assignment a
-JOIN chapter ch ON ch.id = a.chapter_id
-WHERE ch.course_id IN (
-    SELECT course_id FROM curriculum WHERE user_id = $1
-)
-AND a.id NOT IN (SELECT assignment_id FROM submission WHERE user_id = $1 AND status = 'done')
-ORDER BY a.created_at DESC LIMIT 1
+WHERE a.user_id = $1
+  AND a.id NOT IN (
+      SELECT assignment_id FROM submission WHERE user_id = $1 AND status = 'done'
+  )
+ORDER BY a.created_at DESC
+LIMIT 1
 """
 
 # 텔레그램 계정 ↔ user 매핑 조회
 _FIND_USER_SQL = "SELECT user_id FROM telegram_account WHERE telegram_chat_id = $1"
 
 # submission 상태 전이 쿼리
-_INSERT_SUBMISSION_SQL = (
-    "INSERT INTO submission (id, assignment_id, user_id, status, submission_source, submitted_at) "
-    "VALUES ($1, $2, $3, 'grading', 'telegram', NOW())"
-)
-_UPDATE_DONE_SQL = (
-    "UPDATE submission SET status='done', official_score=$1, "
-    "official_feedback=$2, official_ai_confidence=$3 WHERE id=$4"
-)
+_INSERT_SUBMISSION_SQL = "INSERT INTO submission (id, assignment_id, user_id, status, submitted_at) VALUES ($1, $2, $3, 'grading', NOW())"
+_UPDATE_DONE_SQL = "UPDATE submission SET status='done', official_score=$1, official_feedback=$2, official_ai_confidence=$3 WHERE id=$4"
 _UPDATE_FAILED_SQL = "UPDATE submission SET status='failed' WHERE id=$1"
 
 
@@ -75,16 +70,26 @@ async def _find_assignment(conn: WeaknessConnection, user_id: str) -> _Assignmen
     row = await conn.fetchrow(_FIND_ASSIGNMENT_SQL, user_id)
     if row is None:
         return None
-    aid = row.get("id") if hasattr(row, "get") else row["id"]
+    aid = row.get("id")
     if not aid:
         return None
-    prompt = str(row.get("prompt") or "제출 과제") if hasattr(row, "get") else str(row["prompt"] or "제출 과제")
-    criteria = row.get("criteria") if hasattr(row, "get") else row["criteria"]
-    rubric = criteria if isinstance(criteria, list) else ["완성도", "정확성", "창의성"]
+    title = str(row.get("title") or "제출 과제")
+    description = row.get("description")
+    rubric = [str(description)] if description else ["완성도", "정확성", "창의성"]
+    steps: list[str] = []
+    questions = row.get("questions")
+    if isinstance(questions, list):
+        for question in questions:
+            raw = question if isinstance(question, str) else None
+            if raw is None and isinstance(question, Mapping):
+                raw = question.get("question") or question.get("text")
+            text = str(raw).strip() if raw is not None else ""
+            if text:
+                steps.append(text)
     return _AssignmentInfo(
         assignment_id=str(aid),
-        title=prompt[:50] if len(prompt) > 50 else prompt,
-        steps=[],
+        title=title,
+        steps=steps,
         rubric=rubric,
     )
 
