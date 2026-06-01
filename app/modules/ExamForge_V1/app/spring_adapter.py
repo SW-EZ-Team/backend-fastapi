@@ -39,8 +39,10 @@ _DIFFICULTY_DISTRIBUTIONS: dict[str, dict[int, float]] = {
 
 # ExamForge source_text 최소 길이(100자) 미달 시 채우는 안전 패딩 안내 문구
 _SOURCE_MIN_LEN = 100
+_SOURCE_MAX_LEN = 50_000
 _SPRING_COMMIT_RETRY_ATTEMPTS = 5
 _SPRING_COMMIT_RETRY_DELAY_SEC = 1.0
+_MOCK_EXAM_FAILED_STATUS = "FAILED"
 
 
 class MockExamGenerateRequest(BaseModel):
@@ -67,34 +69,60 @@ async def generate_mock_exam(
 async def _run_generation(req: MockExamGenerateRequest) -> None:
     """ExamForge로 모의고사를 생성하고 public 스키마에 저장한다.
 
-    실패는 로깅하고 삼키지 않는다(상태는 GENERATING 유지 → Spring이 미완료로 인지).
+    실패는 public.mock_exam.status=FAILED 전이로 남겨 Spring 폴링이 멈추지 않게 한다.
     """
-    ctx = await _load_exam_context_after_spring_commit(req.examId)
-    if ctx is None:
-        _LOG.error("[mock-exam] mock_exam 없음 — examId=%s", req.examId)
-        return
+    try:
+        ctx = await _load_exam_context_after_spring_commit(req.examId)
+        if ctx is None:
+            reason = "mock_exam not found"
+            _LOG.error("[mock-exam] mock_exam 없음 — examId=%s", req.examId)
+            await _mark_mock_exam_failed(req.examId, reason)
+            return
 
-    async with get_connection() as conn:
-        source_text = await build_source_text(
-            conn, req.courseId, _context_optional_text(ctx, "topic_text")
+        async with get_connection() as conn:
+            source_text = await build_source_text(
+                conn, req.courseId, _context_optional_text(ctx, "topic_text")
+            )
+
+        source_text = _trim_source_text(_ensure_min_source(source_text, ctx, req))
+        forge_req = _build_forge_request(req, ctx, source_text)
+
+        # 순환 import 회피 — 모듈 __init__의 라이브러리 진입점을 지연 import 한다
+        from app.modules.ExamForge_V1 import generate_exam_forge
+
+        response = await generate_exam_forge(forge_req)
+        questions = [q.model_dump() for q in response.questions]
+
+        async with get_connection() as conn:
+            saved = await persist_exam_result(conn, exam_id=req.examId, questions=questions)
+
+        if saved == 0:
+            reason = "no persistable multiple-choice questions"
+            _LOG.error("[mock-exam] 저장 가능한 객관식 문항 0개 — examId=%s", req.examId)
+            await _mark_mock_exam_failed(req.examId, reason)
+            return
+        _LOG.info("[mock-exam] 저장 완료 — examId=%s, 문항 %d개", req.examId, saved)
+    except Exception as exc:
+        _LOG.error("[mock-exam] 생성 실패 — examId=%s, error=%s", req.examId, exc, exc_info=True)
+        await _mark_mock_exam_failed(req.examId, str(exc))
+
+
+async def _mark_mock_exam_failed(exam_id: str, reason: str) -> None:
+    """침묵 실패를 막기 위해 public.mock_exam 상태를 실패로 전이한다."""
+    try:
+        async with get_connection() as conn:
+            await conn.execute(
+                "UPDATE public.mock_exam SET status = $2 WHERE id = $1",
+                exam_id,
+                _MOCK_EXAM_FAILED_STATUS,
+            )
+    except Exception as exc:
+        _LOG.error(
+            "[mock-exam] 실패 상태 기록 실패 — examId=%s, reason=%s, error=%s",
+            exam_id,
+            reason,
+            exc,
         )
-
-    source_text = _ensure_min_source(source_text, ctx, req)
-    forge_req = _build_forge_request(req, ctx, source_text)
-
-    # 순환 import 회피 — 모듈 __init__의 라이브러리 진입점을 지연 import 한다
-    from app.modules.ExamForge_V1 import generate_exam_forge
-
-    response = await generate_exam_forge(forge_req)
-    questions = [q.model_dump() for q in response.questions]
-
-    async with get_connection() as conn:
-        saved = await persist_exam_result(conn, exam_id=req.examId, questions=questions)
-
-    if saved == 0:
-        _LOG.error("[mock-exam] 저장 가능한 객관식 문항 0개 — examId=%s", req.examId)
-        return
-    _LOG.info("[mock-exam] 저장 완료 — examId=%s, 문항 %d개", req.examId, saved)
 
 
 async def _load_exam_context_after_spring_commit(exam_id: str) -> Mapping[str, object] | None:
@@ -149,6 +177,11 @@ def _ensure_min_source(
         f"집중 주제: {topics}. 위 주제를 중심으로 핵심 개념과 적용을 평가한다."
     )
     return (text + "\n" + padding).strip()
+
+
+def _trim_source_text(source_text: str) -> str:
+    """LLM 요청 본문이 과도하게 커지지 않도록 Spring 어댑터 경계에서 자른다."""
+    return source_text[:_SOURCE_MAX_LEN]
 
 
 def _first_context_text(
