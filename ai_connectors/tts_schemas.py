@@ -49,6 +49,11 @@ class TTSRequest(BaseModel):
         description="lang_code: auto/korean/english/chinese 등 (Qwen3-TTS 표기)",
     )
     speed: float = Field(default=1.0, ge=0.5, le=2.0, description="발화 속도 배수")
+    style: str = Field(
+        default="",
+        max_length=120,
+        description="Gemini 등 프롬프트형 TTS에 전달할 말투 지시",
+    )
 
 
 class TTSResponse(BaseModel):

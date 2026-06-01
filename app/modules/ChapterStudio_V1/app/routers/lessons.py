@@ -31,6 +31,12 @@ class LessonGenerateOneRequest(BaseModel):
     pace: int | None = Field(default=None, ge=0, le=100)
     tutorDepth: int | None = Field(default=None, ge=0, le=100)
     socratic: int | None = Field(default=None, ge=0, le=100)
+    useFormalSpeech: bool | None = None
+    useEmoji: bool | None = None
+    tutorName: str | None = Field(default=None, max_length=80)
+    tutorTagline: str | None = Field(default=None, max_length=160)
+    isDefaultTutor: bool | None = None
+    voiceSampleUrl: str | None = Field(default=None, max_length=1000)
 
 
 @router.post("/generate", status_code=202)
@@ -57,5 +63,11 @@ async def generate_one_lesson(
         pace=req.pace,
         tutor_depth=req.tutorDepth,
         socratic=req.socratic,
+        use_formal_speech=req.useFormalSpeech,
+        use_emoji=req.useEmoji,
+        tutor_name=req.tutorName,
+        tutor_tagline=req.tutorTagline,
+        is_default_tutor=req.isDefaultTutor,
+        voice_sample_url=req.voiceSampleUrl,
     )
     return {"accepted": True, "courseId": req.courseId, "lessonId": req.lessonId}

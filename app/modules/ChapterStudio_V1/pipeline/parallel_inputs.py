@@ -38,6 +38,12 @@ class PersonalizationArgs:
     tutor_depth: int
     socratic: int
     learning_goal: str
+    use_formal_speech: bool = True
+    use_emoji: bool = False
+    tutor_name: str = ""
+    tutor_tagline: str = ""
+    is_default_tutor: bool = True
+    voice_sample_url: str = ""
 
 
 def build_brief(state: ChapterStudioState) -> str:
@@ -90,6 +96,12 @@ def build_personalization_args(state: ChapterStudioState) -> PersonalizationArgs
         tutor_depth=_state_int_default(state, "tutor_depth", 50),
         socratic=_state_int_default(state, "socratic", 70),
         learning_goal=_optional_state_text(state, "learning_goal") or "핵심 개념 이해와 실습",
+        use_formal_speech=_state_bool_default(state, "use_formal_speech", True),
+        use_emoji=_state_bool_default(state, "use_emoji", False),
+        tutor_name=_optional_state_text(state, "tutor_name"),
+        tutor_tagline=_optional_state_text(state, "tutor_tagline"),
+        is_default_tutor=_state_bool_default(state, "is_default_tutor", True),
+        voice_sample_url=_optional_state_text(state, "voice_sample_url"),
     )
 
 
@@ -121,6 +133,11 @@ def _optional_state_text(state: ChapterStudioState, key: str) -> str:
 def _state_int_default(state: ChapterStudioState, key: str, default: int) -> int:
     value = state.get(key)
     return value if isinstance(value, int) and not isinstance(value, bool) else default
+
+
+def _state_bool_default(state: ChapterStudioState, key: str, default: bool) -> bool:
+    value = state.get(key)
+    return value if isinstance(value, bool) else default
 
 
 def _state_text(state: ChapterStudioState, key: str) -> str:

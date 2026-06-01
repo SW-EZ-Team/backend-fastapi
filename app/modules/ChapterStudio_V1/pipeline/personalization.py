@@ -10,6 +10,10 @@ def personalization_contract(
     tutor_depth: int,
     socratic: int,
     learning_goal: str,
+    use_formal_speech: bool = True,
+    use_emoji: bool = False,
+    tutor_name: str = "",
+    tutor_tagline: str = "",
     component_rule: str = "",
     weak_component_rule: str = "",
 ) -> str:
@@ -20,7 +24,12 @@ def personalization_contract(
         "개인화 계약:",
         f"학습자 수준 {level}에 맞춰 난이도·용어·예시 조정. 학습 목표 {goal}.",
         _tutor_control_line(tone, pace, tutor_depth, socratic),
+        _speech_line(use_formal_speech),
+        _emoji_line(use_emoji),
     ]
+    persona_line = _persona_line(tutor_name, tutor_tagline)
+    if persona_line:
+        lines.append(persona_line)
     weak_line = _weak_points_line(weak_points)
     if weak_line:
         lines.append(weak_line)
@@ -43,6 +52,28 @@ def _weak_points_line(weak_points: str) -> str:
     if not cleaned:
         return ""
     return f"학습자 약점 개념: {cleaned} — 이 개념들을 집중 보강·반복 노출하고 흔한 오개념을 교정한다."
+
+
+def _speech_line(use_formal_speech: bool) -> str:
+    if use_formal_speech:
+        return "말투: 존댓말로 한다(~해요,~예요,~봐요). 다정하고 또렷한 과외쌤 톤."
+    return "말투: 반말체로 한다(~해,~야,~봐,~거야). 친근한 또래 과외쌤 톤. 과한 ㅋㅋ·은어 금지."
+
+
+def _emoji_line(use_emoji: bool) -> str:
+    if use_emoji:
+        return "narration/음성대본에 가벼운 이모지 문장당 최대1개."
+    return "이모지 금지."
+
+
+def _persona_line(tutor_name: str, tutor_tagline: str) -> str:
+    name = tutor_name.strip()
+    tagline = tutor_tagline.strip()
+    if not name and not tagline:
+        return ""
+    if name and tagline:
+        return f"튜터 페르소나: {name} — {tagline}. 일관된 말투 유지."
+    return f"튜터 페르소나: {name or tagline}. 일관된 말투 유지."
 
 
 def _tone_label(value: int) -> str:

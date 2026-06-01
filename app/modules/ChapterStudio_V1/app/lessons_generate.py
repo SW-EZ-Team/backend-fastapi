@@ -107,6 +107,12 @@ async def generate_lesson_for_chapter(
     pace: int | None = None,
     tutor_depth: int | None = None,
     socratic: int | None = None,
+    use_formal_speech: bool | None = None,
+    use_emoji: bool | None = None,
+    tutor_name: str | None = None,
+    tutor_tagline: str | None = None,
+    is_default_tutor: bool | None = None,
+    voice_sample_url: str | None = None,
 ) -> bool:
     """완료된 이전 강의 약점을 주입해 강의 1개를 progressive로 생성한다."""
     try:
@@ -125,6 +131,12 @@ async def generate_lesson_for_chapter(
             pace=pace,
             tutor_depth=tutor_depth,
             socratic=socratic,
+            use_formal_speech=use_formal_speech,
+            use_emoji=use_emoji,
+            tutor_name=tutor_name,
+            tutor_tagline=tutor_tagline,
+            is_default_tutor=is_default_tutor,
+            voice_sample_url=voice_sample_url,
         )
         return await _generate_loaded_context(personalized)
     except Exception as exc:
@@ -200,6 +212,12 @@ def _personalized_context(
     pace: int | None,
     tutor_depth: int | None,
     socratic: int | None,
+    use_formal_speech: bool | None,
+    use_emoji: bool | None,
+    tutor_name: str | None,
+    tutor_tagline: str | None,
+    is_default_tutor: bool | None,
+    voice_sample_url: str | None,
 ) -> GenerationContext:
     updates: dict[str, object] = {"weak_points": weak_points}
     if audience_level is not None:
@@ -207,6 +225,16 @@ def _personalized_context(
     if learning_goal is not None:
         updates["learning_goal"] = learning_goal
     for key, value in {"tone": tone, "pace": pace, "tutor_depth": tutor_depth, "socratic": socratic}.items():
+        if value is not None:
+            updates[key] = value
+    for key, value in {
+        "use_formal_speech": use_formal_speech,
+        "use_emoji": use_emoji,
+        "tutor_name": tutor_name,
+        "tutor_tagline": tutor_tagline,
+        "is_default_tutor": is_default_tutor,
+        "voice_sample_url": voice_sample_url,
+    }.items():
         if value is not None:
             updates[key] = value
     return context.model_copy(update=updates)

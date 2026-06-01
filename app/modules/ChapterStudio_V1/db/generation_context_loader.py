@@ -67,6 +67,12 @@ def row_to_generation_context(row: Mapping[str, object]) -> GenerationContext:
         pace=_int(context, "pace", 50),
         tutor_depth=_int(context, "tutor_depth", 50),
         socratic=_int(context, "socratic", 70),
+        use_formal_speech=_bool(context, "use_formal_speech", True),
+        use_emoji=_bool(context, "use_emoji", False),
+        tutor_name=_text(context, "tutor_name", ""),
+        tutor_tagline=_text(context, "tutor_tagline", ""),
+        is_default_tutor=_bool(context, "is_default_tutor", True),
+        voice_sample_url=_text(context, "voice_sample_url", ""),
         audience_level=_text(context, "audience_level", "일반 학습자"),
         learning_goal=_text(row, "learning_goal", _text(context, "learning_goal", "핵심 개념 이해와 실습")),
         weak_points=_text(context, "weak_points", ""),
@@ -94,6 +100,13 @@ def _text(source: Mapping[str, object], key: str, default: str) -> str:
 def _int(source: Mapping[str, object], key: str, default: int) -> int:
     value = source.get(key)
     if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return default
+
+
+def _bool(source: Mapping[str, object], key: str, default: bool) -> bool:
+    value = source.get(key)
+    if isinstance(value, bool):
         return value
     return default
 
