@@ -81,7 +81,7 @@ async def test_synthesize_voice_audio_uses_qwen_preset_without_modal_call(
     assert requested_names == ["qwen3-tts-modal"]
     assert connector.requests[0].ref_audio_bytes.startswith(b"RIFF")
     assert result[0]["voice"] == "qwen3-tts-modal"
-    assert str(result[0]["audio_url"]).startswith("file://")
+    assert str(result[0]["audio_url"]).startswith("/media/tts/")
     assert len(list(tmp_path.glob("*.wav"))) == 1
 
 

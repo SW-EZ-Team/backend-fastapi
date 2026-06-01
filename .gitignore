@@ -48,6 +48,7 @@ logs/
 output/
 artifacts/
 **/artifacts/
+media/
 **/.gradle/
 
 # Flask / Celery 인스턴스

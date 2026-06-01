@@ -12,7 +12,7 @@ from ai_connectors.tts_schemas import TTSRequest, TTSResponse
 
 from app.modules.ChapterStudio_V1.ai_connectors.base import TTSConnector
 from app.modules.ChapterStudio_V1.ai_connectors.registry import get_tts_connector
-from app.modules.ChapterStudio_V1.common.config import tts_output_dir
+from app.modules.ChapterStudio_V1.common.config import tts_media_url, tts_output_dir
 from app.modules.ChapterStudio_V1.common.errors import ConversionError
 from app.modules.ChapterStudio_V1.pipeline.state import StateRecord, StateRecords
 from app.modules.ChapterStudio_V1.pipeline.tts_routing import TutorVoiceProfile, TtsPlan, resolve_tts_plan
@@ -130,7 +130,7 @@ def _save_audio_bytes(audio_bytes: bytes, slide_idx: int, engine: str) -> str:
     filename = f"{int(time() * 1000)}_{slide_idx}_{_safe_token(engine)}_{uuid4().hex[:8]}.wav"
     path = output_dir / filename
     path.write_bytes(audio_bytes)
-    return path.resolve().as_uri()
+    return tts_media_url(filename)
 
 
 def _fallback_style(tutor_profile: TutorVoiceProfile) -> str:

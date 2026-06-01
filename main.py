@@ -12,6 +12,7 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -24,6 +25,7 @@ from app.modules.Agent_orchestrator import router as agent_orchestrator_router
 from app.modules.TTS_V2.app.routers.tts_v2 import router as tts_v2_router
 from app.modules.TTS_V2.app.routers.voice_profile_router import router as voice_profile_router
 from app.modules.ChapterStudio_V1 import router as chapter_studio_router
+from app.modules.ChapterStudio_V1.common.config import media_root_dir
 from app.modules.ExamForge_V1 import router as exam_forge_router
 from app.modules.OCR_v1 import health_router as ocr_health_router
 from app.modules.OCR_v1 import ingest_router as ocr_ingest_router
@@ -48,7 +50,8 @@ if not os.getenv("FASTAPI_API_KEY"):
     _LOG.warning("FASTAPI_API_KEY 미설정 — API 인증이 비활성화 상태입니다")
 
 # 인증 면제 경로 — /health 만 항상 면제, 문서 경로는 개발 편의상 추가
-_HEALTH_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
+_HEALTH_PATHS = {"/health", "/docs", "/openapi.json", "/redoc", "/media"}
+_PUBLIC_PATH_PREFIXES = ("/media/",)
 
 # CORS 허용 출처 결정 로직
 # - CORS_ORIGINS 환경변수 설정 시: 쉼표 구분 값 사용
@@ -68,7 +71,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         api_key = os.getenv("FASTAPI_API_KEY")
-        if api_key is None or request.url.path in _HEALTH_PATHS:
+        if api_key is None or _is_auth_exempt(request.url.path):
             return await call_next(request)
         provided = request.headers.get("X-API-Key", "")
         if not hmac.compare_digest(provided, api_key):
@@ -76,6 +79,11 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                 status_code=401, content={"detail": "유효하지 않은 API 키"},
             )
         return await call_next(request)
+
+
+def _is_auth_exempt(path: str) -> bool:
+    """브라우저 오디오 요청은 헤더를 붙일 수 없으므로 media 경로를 공개한다."""
+    return path in _HEALTH_PATHS or path.startswith(_PUBLIC_PATH_PREFIXES)
 
 
 @asynccontextmanager
@@ -111,6 +119,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_MEDIA_ROOT = media_root_dir()
+_MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
+app.mount("/media", StaticFiles(directory=str(_MEDIA_ROOT)), name="media")
 
 app.include_router(agent_orchestrator_router)
 app.include_router(telegram_control_router)

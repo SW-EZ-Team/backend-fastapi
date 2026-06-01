@@ -8,6 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 _SCHEMA_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_BACKEND_ROOT = Path(__file__).resolve().parents[4]
 
 
 @cache
@@ -23,6 +24,13 @@ def _optional_value(key: str) -> str | None:
     if value is None or value == "":
         return None
     return value
+
+
+def _path_value(key: str, default: str) -> Path:
+    """상대 경로 설정은 backend-fastapi 루트 기준으로 고정한다."""
+    raw_value = _optional_value(key) or default
+    path = Path(raw_value).expanduser()
+    return path if path.is_absolute() else _BACKEND_ROOT / path
 
 
 def _required_value(key: str) -> str:
@@ -147,8 +155,26 @@ def tts_ref_text() -> str | None:
 
 
 def tts_output_dir() -> Path:
-    value = _optional_value("TTS_OUTPUT_DIR") or "artifacts/tts_audio"
-    return Path(value).expanduser()
+    if _optional_value("TTS_OUTPUT_DIR") is not None:
+        return _path_value("TTS_OUTPUT_DIR", "media/tts")
+    return media_root_dir() / "tts"
+
+
+def media_root_dir() -> Path:
+    if _optional_value("MEDIA_ROOT_DIR") is not None:
+        return _path_value("MEDIA_ROOT_DIR", "media")
+    if _optional_value("TTS_OUTPUT_DIR") is not None:
+        return _path_value("TTS_OUTPUT_DIR", "media/tts").parent
+    return _path_value("MEDIA_ROOT_DIR", "media")
+
+
+def tts_media_url(filename: str) -> str:
+    """DB에는 브라우저가 바로 요청할 수 있는 media 상대 URL만 저장한다."""
+    try:
+        relative_dir = tts_output_dir().resolve().relative_to(media_root_dir().resolve())
+    except ValueError as exc:
+        raise RuntimeError("TTS_OUTPUT_DIR는 MEDIA_ROOT_DIR 내부 경로여야 한다.") from exc
+    return f"/media/{relative_dir.as_posix()}/{filename}"
 
 
 def tts_timeout_sec() -> float:
