@@ -11,6 +11,7 @@ from app.modules.ExamForge_V1.templates.registry import get_template
 from app.modules.ExamForge_V1.quality.deduplicator import check_duplicates
 from app.modules.ExamForge_V1.quality.consistency_checker import check_consistency
 from app.modules.ExamForge_V1.quality.coverage_analyzer import analyze_coverage
+from app.modules.ExamForge_V1.quality.explanation_checker import check_explanation_quality
 from app.modules.ExamForge_V1.common.logger import get_logger
 from app.modules.ExamForge_V1.pipeline.nodes.programming_context import has_code_snippets
 from app.modules.ExamForge_V1.pipeline.nodes.programming_context import looks_like_programming_source
@@ -123,7 +124,7 @@ def _check_single_structure(q: dict, template_id: str) -> list[str]:
         template = get_template(template_id)
         from app.modules.ExamForge_V1.schemas.question import Question
         question_obj = Question(**q)
-        return template.validate_structure(question_obj)
+        return template.validate_structure(question_obj) + check_explanation_quality(q)
     except (ExamForgeError, PydanticValidationError, ValueError, TypeError) as e:
         return [f"구조 검증 오류: {str(e)[:100]}"]
 
@@ -142,6 +143,7 @@ def _validate_cross_question(
         dedup_score, dup_pairs = 0.0, []
     if dup_pairs:
         global_issues.append(f"중복 의심 쌍 {len(dup_pairs)}건 발견")
+        failed_ids.extend(_duplicate_targets_to_draft_ids(questions, dup_pairs))
 
     try:
         inconsistencies = check_consistency(questions)
@@ -159,6 +161,24 @@ def _validate_cross_question(
             failed_ids.append(matched_q.get("draft_id", inc_qid))
 
     return global_issues, failed_ids, dedup_score
+
+
+def _duplicate_targets_to_draft_ids(
+    questions: list[dict],
+    dup_pairs: list[tuple[str, str]],
+) -> list[str]:
+    """중복 쌍의 뒤쪽 문항을 재생성 대상으로 변환한다."""
+    q_map = {
+        str(q.get("question_id") or q.get("draft_id") or index): q
+        for index, q in enumerate(questions)
+    }
+    failed: list[str] = []
+    for _, duplicate_id in dup_pairs:
+        matched = q_map.get(str(duplicate_id), {})
+        draft_id = str(matched.get("draft_id") or duplicate_id)
+        if draft_id and draft_id not in failed:
+            failed.append(draft_id)
+    return failed
 
 
 def _validate_global(

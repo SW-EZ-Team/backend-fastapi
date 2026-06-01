@@ -10,6 +10,7 @@ from app.modules.ExamForge_V1.common.ai_bridge import get_planner_connector, Cha
 from app.modules.ExamForge_V1.common.logger import get_logger
 from app.modules.ExamForge_V1.templates.catalog import allocation_contract
 from app.modules.ExamForge_V1.pipeline.nodes._plan_prompts import PLAN_PROMPT as _PLAN_PROMPT
+from app.modules.ExamForge_V1.pipeline.nodes.concept_blueprint import build_question_blueprint
 
 logger = get_logger(__name__)
 
@@ -31,7 +32,7 @@ async def plan_exam_node(state: ExamForgeState) -> dict:
         logger.warning("시험 계획 커넥터 초기화 실패 — 기본 계획 사용: %s", exc)
         total = config.get("total_questions", 50)
         plan = _build_fallback_plan(subject, total, config, topics)
-        plan = _normalize_plan(plan, config)
+        plan = _normalize_plan(plan, config, topics)
         return {
             "exam_plan": plan,
             "pipeline_status": "generating",
@@ -64,7 +65,7 @@ async def plan_exam_node(state: ExamForgeState) -> dict:
         total = config.get("total_questions", 50)
         plan = _build_fallback_plan(subject, total, config, topics)
         used_fallback = True
-    plan = _normalize_plan(plan, config)
+    plan = _normalize_plan(plan, config, topics)
 
     logger.info("노드 완료: plan_exam_node (%.2fs)", time.time() - node_start)
     result: dict = {
@@ -76,7 +77,11 @@ async def plan_exam_node(state: ExamForgeState) -> dict:
     return result
 
 
-def _normalize_plan(plan: dict, config: dict) -> dict:
+def _normalize_plan(
+    plan: dict,
+    config: dict,
+    topics: list[dict] | None = None,
+) -> dict:
     """작은 시험에서도 계획이 생성/커버리지 계산에 맞게 수렴하도록 보정한다."""
     normalized = dict(plan)
     # 비정수 값이 들어올 수 있으므로 변환 실패 시 내부 값으로 안전하게 폴백한다
@@ -85,6 +90,10 @@ def _normalize_plan(plan: dict, config: dict) -> dict:
     except (ValueError, TypeError):
         total = int(normalized.get("total_questions", 0) or 0)
     normalized["total_questions"] = total
+    normalized["type_allocations"] = _ensure_reasoning_distribution(
+        normalized.get("type_allocations", []),
+        total,
+    )
     normalized["topic_weights"] = _trim_topic_weights(
         normalized.get("topic_weights", {}),
         max_topics=max(1, total),
@@ -92,7 +101,41 @@ def _normalize_plan(plan: dict, config: dict) -> dict:
     normalized["bloom_distribution"] = _bloom_distribution_from_allocations(
         normalized.get("type_allocations", [])
     )
+    if topics is not None:
+        normalized["question_blueprint"] = build_question_blueprint(
+            topics,
+            normalized.get("type_allocations", []),
+        )
     return normalized
+
+
+def _ensure_reasoning_distribution(allocations: list[dict], total: int) -> list[dict]:
+    """난이도 3 이상 문항이 최소 비율에 닿도록 낮은 난이도 일부를 이동한다."""
+    if total < 5:
+        return allocations
+    adjusted = [{**alloc, "difficulty_distribution": dict(alloc.get("difficulty_distribution", {}))}
+                for alloc in allocations]
+    target = max(1, int(total * 0.4))
+    current = sum(
+        int(count)
+        for alloc in adjusted
+        for diff, count in alloc.get("difficulty_distribution", {}).items()
+        if int(diff) >= 3
+    )
+    needed = target - current
+    if needed <= 0:
+        return adjusted
+    for alloc in adjusted:
+        dist = alloc.get("difficulty_distribution", {})
+        for low in (1, 2):
+            while needed > 0 and int(dist.get(low, 0)) > 0:
+                dist[low] = int(dist.get(low, 0)) - 1
+                dist[3] = int(dist.get(3, 0)) + 1
+                needed -= 1
+        alloc["difficulty_distribution"] = {k: v for k, v in dist.items() if int(v) > 0}
+        if needed <= 0:
+            break
+    return adjusted
 
 
 def _trim_topic_weights(topic_weights: dict, max_topics: int) -> dict[str, float]:

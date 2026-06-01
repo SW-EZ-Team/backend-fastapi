@@ -108,7 +108,7 @@ def _build_answer_request(
         "- JSON 객체 하나만 출력하시오.\n"
         "- 마크다운, 코드블록, 백틱, 원본 코드 줄 복붙을 금지한다.\n"
         "- 코드가 필요한 설명은 자연어로 요약하고 큰따옴표가 든 코드 조각을 직접 쓰지 마시오.\n"
-        "- explanation은 250~550자로 제한하시오."
+        "- 객관식 explanation은 정답 근거와 모든 오답별 오개념을 포함해 350~900자로 완결하시오."
     )
     repair_suffix = json_guard
     if attempt == 1:
@@ -128,7 +128,7 @@ def _build_answer_request(
     return ChapterAIRequest(
         system=system_prompt,
         user=prompt + repair_suffix,
-        max_tokens=5000 if attempt > 0 else 2500,
+        max_tokens=6000 if attempt > 0 else 3500,
         temperature=0.05 if attempt > 0 else 0.3,
     )
 
@@ -150,7 +150,10 @@ def _empty_answer(q: dict) -> dict:
 def _preserve_generation_fields(answered: dict, draft: dict) -> dict:
     """정답 생성 전 단계에서 보강된 필드를 보존한다."""
     preserved = answered.copy()
-    for key in ("distractor_rationale", "code_snippet"):
+    for key in (
+        "distractor_rationale", "code_snippet", "_blueprint_slot",
+        "_chapter", "_concept_key", "_reasoning_type",
+    ):
         if draft.get(key) and not preserved.get(key):
             preserved[key] = draft[key]
     return preserved

@@ -22,11 +22,17 @@ from app.modules.ExamForge_V1.pipeline.nodes.generation_request import build_gen
 from app.modules.ExamForge_V1.pipeline.nodes.question_metadata import apply_task_metadata
 from app.modules.ExamForge_V1.pipeline.nodes.programming_context import attach_source_code_if_needed, programming_generation_clause
 from app.modules.ExamForge_V1.pipeline.nodes.question_repair import repair_missing_questions
+from app.modules.ExamForge_V1.pipeline.nodes.concept_blueprint import blueprint_prompt
+from app.modules.ExamForge_V1.quality.deduplicator import deduplicate_questions
 
 logger = get_logger(__name__)
 
 
-def _build_chunks(allocations: list[dict], topic_weights: dict[str, float]) -> list[dict]:
+def _build_chunks(
+    allocations: list[dict],
+    topic_weights: dict[str, float],
+    blueprint: list[dict] | None = None,
+) -> list[dict]:
     """생성 작업을 문항 1개 단위로 구성한다."""
     tasks: list[dict] = []
     topic_names = list(topic_weights.keys()) or ["일반"]
@@ -40,13 +46,36 @@ def _build_chunks(allocations: list[dict], topic_weights: dict[str, float]) -> l
             for _ in range(int(count)):
                 topic_idx = topic_cursor % len(topic_names)
                 topic_cursor += 1
-                tasks.append({
+                task = {
                     "template_id": template_id,
                     "topic": topic_names[topic_idx],
                     "difficulty": int(diff_level),
                     "count": 1,
-                })
+                }
+                slot = blueprint[len(tasks)] if blueprint and len(tasks) < len(blueprint) else None
+                tasks.append(_attach_blueprint(task, slot))
     return tasks
+
+
+def _attach_blueprint(task: dict, slot: dict | None) -> dict:
+    """생성 작업에 강의·개념 슬롯을 내부 메타데이터로 붙인다."""
+    if not slot:
+        return task
+    chapter = str(slot.get("chapter", task.get("topic", "일반")))
+    concept = str(slot.get("concept", task.get("topic", "핵심 개념")))
+    return {
+        **task,
+        "topic": str(slot.get("topic", task.get("topic", "일반"))),
+        "difficulty": int(slot.get("difficulty", task.get("difficulty", 3))),
+        "bloom_level": slot.get("bloom_level", ""),
+        "chapter": chapter,
+        "concept": concept,
+        "reasoning_type": slot.get("reasoning_type", ""),
+        "_blueprint_slot": slot.get("slot"),
+        "_chapter": chapter,
+        "_concept_key": f"{chapter}::{concept}",
+        "_reasoning_type": slot.get("reasoning_type", ""),
+    }
 
 
 def _wrap_source(text: str, max_len: int = 6000) -> tuple[str, bool]:
@@ -92,6 +121,7 @@ async def _generate_chunk(
         prompt = (
             f"{prompt}\n\n[템플릿 계약]\n"
             f"{build_template_contract(template_id)}\n\n"
+            f"{blueprint_prompt(task)}\n\n"
             "[추가 준수]\n"
             "- 생성 결과의 template_id는 위 계약의 template_id와 정확히 같아야 한다.\n"
             "- 렌더링 방식에 필요한 필드를 빠뜨리지 말아야 한다.\n"
@@ -130,10 +160,11 @@ async def generate_questions_node(state: ExamForgeState) -> dict:
     locale = state.get("locale", "ko")
     allocations = plan.get("type_allocations", [])
     topic_weights = plan.get("topic_weights", {})
+    blueprint = plan.get("question_blueprint", [])
 
     failed_ids = state.get("failed_question_ids", [])
     existing_questions = state.get("questions", [])
-    tasks = _build_chunks(allocations, topic_weights)
+    tasks = _build_chunks(allocations, topic_weights, blueprint)
 
     if failed_ids and existing_questions:
         passed = [q for q in existing_questions if q.get("draft_id") not in failed_ids]
@@ -171,10 +202,11 @@ async def generate_questions_node(state: ExamForgeState) -> dict:
             new_drafts.extend(result)
         else:
             logger.warning("문항 생성 중 예외 발생: %s", result)
+    candidates = passed + new_drafts
     repair_drafts = await repair_missing_questions(
         allocations=allocations,
         topic_weights=topic_weights,
-        existing_drafts=passed + new_drafts,
+        existing_drafts=candidates,
         connector=connector,
         source_text=source_text,
         locale=locale,
@@ -184,8 +216,11 @@ async def generate_questions_node(state: ExamForgeState) -> dict:
         generate_chunk=_generate_chunk,
     )
     if repair_drafts:
-        new_drafts.extend(repair_drafts)
-    all_drafts = attach_source_code_if_needed(passed + new_drafts, source_text)
+        candidates.extend(repair_drafts)
+    candidates = await _dedup_and_refill(
+        candidates, allocations, topic_weights, connector, source_text, locale, semaphore
+    )
+    all_drafts = attach_source_code_if_needed(candidates, source_text)
 
     # 생성 결과가 0건이면 에러로 종료
     if not all_drafts:
@@ -214,3 +249,33 @@ def _limit_tasks(tasks: list[dict], target_count: int) -> list[dict]:
         limited.append({**task, "count": chunk_count})
         remaining -= chunk_count
     return limited
+
+
+async def _dedup_and_refill(
+    drafts: list[dict],
+    allocations: list[dict],
+    topic_weights: dict[str, float],
+    connector: AIConnector,
+    source_text: str,
+    locale: str,
+    semaphore: asyncio.Semaphore,
+) -> list[dict]:
+    """생성 직후 의미 중복을 제거하고 부족분을 한 번 보충한다."""
+    unique, removed = deduplicate_questions(drafts)
+    if not removed:
+        return unique
+    logger.warning("생성 단계 중복 문항 제거: %s", ", ".join(removed))
+    refill = await repair_missing_questions(
+        allocations=allocations,
+        topic_weights=topic_weights,
+        existing_drafts=unique,
+        connector=connector,
+        source_text=source_text,
+        locale=locale,
+        semaphore=semaphore,
+        generate_chunk=_generate_chunk,
+    )
+    if refill:
+        unique.extend(refill)
+    unique, _ = deduplicate_questions(unique)
+    return unique

@@ -1,10 +1,14 @@
 """품질 모듈 테스트."""
 from __future__ import annotations
 
+from app.modules.ExamForge_V1.quality.answer_positions import answer_position_counts
+from app.modules.ExamForge_V1.quality.answer_positions import balance_correct_answer_positions
 from app.modules.ExamForge_V1.quality.deduplicator import check_duplicates
+from app.modules.ExamForge_V1.quality.deduplicator import deduplicate_questions
 from app.modules.ExamForge_V1.quality.consistency_checker import check_consistency
 from app.modules.ExamForge_V1.quality.difficulty_scorer import score_bloom_distribution
 from app.modules.ExamForge_V1.quality.coverage_analyzer import analyze_coverage
+from app.modules.ExamForge_V1.quality.explanation_checker import check_explanation_quality
 from app.modules.ExamForge_V1.quality.metrics import compute_quality_metrics
 
 
@@ -31,6 +35,27 @@ class TestDeduplicator:
         score, pairs = check_duplicates(questions)
         assert score < 1.0
         assert len(pairs) == 1
+
+    def test_semantic_rule_duplicates(self) -> None:
+        """표현이 달라도 같은 풀이 규칙이면 중복 후보로 잡는다."""
+        questions = [
+            {"stem": "절댓값을 먼저 계산하고 가장 큰 값을 고르는 문제이다.", "question_id": "q1"},
+            {"stem": "절댓값 계산 후 가장 큰 값을 선택하는 문제이다.", "question_id": "q2"},
+            {"stem": "분수의 통분 원리를 설명하는 문항이다.", "question_id": "q3"},
+        ]
+        score, pairs = check_duplicates(questions)
+        assert score < 1.0
+        assert ("q1", "q2") in pairs
+
+    def test_deduplicate_questions_removes_later_item(self) -> None:
+        """중복 문항 제거는 뒤쪽 문항만 재생성 대상으로 돌린다."""
+        questions = [
+            {"stem": "같은 개념을 묻는 문제", "draft_id": "d1"},
+            {"stem": "같은 개념을 묻는 문제", "draft_id": "d2"},
+        ]
+        unique, removed = deduplicate_questions(questions)
+        assert [q["draft_id"] for q in unique] == ["d1"]
+        assert removed == ["d2"]
 
 
 class TestConsistencyChecker:
@@ -63,6 +88,49 @@ class TestConsistencyChecker:
         }]
         issues = check_consistency(questions)
         assert len(issues) > 0
+
+
+class TestAnswerPositionBalance:
+    """정답 위치 균등화 테스트."""
+
+    def test_balances_five_option_answer_positions(self) -> None:
+        """10문항이면 5개 위치가 2회씩 배정된다."""
+        questions = [
+            {
+                "question_id": f"q{i}",
+                "options": [
+                    {"label": "1", "text": "정답", "is_correct": True},
+                    {"label": "2", "text": "오답", "is_correct": False},
+                    {"label": "3", "text": "오답", "is_correct": False},
+                    {"label": "4", "text": "오답", "is_correct": False},
+                    {"label": "5", "text": "오답", "is_correct": False},
+                ],
+            }
+            for i in range(10)
+        ]
+        balanced = balance_correct_answer_positions(questions)
+        assert answer_position_counts(balanced) == {0: 2, 1: 2, 2: 2, 3: 2, 4: 2}
+        assert [opt["label"] for opt in balanced[4]["options"]] == ["1", "2", "3", "4", "5"]
+
+
+class TestExplanationChecker:
+    """오답별 해설 품질 검사 테스트."""
+
+    def test_missing_wrong_option_explanation_is_flagged(self) -> None:
+        """객관식 해설이 오답 일부를 빼먹으면 실패한다."""
+        question = {
+            "correct_answer": "1",
+            "explanation": "정답 근거: 1번은 맞다. 오답 해설: 2번은 오개념이다.",
+            "options": [
+                {"label": "1", "text": "정답", "is_correct": True},
+                {"label": "2", "text": "오답", "is_correct": False},
+                {"label": "3", "text": "오답", "is_correct": False},
+                {"label": "4", "text": "오답", "is_correct": False},
+                {"label": "5", "text": "오답", "is_correct": False},
+            ],
+        }
+        issues = check_explanation_quality(question)
+        assert any("오답별 해설 누락" in issue for issue in issues)
 
 
 class TestDifficultyScorer:

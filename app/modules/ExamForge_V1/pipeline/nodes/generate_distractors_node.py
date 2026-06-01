@@ -16,6 +16,7 @@ from app.modules.ExamForge_V1.common.ai_bridge import (
     run_connector_tasks,
 )
 from app.modules.ExamForge_V1.common.logger import get_logger
+from app.modules.ExamForge_V1.quality.answer_positions import balance_correct_answer_positions
 
 logger = get_logger(__name__)
 
@@ -129,7 +130,7 @@ async def generate_distractors_node(state: ExamForgeState) -> dict:
             # 예외 발생한 건은 원본 사용
             improved.append(mcq_questions[i])
 
-    all_questions = improved + non_mcq_questions
+    all_questions = balance_correct_answer_positions(improved) + non_mcq_questions
     logger.info("노드 완료: generate_distractors_node (%.2fs)", time.time() - node_start)
     return {"questions_with_distractors": all_questions, "pipeline_status": "answering"}
 

@@ -295,6 +295,28 @@ def test_generation_chunks_rotate_topics() -> None:
     assert topics[:3] == ["소유권", "빌림", "Result"]
 
 
+def test_generation_chunks_use_blueprint_concepts() -> None:
+    """blueprint가 있으면 청크가 강의·개념 메타데이터를 갖는다."""
+    chunks = _build_chunks(
+        allocations=[{
+            "template_id": "ko_multiple_choice_5",
+            "difficulty_distribution": {3: 1},
+        }],
+        topic_weights={"정수": 1.0},
+        blueprint=[{
+            "slot": 1,
+            "chapter": "1강 정수",
+            "topic": "절댓값",
+            "concept": "절댓값과 대소비교",
+            "difficulty": 3,
+            "reasoning_type": "2단계 계산/비교",
+        }],
+    )
+    assert chunks[0]["topic"] == "절댓값"
+    assert chunks[0]["_concept_key"] == "1강 정수::절댓값과 대소비교"
+    assert chunks[0]["_reasoning_type"] == "2단계 계산/비교"
+
+
 def test_task_metadata_overrides_llm_difficulty() -> None:
     """LLM이 난이도/블룸을 흔들어도 청크 계약을 우선한다."""
     draft = {"difficulty": 1, "bloom_level": "기억", "stem": "문제"}
@@ -334,6 +356,34 @@ def test_plan_bloom_distribution_matches_allocations() -> None:
         "적용": pytest.approx(1 / 3),
         "분석": pytest.approx(1 / 3),
     }
+
+
+def test_normalize_plan_adds_blueprint_and_reasoning_quota() -> None:
+    """계획 정규화가 개념 blueprint와 2단계 추론 비중을 보강한다."""
+    plan = {
+        "total_questions": 5,
+        "topic_weights": {"정수": 1.0},
+        "type_allocations": [{
+            "template_id": "ko_multiple_choice_5",
+            "count": 5,
+            "difficulty_distribution": {1: 5},
+        }],
+    }
+    topics = [{
+        "name": "정수",
+        "chapter": "1강",
+        "importance": 1.0,
+        "sub_concepts": ["절댓값", "대소비교", "사칙연산"],
+    }]
+    normalized = _normalize_plan(plan, {"total_questions": 5}, topics)
+    high_count = sum(
+        count
+        for diff, count in normalized["type_allocations"][0]["difficulty_distribution"].items()
+        if int(diff) >= 3
+    )
+    assert high_count >= 2
+    assert len(normalized["question_blueprint"]) == 5
+    assert normalized["question_blueprint"][0]["chapter"] == "1강"
 
 
 def test_repair_tasks_fill_missing_by_template() -> None:
@@ -489,6 +539,10 @@ def test_generation_prompt_includes_template_contract() -> None:
                 "topic": "Rust",
                 "difficulty": 3,
                 "count": 1,
+                "_blueprint_slot": 1,
+                "_chapter": "1강 Rust",
+                "_concept_key": "1강 Rust::소유권 이동",
+                "_reasoning_type": "2단계 적용 추론",
             },
             connector=connector,
             source_text="Rust는 소유권과 빌림 규칙으로 메모리 안전성을 보장한다.",
@@ -498,6 +552,8 @@ def test_generation_prompt_includes_template_contract() -> None:
     )
     assert result
     assert "[템플릿 계약]" in connector.last_user
+    assert "[문항 blueprint 계약]" in connector.last_user
+    assert "2단계 적용 추론" in connector.last_user
     assert "보기 정확히 5개" in connector.last_user
     assert "코드 예제의 결과" in connector.last_user
     assert '"code_snippet"' not in connector.last_user
