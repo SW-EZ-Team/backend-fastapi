@@ -8,6 +8,7 @@ from app.modules.ChapterStudio_V1.common.config import (
 from app.modules.ChapterStudio_V1.common.errors import ConversionError
 from app.modules.ChapterStudio_V1.pipeline.content_verify import verify_and_correct
 from app.modules.ChapterStudio_V1.pipeline.content_verify_parallel import verify_and_correct_parallel
+from app.modules.ChapterStudio_V1.pipeline.kanana_polish import inspect_and_polish_payload
 from app.modules.ChapterStudio_V1.pipeline.payload import (
     GeneratedLessonPayload,
     payload_from_state_dict,
@@ -32,6 +33,7 @@ async def content_verify_node(state: ChapterStudioState) -> ChapterStudioState:
             payload = await verify_and_correct_parallel(connector, payload, slide_count)
         else:
             payload = await verify_and_correct(connector, payload, slide_count)
+    payload = await inspect_and_polish_payload(payload, tone_hint=_tone_hint(state))
     return payload_to_state(payload)
 
 
@@ -47,6 +49,15 @@ def _state_int(state: ChapterStudioState, key: str) -> int:
     if not isinstance(value, int):
         raise ConversionError(f"{key} 정수가 필요하다.")
     return value
+
+
+def _tone_hint(state: ChapterStudioState) -> str:
+    formal = state.get("use_formal_speech")
+    if formal is True:
+        return "존댓말"
+    if formal is False:
+        return "반말"
+    return ""
 
 
 __all__ = ["content_verify_node"]

@@ -47,6 +47,9 @@ async def test_load_generation_context_reads_db_snapshot() -> None:
     assert context.lesson_id == "lesson-1"
     assert context.template == "statistics_inference"
     assert context.to_generation_input().teacher == "fox"
+    assert context.to_generation_input().use_formal_speech is False
+    assert context.to_generation_input().use_emoji is True
+    assert context.to_generation_input().tutor_name == "냥 튜터"
 
 
 @pytest.mark.asyncio
@@ -108,6 +111,9 @@ def test_row_to_generation_context_uses_safe_defaults() -> None:
     assert context.duration_days == 30
     assert context.teacher == "owl"
     assert context.slide_count == 12
+    assert context.use_formal_speech is True
+    assert context.use_emoji is False
+    assert context.tutor_name == ""
 
 
 def _row() -> Mapping[str, object]:
@@ -133,5 +139,11 @@ def _row() -> Mapping[str, object]:
             "socratic": 75,
             "audience_level": "통계 입문자",
             "weak_points": "표본분포",
+            "use_formal_speech": False,
+            "use_emoji": True,
+            "tutor_name": "냥 튜터",
+            "tutor_tagline": "친근한 말투 · 비유 잘 씀",
+            "is_default_tutor": True,
+            "voice_sample_url": "",
         },
     }

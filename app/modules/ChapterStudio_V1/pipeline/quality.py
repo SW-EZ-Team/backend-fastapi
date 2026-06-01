@@ -30,10 +30,10 @@ SLIDE_MIN_PLAIN_CHARS = 120
 # category별 후처리(render) 체인이 기대하는 필수 마커. postprocess._has_meaningful_visual과
 # 같은 어휘를 쓰되, 생성 단계에서 원본 소스 마커를 확인한다.
 _CATEGORY_MARKERS: dict[str, tuple[str, ...]] = {
-    "diagram": ("<pre",),
+    "diagram": ("<pre", "<svg", "visual-slide", "concept-map-visual", "step-flow-visual"),
     "code": ("<pre", "<code"),
-    "math": ("formula", "katex", "$"),
-    "chart": ("chart-box", "data-chart-spec"),
+    "math": ("formula", "katex", "$", "<svg", "number-line-visual", "fraction-bar-visual"),
+    "chart": ("chart-box", "data-chart-spec", "<svg", "comparison-visual"),
     "table": ("<table",),
     "interactive": ("<details", "step-grid", "node-link-visual", "linked-list", "graph-map"),
 }
@@ -131,6 +131,11 @@ def _check_slides(payload: GeneratedLessonPayload) -> list[Deficiency]:
     for slide in payload.slides:
         plain = _plain_text(slide.html)
         sentences = _sentence_count(plain)
+        if _has_structured_visual(slide.html):
+            missing = _missing_category_marker(slide.category, slide.html)
+            if missing:
+                items.append(Deficiency("slide_html", slide.slide_idx, f"category={slide.category} 필수 시각요소({missing}) 누락."))
+            continue
         if len(plain) < SLIDE_MIN_PLAIN_CHARS or sentences < SLIDE_MIN_SENTENCES:
             items.append(
                 Deficiency(
@@ -144,6 +149,11 @@ def _check_slides(payload: GeneratedLessonPayload) -> list[Deficiency]:
         if missing:
             items.append(Deficiency("slide_html", slide.slide_idx, f"category={slide.category} 필수 시각요소({missing}) 누락."))
     return items
+
+
+def _has_structured_visual(html: str) -> bool:
+    markers = ("visual-slide", "number-line-visual", "comparison-visual", "step-flow-visual", "fraction-bar-visual", "concept-map-visual", "example-box-visual")
+    return any(marker in html for marker in markers)
 
 
 def _missing_category_marker(category: str, html: str) -> str:

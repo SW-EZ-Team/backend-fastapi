@@ -135,18 +135,54 @@ def response_schema(slide_count: int = 5) -> dict[str, Any]:
 
 
 def slides_schema(slide_count: int = 5) -> dict[str, Any]:
-    """슬라이드 배열만 생성하는 작은 guided JSON 스키마다(컴포넌트 병렬 생성용).
+    """구조화 visual 슬라이드 배열만 생성하는 작은 guided JSON 스키마다.
 
-    큰 lesson 스키마에서 xgrammar가 뒤쪽 배열을 적게 강제하던 문제를 피하려고, slides만
-    단일 목적으로 떼어 정확히 slide_count개를 강제한다. 각 item 구조는 lesson 스키마의
-    slide 정의를 그대로 재사용해 계약을 일치시킨다.
+    Qwen은 raw HTML을 만들지 않고 visual.type/data만 만든다. Python 렌더러가 이 구조를
+    검증된 SVG/HTML body로 바꾸므로, 깨진 마크업이 iframe까지 전파되지 않는다.
     """
     bounded_count = max(5, min(15, slide_count))
     return {
         "type": "object",
         "additionalProperties": False,
         "required": ["slides"],
-        "properties": {"slides": response_schema(bounded_count)["properties"]["slides"]},
+        "properties": {
+            "slides": {
+                "type": "array",
+                "minItems": bounded_count,
+                "maxItems": bounded_count,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["slide_idx", "title", "category", "narration", "visual", "checkpoint"],
+                    "properties": {
+                        "slide_idx": {"type": "integer", "minimum": 0, "maximum": bounded_count - 1},
+                        "title": {"type": "string", "minLength": 1, "maxLength": 48},
+                        "category": {"type": "string", "enum": ["text", "diagram", "math", "chart"]},
+                        "narration": {"type": "string", "minLength": 20, "maxLength": 220},
+                        "checkpoint": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "visual": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["type", "data"],
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "enum": [
+                                        "number_line",
+                                        "comparison",
+                                        "step_flow",
+                                        "fraction_bar",
+                                        "concept_map",
+                                        "example_box",
+                                    ],
+                                },
+                                "data": {"type": "object", "additionalProperties": True},
+                            },
+                        },
+                    },
+                },
+            }
+        },
     }
 
 

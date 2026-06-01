@@ -27,6 +27,8 @@ class GeneratedSlide(BaseModel):
     category: SlideCategory
     html: str = Field(min_length=1)
     css: str = ""
+    narration: str = ""
+    visual: dict[str, object] = Field(default_factory=dict)
 
 
 class GeneratedQuiz(BaseModel):

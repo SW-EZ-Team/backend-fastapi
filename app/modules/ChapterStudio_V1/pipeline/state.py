@@ -20,6 +20,12 @@ class ChapterStudioState(TypedDict, total=False):
     pace: int
     tutor_depth: int
     socratic: int
+    use_formal_speech: bool
+    use_emoji: bool
+    tutor_name: str
+    tutor_tagline: str
+    is_default_tutor: bool
+    voice_sample_url: str
     audience_level: str
     learning_goal: str
     chapter_brief: str

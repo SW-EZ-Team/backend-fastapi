@@ -126,6 +126,18 @@ def test_tts_passes_config_and_wraps_pcm_as_wav(monkeypatch: pytest.MonkeyPatch)
         assert wf.getnframes() == 3
 
 
+def test_tts_prepends_style_instruction_when_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+    models, _fake_genai = _patch_genai(monkeypatch, _tts_response(struct.pack("<h", 0)))
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+
+    req = TTSRequest(text="이제 예제를 볼게.", ref_audio_bytes=b"unused", style="반말 친근 과외톤")
+    asyncio.run(GeminiTTSConnector().synthesize(req))
+
+    contents = models.calls[0]["contents"]
+    assert contents.startswith("친근한 또래 과외 선생님이 반말로 밝게 설명하듯 읽어줘:")
+    assert contents.endswith("이제 예제를 볼게.")
+
+
 def test_asr_passes_audio_part_and_parses_text(monkeypatch: pytest.MonkeyPatch) -> None:
     models, _fake_genai = _patch_genai(monkeypatch, SimpleNamespace(text=" 전사 결과 \n"))
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key")

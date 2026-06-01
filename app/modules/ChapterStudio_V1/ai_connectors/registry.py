@@ -11,6 +11,7 @@ from app.modules.ChapterStudio_V1.ai_connectors.codex_cli_connector import Codex
 from app.modules.ChapterStudio_V1.ai_connectors.failover_connector import FailoverAIConnector
 from app.modules.ChapterStudio_V1.ai_connectors.errors import ModelNotFoundError
 from app.modules.ChapterStudio_V1.ai_connectors.gemini_cli_connector import GeminiCLIConnector
+from app.modules.ChapterStudio_V1.ai_connectors.kanana2_connector import Kanana2Connector
 from app.modules.ChapterStudio_V1.ai_connectors.opus46_connector import Opus46Connector
 from app.modules.ChapterStudio_V1.ai_connectors.qwen27b_modal_connector import Qwen27BModalConnector
 from app.modules.ChapterStudio_V1.ai_connectors.tts_v1_connector import TTSV1Connector
@@ -58,6 +59,7 @@ _REGISTRY: dict[str, ConnectorFactory] = {
     "mlx_qwen3_local": lambda: _build_mlx_qwen3_connector(),
 }
 _CACHE: dict[str, Connector] = {}
+_POLISH_CACHE: Kanana2Connector | None = None
 
 
 def _build_failover_connector() -> FailoverAIConnector:
@@ -159,9 +161,19 @@ def get_tts_connector() -> TTSConnector:
     return connector
 
 
+def get_polish_connector() -> Kanana2Connector:
+    """Kanana2 교정 커넥터는 생성/검증 모델 레지스트리와 분리해 반환한다."""
+    global _POLISH_CACHE
+    if _POLISH_CACHE is None:
+        _POLISH_CACHE = Kanana2Connector()
+    return _POLISH_CACHE
+
+
 def clear_cache() -> None:
     """테스트 격리를 위해 싱글톤 캐시를 비운다."""
+    global _POLISH_CACHE
     _CACHE.clear()
+    _POLISH_CACHE = None
 
 
 async def close_all() -> None:
@@ -185,6 +197,7 @@ __all__ = [
     "close_all",
     "get_connector",
     "get_planner_connector",
+    "get_polish_connector",
     "get_text_connector",
     "get_tts_connector",
     "get_verifier_connector",

@@ -12,6 +12,7 @@ from app.modules.ChapterStudio_V1.postprocess.nh3_sanitizer import sanitize
 from app.modules.ChapterStudio_V1.postprocess.shiki import shiki_render
 from app.modules.ChapterStudio_V1.postprocess.syntax_theme import code_theme_css
 from app.modules.ChapterStudio_V1.postprocess.visual_theme import accessibility_guard_css, visual_theme_css
+from app.modules.ChapterStudio_V1.postprocess.visual_quality import ensure_visual_body
 from app.modules.ChapterStudio_V1.validators.visual_density import visual_density_warnings
 
 
@@ -43,6 +44,8 @@ async def postprocess_slide(
     html = await _chart_step(category, html, warnings)
     html = _mark_flow_arrow_children(html)
     html = sanitize(html, category=category)
+    html, gate_warnings = ensure_visual_body(html, category, slide_index)
+    warnings.extend(gate_warnings)
     warnings.extend(visual_density_warnings(html, category))
     iframe_html = wrap_iframe(html, css=_compose_iframe_css(raw_css))
     return {

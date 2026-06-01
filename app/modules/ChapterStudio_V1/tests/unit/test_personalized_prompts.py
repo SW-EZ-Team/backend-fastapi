@@ -38,6 +38,35 @@ def test_parallel_component_prompts_include_personalization() -> None:
         assert "질문 스타일은" in text
 
 
+def test_personalization_reflects_casual_speech_persona_and_emoji() -> None:
+    args = {
+        **_ARGS,
+        "use_formal_speech": False,
+        "use_emoji": True,
+        "tutor_name": "냥 튜터",
+        "tutor_tagline": "친근한 말투 · 비유 잘 씀",
+    }
+
+    slide_text = _join(slides_prompts("요청", "outline", 10, "concept_flow", **args))
+    voice_text = _join(voice_prompt("요청", "제목", "초점", "요약", 0, **args))
+
+    for text in (slide_text, voice_text):
+        assert "말투: 반말체" in text
+        assert "친근한 또래 과외쌤 톤" in text
+        assert "narration/음성대본에 가벼운 이모지" in text
+        assert "튜터 페르소나: 냥 튜터 — 친근한 말투 · 비유 잘 씀" in text
+
+
+def test_personalization_reflects_formal_speech_and_emoji_ban() -> None:
+    args = {**_ARGS, "use_formal_speech": True, "use_emoji": False}
+
+    text = _join(voice_prompt("요청", "제목", "초점", "요약", 0, **args))
+
+    assert "말투: 존댓말" in text
+    assert "다정하고 또렷한 과외쌤 톤" in text
+    assert "이모지 금지" in text
+
+
 def test_weak_points_empty_is_noop_for_weak_specific_rules() -> None:
     args = {**_ARGS, "weak_points": ""}
 
@@ -57,12 +86,17 @@ def test_required_weak_rules_are_component_specific() -> None:
     assert "더 천천히·예시 많이 설명" in voice_text
 
 
-def test_parallel_slide_prompt_includes_mermaid_safe_edge_rule() -> None:
+def test_parallel_slide_prompt_requires_structured_visual_spec() -> None:
     system, _ = slides_prompts("요청", "outline", 10, "concept_flow", **_ARGS)
 
-    assert "mermaid 노드 라벨에 대괄호 [] 금지" in system
-    assert "edge 라벨에 화살표 기호(->) 등 mermaid 예약기호를 넣지 않는다" in system
-    assert "한 라벨은 한 줄" in system
+    assert "html, css, markdown, mermaid, script, 외부 URL을 절대 생성하지 않는다" in system
+    assert "visual은 {type, data} 객체" in system
+    assert "number_line, comparison, step_flow, fraction_bar, concept_map, example_box" in system
+    assert "중1 수학·수직선·정수 비교·절댓값·분수 단원" in system
+    assert "같은 visual.type을 연속 사용하지 말고" in system
+    assert "최소 3종 이상" in system
+    assert "concept_map은 남발 금지이며 단원당 1~2개" in system
+    assert "few-shot" in system
 
 
 def test_single_call_prompt_includes_missing_personalization_fields() -> None:
@@ -71,6 +105,8 @@ def test_single_call_prompt_includes_missing_personalization_fields() -> None:
     assert "학습자 수준 Rust 입문자에 맞춰 난이도·용어·예시 조정" in request.user
     assert "학습 목표 빌림 규칙을 코드로 설명" in request.user
     assert "학습자 약점 개념: 소유권, 라이프타임" in request.user
+    assert "말투: 반말체" in request.user
+    assert "튜터 페르소나: 냥 튜터 — 친근한 말투 · 비유 잘 씀" in request.user
 
 
 def _join(pair: tuple[str, str]) -> str:
@@ -91,6 +127,10 @@ def _state() -> ChapterStudioState:
         "pace": 20,
         "tutor_depth": 80,
         "socratic": 90,
+        "use_formal_speech": False,
+        "use_emoji": True,
+        "tutor_name": "냥 튜터",
+        "tutor_tagline": "친근한 말투 · 비유 잘 씀",
         "audience_level": "Rust 입문자",
         "learning_goal": "빌림 규칙을 코드로 설명",
         "weak_points": "소유권, 라이프타임",

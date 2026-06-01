@@ -75,12 +75,24 @@ def test_modal_supporting_materials_schema_scopes_quizzes_and_assignment() -> No
 
 def test_slides_schema_scopes_exactly_slide_count_slides() -> None:
     schema = slides_schema(10)
+    item = schema["properties"]["slides"]["items"]
 
     assert schema["required"] == ["slides"]
     assert list(schema["properties"].keys()) == ["slides"]
     assert schema["properties"]["slides"]["minItems"] == 10
     assert schema["properties"]["slides"]["maxItems"] == 10
-    assert schema["properties"]["slides"]["items"]["properties"]["slide_idx"]["maximum"] == 9
+    assert item["properties"]["slide_idx"]["maximum"] == 9
+    assert item["required"] == ["slide_idx", "title", "category", "narration", "visual", "checkpoint"]
+    assert "html" not in item["properties"]
+    assert "css" not in item["properties"]
+    assert item["properties"]["visual"]["properties"]["type"]["enum"] == [
+        "number_line",
+        "comparison",
+        "step_flow",
+        "fraction_bar",
+        "concept_map",
+        "example_box",
+    ]
 
 
 def test_quizzes_schema_scopes_exactly_slide_count_quizzes() -> None:

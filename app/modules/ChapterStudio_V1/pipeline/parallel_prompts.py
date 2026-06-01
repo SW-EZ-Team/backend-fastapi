@@ -1,9 +1,13 @@
 """컴포넌트 병렬 생성용 프롬프트 빌더와 응답 파서."""
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Literal, cast
+
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.modules.ChapterStudio_V1.ai_connectors.schemas import ChapterAIRequest
+from app.modules.ChapterStudio_V1.postprocess.visual_renderers import render_fallback_visual, render_visual_slide
 from app.modules.ChapterStudio_V1.pipeline.normalize import normalize_assignment_value
 from app.modules.ChapterStudio_V1.pipeline.parallel_prompt_text import (
     assignment_prompts,
@@ -20,6 +24,7 @@ from app.modules.ChapterStudio_V1.pipeline.payload import (
     GeneratedQuiz,
     GeneratedSlide,
     GeneratedVoiceScript,
+    SlideCategory,
 )
 from common.llm_output import extract_json_block, loads_lenient, strip_thinking
 
@@ -29,6 +34,7 @@ _QUIZZES_MAX_TOKENS = 9000
 _NOTE_MAX_TOKENS = 4000
 _ASSIGNMENT_MAX_TOKENS = 4000
 _VOICE_MAX_TOKENS = 4000
+VisualSlideCategory = Literal["text", "diagram", "math", "chart"]
 
 
 class _SlidesResult(BaseModel):
@@ -37,6 +43,28 @@ class _SlidesResult(BaseModel):
     model_config = ConfigDict(strict=True)
 
     slides: list[GeneratedSlide] = Field(min_length=1, max_length=15)
+
+
+class _VisualSpecResult(BaseModel):
+    """Qwen slides 스키마의 구조화 visual 객체다."""
+
+    model_config = ConfigDict(strict=True)
+
+    type: str = Field(min_length=1)
+    data: dict[str, object]
+
+
+class _VisualSlideResult(BaseModel):
+    """raw HTML 대신 받은 슬라이드 visual 스펙이다."""
+
+    model_config = ConfigDict(strict=True)
+
+    slide_idx: int = Field(ge=0, le=14)
+    title: str = Field(min_length=1)
+    category: VisualSlideCategory
+    narration: str = Field(min_length=1, max_length=220)
+    visual: _VisualSpecResult
+    checkpoint: str = Field(min_length=1)
 
 
 class _QuizzesResult(BaseModel):
@@ -116,8 +144,10 @@ def build_voice_request(
 
 
 def parse_slides(text: str) -> list[GeneratedSlide]:
-    """slides 응답에서 slides 배열을 strict 검증해 꺼낸다."""
-    return _SlidesResult.model_validate(_loaded(text)).slides
+    """slides 응답에서 legacy HTML 또는 구조화 visual 스펙을 strict 검증해 꺼낸다."""
+    data = _loaded(text)
+    raw_slides = _raw_slides(data)
+    return [_parse_slide_item(item) for item in raw_slides]
 
 
 def parse_quizzes(text: str) -> list[GeneratedQuiz]:
@@ -161,6 +191,81 @@ def _loaded(text: str) -> object:
     return loads_lenient(extract_json_block(strip_thinking(text)))
 
 
+def _raw_slides(data: object) -> list[object]:
+    if not isinstance(data, dict) or not isinstance(data.get("slides"), list):
+        raise ValueError("slides 배열이 필요하다.")
+    raw = data["slides"]
+    if not 1 <= len(raw) <= 15:
+        raise ValueError("slides 개수가 허용 범위를 벗어났다.")
+    return raw
+
+
+def _parse_slide_item(item: object) -> GeneratedSlide:
+    if not isinstance(item, Mapping):
+        raise ValueError("slides 항목은 객체여야 한다.")
+    data = dict(item)
+    if isinstance(data.get("visual"), Mapping):
+        try:
+            return _visual_slide_to_generated(_VisualSlideResult.model_validate(data))
+        except ValidationError:
+            return _fallback_slide(data)
+    if "html" not in data:
+        return _fallback_slide(data)
+    return GeneratedSlide.model_validate(data)
+
+
+def _visual_slide_to_generated(item: _VisualSlideResult) -> GeneratedSlide:
+    visual_data = item.visual.model_dump()
+    html = render_visual_slide(item.title, item.narration, item.visual.type, item.visual.data)
+    return GeneratedSlide(
+        slide_idx=item.slide_idx,
+        title=item.title,
+        focus=item.narration,
+        checkpoint=item.checkpoint,
+        category=_slide_category(item.category),
+        html=html,
+        css="",
+        narration=item.narration,
+        visual=visual_data,
+    )
+
+
+def _slide_category(category: VisualSlideCategory) -> SlideCategory:
+    return category
+
+
+def _fallback_slide(data: dict[object, object]) -> GeneratedSlide:
+    slide_idx = data.get("slide_idx")
+    if not isinstance(slide_idx, int):
+        raise ValueError("slide_idx 정수가 필요하다.")
+    title = _text_value(data.get("title"), f"슬라이드 {slide_idx + 1}")
+    narration = _text_value(data.get("narration"), "핵심 내용을 예제 카드로 정리한다.")
+    checkpoint = _text_value(data.get("checkpoint"), "핵심 조건을 말로 확인할 수 있는가?")
+    category = _category_value(data.get("category"))
+    html = render_fallback_visual(title, narration)
+    return GeneratedSlide(
+        slide_idx=slide_idx,
+        title=title,
+        focus=narration,
+        checkpoint=checkpoint,
+        category=category,
+        html=html,
+        css="",
+        narration=narration,
+        visual={"type": "example_box", "data": {"problem": title, "steps": [narration], "answer": checkpoint}},
+    )
+
+
+def _text_value(value: object, default: str) -> str:
+    return value if isinstance(value, str) and value else default
+
+
+def _category_value(value: object) -> SlideCategory:
+    if isinstance(value, str) and value in {"text", "diagram", "math", "chart"}:
+        return cast(SlideCategory, value)
+    return "text"
+
+
 def _request(
     system: str, user: str, max_tokens: int, temperature: float, slide_count: int, schema: str, template_key: str
 ) -> ChapterAIRequest:
@@ -173,7 +278,7 @@ def _request(
     )
 
 
-def _prompt_kwargs(personalization: PersonalizationArgs) -> dict[str, str | int]:
+def _prompt_kwargs(personalization: PersonalizationArgs) -> dict[str, str | int | bool]:
     return {
         "weak_points": personalization.weak_points,
         "audience_level": personalization.audience_level,
@@ -182,6 +287,12 @@ def _prompt_kwargs(personalization: PersonalizationArgs) -> dict[str, str | int]
         "tutor_depth": personalization.tutor_depth,
         "socratic": personalization.socratic,
         "learning_goal": personalization.learning_goal,
+        "use_formal_speech": personalization.use_formal_speech,
+        "use_emoji": personalization.use_emoji,
+        "tutor_name": personalization.tutor_name,
+        "tutor_tagline": personalization.tutor_tagline,
+        "is_default_tutor": personalization.is_default_tutor,
+        "voice_sample_url": personalization.voice_sample_url,
     }
 
 

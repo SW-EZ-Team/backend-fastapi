@@ -177,6 +177,29 @@ class TestPostprocessSlide:
             await postprocess_slide(0, "text", '<div class="chart-box" data-chart-type="bar" data-chart-spec="{}"></div>', "")
             mock_c.assert_called_once()
 
+    async def test_quality_gate_replaces_trailing_html_garbage_with_svg_fallback(self):
+        result = await postprocess_slide(
+            slide_index=0,
+            category="text",
+            raw_html="<html><body><p>깨진 문서</p></body></html>뒤 쓰레기",
+            raw_css="",
+        )
+
+        assert "example-box-visual" in result["html"]
+        assert "<svg" in result["html"]
+        assert any("visual-quality" in warning for warning in result["warnings"])
+
+    async def test_quality_gate_replaces_plain_text_only_body_with_svg_fallback(self):
+        result = await postprocess_slide(
+            slide_index=1,
+            category="text",
+            raw_html="<section><p>긴 문단 하나뿐입니다.</p></section>",
+            raw_css="",
+        )
+
+        assert "example-box-visual" in result["html"]
+        assert "<svg" in result["html"]
+
 
 @pytest.mark.asyncio
 class TestPostprocessAll:

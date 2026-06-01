@@ -159,6 +159,20 @@ def qwen_app_name() -> str:
     return _optional_value("QWEN_APP_NAME") or "chapterstudio-qwen27b"
 
 
+def kanana_app_name() -> str:
+    return _optional_value("KANANA_MODAL_APP_NAME") or "kanana2-typofix"
+
+
+def kanana_polish_enabled() -> bool:
+    """Kanana2 교정 패스는 로컬·테스트 안전을 위해 명시 설정 때만 켠다."""
+    return _bool_value("KANANA_POLISH_ENABLED", False)
+
+
+def kanana_polish_max_concurrency() -> int:
+    """교정은 Modal 원격 호출이므로 동시성을 제한해 비용과 큐 적체를 막는다."""
+    return _int_value("KANANA_POLISH_MAX_CONCURRENCY", "8", 1, 16)
+
+
 def modal_teardown_enabled() -> bool:
     """Modal 앱을 완전히 un-deploy(decommission)할지 여부를 반환한다(기본 false).
 

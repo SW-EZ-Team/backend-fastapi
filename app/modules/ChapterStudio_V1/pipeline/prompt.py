@@ -126,6 +126,10 @@ def _personalization_block(state: ChapterStudioState) -> str:
         tutor_depth=_state_int(state, "tutor_depth"),
         socratic=_state_int(state, "socratic"),
         learning_goal=_optional_state_text(state, "learning_goal") or "핵심 개념 이해와 실습",
+        use_formal_speech=_optional_state_bool(state, "use_formal_speech", True),
+        use_emoji=_optional_state_bool(state, "use_emoji", False),
+        tutor_name=_optional_state_text(state, "tutor_name"),
+        tutor_tagline=_optional_state_text(state, "tutor_tagline"),
     )
 
 
@@ -141,6 +145,11 @@ def _optional_state_text(state: ChapterStudioState, key: str) -> str:
     if isinstance(value, str):
         return value
     return ""
+
+
+def _optional_state_bool(state: ChapterStudioState, key: str, default: bool) -> bool:
+    value = state.get(key)
+    return value if isinstance(value, bool) else default
 
 
 def _outline_contract(state: ChapterStudioState) -> str:
