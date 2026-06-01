@@ -33,6 +33,7 @@ from app.modules.ChapterStudio_V1.db.persistence_values import (
     summary as _summary,
     voice_rows as _voice_rows,
 )
+from app.modules.ChapterStudio_V1.db.public_persistence import persist_public_content
 from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState
 
 
@@ -59,6 +60,7 @@ async def persist_chapter_state(
         await _insert_note(conn, context, chapter_id, state, schema)
         await _insert_assignment(conn, context, chapter_id, state, schema)
         await _insert_voice_scripts(conn, context, chapter_id, state, schema)
+        await persist_public_content(conn, context, state)
         await _mark_done(conn, context, chapter_id, state, schema)
 
 

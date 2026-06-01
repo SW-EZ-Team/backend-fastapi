@@ -1,4 +1,4 @@
-"""문제를 병렬로 생성하는 노드."""
+"""문제를 문항 단위로 생성하는 노드."""
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +10,12 @@ from app.modules.ExamForge_V1.templates.registry import get_template
 from app.modules.ExamForge_V1.templates.catalog import template_contract as build_template_contract
 from app.modules.ExamForge_V1.prompts.question_gen import get_system_prompt
 from app.modules.ExamForge_V1.common.config import generation_concurrency
-from app.modules.ExamForge_V1.common.ai_bridge import AIConnector, get_text_connector
+from app.modules.ExamForge_V1.common.ai_bridge import (
+    AIConnector,
+    connector_supports_batch,
+    get_text_connector,
+    run_connector_tasks,
+)
 from app.modules.ExamForge_V1.common.errors import ParseError
 from app.modules.ExamForge_V1.common.logger import get_logger
 from app.modules.ExamForge_V1.pipeline.nodes.generation_request import build_generation_request, strict_generation_prompt
@@ -22,7 +27,7 @@ logger = get_logger(__name__)
 
 
 def _build_chunks(allocations: list[dict], topic_weights: dict[str, float]) -> list[dict]:
-    """생성 작업 청크 목록을 구성한다."""
+    """생성 작업을 문항 1개 단위로 구성한다."""
     tasks: list[dict] = []
     topic_names = list(topic_weights.keys()) or ["일반"]
     topic_cursor = 0
@@ -32,15 +37,14 @@ def _build_chunks(allocations: list[dict], topic_weights: dict[str, float]) -> l
         for diff_level, count in diff_dist.items():
             if count <= 0:
                 continue
-            for chunk_start in range(0, count, 2):
-                chunk_count = min(2, count - chunk_start)
+            for _ in range(int(count)):
                 topic_idx = topic_cursor % len(topic_names)
                 topic_cursor += 1
                 tasks.append({
                     "template_id": template_id,
                     "topic": topic_names[topic_idx],
                     "difficulty": int(diff_level),
-                    "count": chunk_count,
+                    "count": 1,
                 })
     return tasks
 
@@ -66,7 +70,7 @@ async def _generate_chunk(
     locale: str,
     semaphore: asyncio.Semaphore,
 ) -> list[dict]:
-    """단일 청크의 문제를 생성한다."""
+    """단일 문항 작업의 문제를 생성한다."""
     async with semaphore:
         template_id = task.get("template_id", "")
         topic = task.get("topic", "일반")
@@ -115,7 +119,7 @@ async def _generate_chunk(
 
 
 async def generate_questions_node(state: ExamForgeState) -> dict:
-    """계획에 따라 문제를 병렬로 생성한다."""
+    """계획에 따라 문제를 문항 단위로 생성한다."""
     # 상위 노드에서 에러가 전파된 경우 즉시 반환해 불필요한 AI 호출을 방지한다
     if state.get("pipeline_status") == "error":
         return {}
@@ -151,9 +155,14 @@ async def generate_questions_node(state: ExamForgeState) -> dict:
             "error_message": f"문제 생성 커넥터 초기화 실패: {exc}",
         }
 
-    results = await asyncio.gather(
-        *[_generate_chunk(t, connector, source_text, locale, semaphore) for t in limited_tasks],
-        return_exceptions=True,
+    results = await run_connector_tasks(
+        [
+            lambda task=task: _generate_chunk(
+                task, connector, source_text, locale, semaphore
+            )
+            for task in limited_tasks
+        ],
+        connector,
     )
 
     new_drafts: list[dict] = []
@@ -161,7 +170,7 @@ async def generate_questions_node(state: ExamForgeState) -> dict:
         if isinstance(result, list):
             new_drafts.extend(result)
         else:
-            logger.warning("청크 병렬 생성 중 예외 발생: %s", result)
+            logger.warning("문항 생성 중 예외 발생: %s", result)
     repair_drafts = await repair_missing_questions(
         allocations=allocations,
         topic_weights=topic_weights,
@@ -169,7 +178,9 @@ async def generate_questions_node(state: ExamForgeState) -> dict:
         connector=connector,
         source_text=source_text,
         locale=locale,
-        semaphore=semaphore,
+        semaphore=(
+            semaphore if connector_supports_batch(connector) else asyncio.Semaphore(1)
+        ),
         generate_chunk=_generate_chunk,
     )
     if repair_drafts:
@@ -185,7 +196,12 @@ async def generate_questions_node(state: ExamForgeState) -> dict:
             "source_truncated": source_truncated,
         }
     logger.info("노드 완료: generate_questions_node (%.2fs)", time.time() - node_start)
-    return {"questions": all_drafts, "pipeline_status": "distractors", "source_truncated": source_truncated}
+    return {
+        "questions": all_drafts,
+        "pipeline_status": "distractors",
+        "source_truncated": source_truncated,
+    }
+
 
 def _limit_tasks(tasks: list[dict], target_count: int) -> list[dict]:
     """필요한 문제 수에 맞게 청크 목록을 잘라낸다."""

@@ -8,9 +8,13 @@ Gemini CLI 계열 커넥터는 테스트 전용이다. GEMINI_CLI_ENABLED=true �
 """
 from __future__ import annotations
 
+import asyncio
 import contextvars
+import inspect
 import logging
 import os
+from collections.abc import Awaitable, Callable, Sequence
+from typing import TypeVar
 
 from app.modules.ExamForge_V1.common._ai_schemas import (
     AIConnector,
@@ -48,12 +52,54 @@ _GEMINI_CLI_MODEL_MAP: dict[str, str] = {
 
 _CONNECTOR_CACHE: dict[str, AIConnector] = {}
 _current_budget = current_budget
+_TaskResult = TypeVar("_TaskResult")
 
 
 class _GeminiCliConnector:
     """기존 테스트가 참조하던 Gemini CLI 출력 정규화 호환 래퍼."""
 
     _clean_output = staticmethod(_gemini_clean_output)
+
+
+class _Qwen27BModalExamForgeAdapter:
+    """ChapterStudio Modal 커넥터를 ExamForge 스키마로 감싸는 어댑터."""
+
+    name: str = "qwen27b_modal"
+
+    def __init__(self) -> None:
+        from app.modules.ChapterStudio_V1.ai_connectors.qwen27b_modal_connector import (
+            Qwen27BModalConnector,
+        )
+
+        self._connector: Qwen27BModalConnector = Qwen27BModalConnector()
+
+    async def generate(self, req: ChapterAIRequest) -> ChapterAIResponse:
+        """동일 필드 스키마를 ExamForge 응답 타입으로 되돌린다."""
+        from app.modules.ChapterStudio_V1.ai_connectors.schemas import (
+            ChapterAIRequest as StudioAIRequest,
+        )
+
+        studio_req = StudioAIRequest(
+            system=req.system,
+            user=req.user,
+            max_tokens=req.max_tokens,
+            temperature=req.temperature,
+            extra=req.extra,
+        )
+        resp = await self._connector.generate(studio_req)
+        return ChapterAIResponse(
+            text=resp.text,
+            model=resp.model,
+            input_tokens=resp.input_tokens,
+            output_tokens=resp.output_tokens,
+            finish_reason=resp.finish_reason,
+        )
+
+    def supports(self, feature: str) -> bool:
+        """Modal B200 경로는 문항별 병렬 실행을 허용한다."""
+        if feature == "batch":
+            return True
+        return self._connector.supports(feature)
 
 
 def set_current_budget(budget: LLMBudgetCounter) -> contextvars.Token:
@@ -94,6 +140,8 @@ def get_connector(name: str) -> AIConnector:
     if name == "codex_cli":
         # Codex CLI 커넥터는 API 키 없이 ChatGPT OAuth를 사용한다
         connector = CodexCliConnector()
+    elif name == "qwen27b_modal":
+        connector = _Qwen27BModalExamForgeAdapter()
     elif name == "gemini_flash":
         connector = _build_gemini_genai_connector()
     elif name in _ANTHROPIC_MODEL_MAP:
@@ -105,6 +153,37 @@ def get_connector(name: str) -> AIConnector:
 
     _CONNECTOR_CACHE[name] = connector
     return connector
+
+
+async def run_connector_tasks(
+    task_factories: Sequence[Callable[[], Awaitable[_TaskResult]]],
+    connector: AIConnector,
+) -> list[_TaskResult | Exception]:
+    """커넥터 batch 지원 여부에 따라 병렬/순차 실행을 선택한다."""
+    if connector_supports_batch(connector):
+        return await asyncio.gather(
+            *(factory() for factory in task_factories),
+            return_exceptions=True,
+        )
+
+    results: list[_TaskResult | Exception] = []
+    for factory in task_factories:
+        try:
+            results.append(await factory())
+        except Exception as exc:
+            results.append(exc)
+    return results
+
+
+def connector_supports_batch(connector: AIConnector) -> bool:
+    """동기 supports 계약만 batch 지원으로 인정한다."""
+    supported = connector.supports("batch")
+    if inspect.isawaitable(supported):
+        closer = getattr(supported, "close", None)
+        if callable(closer):
+            closer()
+        return False
+    return supported is True
 
 
 def _build_gemini_genai_connector() -> AIConnector:
@@ -143,5 +222,7 @@ __all__ = [
     "get_planner_connector",
     "get_text_connector",
     "get_verifier_connector",
+    "connector_supports_batch",
+    "run_connector_tasks",
     "set_current_budget",
 ]

@@ -103,6 +103,38 @@ async def test_persist_chapter_state_preserves_assignment_metadata() -> None:
     assert args[8] == "코드 변환"
 
 
+@pytest.mark.anyio
+async def test_persist_chapter_state_writes_public_spring_tables() -> None:
+    conn = FakeConnection()
+
+    await persist_chapter_state(conn, _context(), "lesson-1", _state())
+
+    slide_args = _args_for(conn, "INSERT INTO public.slide")
+    quiz_args = _args_for(conn, "INSERT INTO public.quiz")
+    note_args = _args_for(conn, "INSERT INTO public.note")
+    assert re.fullmatch(r"sld_[0-9A-Z]{26}", str(slide_args[0]))
+    assert slide_args[1:5] == (
+        "lesson-1",
+        0,
+        "리스트 컴프리헨션 1",
+        "<iframe srcdoc='<section>1</section>'></iframe>",
+    )
+    assert slide_args[5:] == (None, 3.5)
+    assert re.fullmatch(r"qz_[0-9A-Z]{26}", str(quiz_args[0]))
+    assert quiz_args[1:4] == ("lesson-1", 0, "리스트 컴프리헨션의 첫 확인 요소는 무엇인가요?")
+    assert json.loads(str(quiz_args[4])) == ["출력식", "파일명", "패키지", "운영체제"]
+    assert quiz_args[5:] == (0, "출력식이 새 리스트의 원소를 결정합니다.", slide_args[0])
+    assert re.fullmatch(r"nte_[0-9A-Z]{26}", str(note_args[0]))
+    assert note_args[1:] == (
+        "user-1",
+        "tutoring-1",
+        "lesson-1",
+        "ai_auto",
+        "리스트 컴프리헨션 핵심 노트",
+        "핵심 노트",
+    )
+
+
 def _context() -> GenerationContext:
     return GenerationContext(
         lesson_id="lesson-1",
@@ -159,3 +191,7 @@ def _state() -> ChapterStudioState:
 
 def _has_query(queries: list[str], needle: str) -> bool:
     return any(needle in query for query in queries)
+
+
+def _args_for(conn: FakeConnection, needle: str) -> tuple[object, ...]:
+    return next(args for query, args in conn.calls if needle in query)

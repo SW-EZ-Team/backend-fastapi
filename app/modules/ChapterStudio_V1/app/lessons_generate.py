@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from typing import Protocol
 
 from app.modules.ChapterStudio_V1.app.generation_context import GenerationContext
@@ -25,7 +24,6 @@ from app.modules.ChapterStudio_V1.pipeline.graph import generate_chapter_state
 from common.db import get_connection
 
 _LOG = logging.getLogger(__name__)
-_CHAPTER_ID_SAFE = re.compile(r"[^A-Za-z0-9_-]+")
 _SPRING_COMMIT_RETRY_ATTEMPTS = 5
 _SPRING_COMMIT_RETRY_DELAY_SEC = 1.0
 
@@ -36,8 +34,8 @@ class ExecuteConnection(Protocol):
 
 
 def _chapter_id(lesson_id: str) -> str:
-    """ChapterStudio 저장 키 규칙과 동일하게 lesson_id 기반 chapter_id를 만든다."""
-    return f"chapter_{_CHAPTER_ID_SAFE.sub('_', lesson_id).strip('_') or 'lesson'}"
+    """Spring public.chapter.id와 같은 키를 chapter_studio 저장 키로 사용한다."""
+    return lesson_id
 
 
 async def generate_lessons_for_course(course_id: str) -> None:

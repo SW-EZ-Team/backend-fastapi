@@ -1,16 +1,20 @@
 """객관식 문제의 오답 선택지를 별도 생성하는 노드."""
 from __future__ import annotations
-from app.modules.ExamForge_V1.common.json_utils import parse_llm_json
 
 import asyncio
 import time
 
+from app.modules.ExamForge_V1.common.json_utils import parse_llm_json
 from app.modules.ExamForge_V1.pipeline.state import ExamForgeState
 from app.modules.ExamForge_V1.schemas.question import QuestionDraft
 from app.modules.ExamForge_V1.templates.registry import get_template
 from app.modules.ExamForge_V1.prompts.distractor_gen import get_distractor_system
 from app.modules.ExamForge_V1.common.config import generation_concurrency, distractor_rewrite_enabled
-from app.modules.ExamForge_V1.common.ai_bridge import get_text_connector, ChapterAIRequest
+from app.modules.ExamForge_V1.common.ai_bridge import (
+    ChapterAIRequest,
+    get_text_connector,
+    run_connector_tasks,
+)
 from app.modules.ExamForge_V1.common.logger import get_logger
 
 logger = get_logger(__name__)
@@ -26,7 +30,7 @@ _FIVE_OPTION_TEMPLATES: frozenset[str] = frozenset([
 
 
 async def generate_distractors_node(state: ExamForgeState) -> dict:
-    """MCQ 문제의 오답 선택지를 개선한다."""
+    """MCQ 문제의 오답 선택지를 문항 단위로 개선한다."""
     # 상위 노드에서 오류가 발생한 경우 즉시 반환해 오류 전파를 막는다
     if state.get("pipeline_status") == "error":
         return {}
@@ -111,10 +115,11 @@ async def generate_distractors_node(state: ExamForgeState) -> dict:
                 logger.warning("오답 개선 파싱 실패: %s", e)
             return q_copy
 
-    results = await asyncio.gather(
-        *[_improve_distractors(q) for q in mcq_questions],
-        return_exceptions=True,
-    )
+    task_factories = [
+        lambda question=question: _improve_distractors(question)
+        for question in mcq_questions
+    ]
+    results = await run_connector_tasks(task_factories, connector)
 
     improved: list[dict] = []
     for i, r in enumerate(results):

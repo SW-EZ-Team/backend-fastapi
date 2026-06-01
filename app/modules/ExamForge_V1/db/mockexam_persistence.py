@@ -10,10 +10,43 @@ getExamDetail로 문항을 읽을 수 있다(커리큘럼 어댑터가 public.ch
 """
 from __future__ import annotations
 
+import html as html_lib
+import re
+from html.parser import HTMLParser
 from typing import Any, Protocol
 
 from app.modules.ExamForge_V1.common.ids import new_id
 from app.modules.ExamForge_V1.db.mockexam_mapping import to_question_rows
+
+_SLIDE_TEXT_MAX_LEN = 600
+_SRCDOC_RE = re.compile(r"""\bsrcdoc\s*=\s*(["'])(.*?)\1""", re.IGNORECASE | re.DOTALL)
+_TAG_RE = re.compile(r"<[^>]+>")
+_SPACE_RE = re.compile(r"\s+")
+
+
+class _VisibleTextParser(HTMLParser):
+    """HTML 조각에서 화면에 보이는 텍스트만 모은다."""
+    _hidden_tags = {"script", "style"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._hidden_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() in self._hidden_tags:
+            self._hidden_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() in self._hidden_tags and self._hidden_depth:
+            self._hidden_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self._hidden_depth and data.strip():
+            self._parts.append(data)
+
+    def text(self) -> str:
+        return _normalize_visible_text(" ".join(self._parts))
 
 
 class PersistenceConnection(Protocol):
@@ -71,10 +104,47 @@ async def build_source_text(conn: PersistenceConnection, course_id: str, topic_t
             if sl["title"]:
                 parts.append(str(sl["title"]))
             if sl["content"]:
-                parts.append(str(sl["content"]))
+                slide_text = _extract_slide_text(str(sl["content"]))
+                if slide_text:
+                    parts.append(slide_text)
 
     assembled = "\n".join(p for p in parts if p).strip()
     return assembled or (topic_text or "").strip()
+
+
+def _extract_slide_text(content: str) -> str:
+    html_text = _extract_srcdoc_html(content) or content
+    visible_text = _visible_text_from_html(html_lib.unescape(html_text))
+    if not visible_text:
+        return ""
+    return _trim_slide_text(visible_text, _SLIDE_TEXT_MAX_LEN)
+
+
+def _extract_srcdoc_html(markup: str) -> str | None:
+    match = _SRCDOC_RE.search(markup)
+    if not match:
+        return None
+    srcdoc = html_lib.unescape(match.group(2)).strip()
+    return srcdoc or None
+
+
+def _visible_text_from_html(html_text: str) -> str:
+    parser = _VisibleTextParser()
+    parser.feed(html_text)
+    parser.close()
+    return parser.text()
+
+
+def _normalize_visible_text(text: str) -> str:
+    without_tags = _TAG_RE.sub(" ", text)
+    return _SPACE_RE.sub(" ", without_tags).strip()
+
+
+def _trim_slide_text(text: str, max_len: int) -> str:
+    if len(text) <= max_len:
+        return text
+    trimmed = text[:max_len].rsplit(" ", 1)[0].rstrip()
+    return f"{trimmed or text[:max_len].rstrip()}..."
 
 
 async def persist_exam_result(

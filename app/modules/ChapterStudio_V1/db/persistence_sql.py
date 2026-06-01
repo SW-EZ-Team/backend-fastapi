@@ -92,6 +92,69 @@ def status_sql(schema: str) -> str:
     )
 
 
+def public_delete_quiz_sql() -> str:
+    """public.slide FK 삭제 전에 같은 chapter의 quiz를 제거한다."""
+    return "DELETE FROM public.quiz WHERE chapter_id = $1"
+
+
+def public_delete_note_sql() -> str:
+    """재생성 중복 방지를 위해 FastAPI 자동 노트만 제거한다."""
+    return (
+        "DELETE FROM public.note "
+        "WHERE user_id = $1 AND course_id = $2 AND chapter_id = $3 AND type = $4"
+    )
+
+
+def public_delete_slide_sql() -> str:
+    """public.quiz 제거 뒤 같은 chapter의 slide를 재삽입 가능하게 비운다."""
+    return "DELETE FROM public.slide WHERE chapter_id = $1"
+
+
+def public_slide_sql() -> str:
+    """Spring Slide 엔티티가 읽는 public.slide 저장 쿼리다."""
+    return (
+        "INSERT INTO public.slide "
+        "(id, chapter_id, slide_idx, title, content, audio_url, duration_sec) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7) "
+        "ON CONFLICT (chapter_id, slide_idx) DO UPDATE SET "
+        "id = EXCLUDED.id, "
+        "title = EXCLUDED.title, "
+        "content = EXCLUDED.content, "
+        "audio_url = EXCLUDED.audio_url, "
+        "duration_sec = EXCLUDED.duration_sec"
+    )
+
+
+def public_quiz_sql() -> str:
+    """Spring Quiz 엔티티가 읽는 public.quiz 저장 쿼리다."""
+    return (
+        "INSERT INTO public.quiz "
+        "(id, chapter_id, quiz_idx, question_text, options, correct_option, explanation, slide_id) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) "
+        "ON CONFLICT (slide_id) DO UPDATE SET "
+        "id = EXCLUDED.id, "
+        "chapter_id = EXCLUDED.chapter_id, "
+        "quiz_idx = EXCLUDED.quiz_idx, "
+        "question_text = EXCLUDED.question_text, "
+        "options = EXCLUDED.options, "
+        "correct_option = EXCLUDED.correct_option, "
+        "explanation = EXCLUDED.explanation"
+    )
+
+
+def public_note_sql() -> str:
+    """Spring Note 엔티티가 읽는 public.note 저장 쿼리다."""
+    return (
+        "INSERT INTO public.note "
+        "(id, user_id, course_id, chapter_id, type, title, content) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7) "
+        "ON CONFLICT (id) DO UPDATE SET "
+        "title = EXCLUDED.title, "
+        "content = EXCLUDED.content, "
+        "updated_at = NOW()"
+    )
+
+
 def failure_status_sql(schema: str) -> str:
     """실패 상태를 lesson_generation_status에 남기는 upsert 쿼리다."""
     return (
