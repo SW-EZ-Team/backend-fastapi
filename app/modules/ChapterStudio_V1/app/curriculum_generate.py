@@ -7,6 +7,7 @@ DB 쓰기는 schema-qualified 명시(get_connection은 search_path 미설정).
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -26,6 +27,8 @@ _PLANNER_SYSTEM = (
 
 # <think>...</think> 추론 블록 제거용 (Qwen3 thinking 출력 대비)
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+_SPRING_COMMIT_RETRY_ATTEMPTS = 5
+_SPRING_COMMIT_RETRY_DELAY_SEC = 1.0
 
 
 async def generate_and_store_curriculum(
@@ -35,7 +38,7 @@ async def generate_and_store_curriculum(
     source_type: str,
 ) -> None:
     """커리큘럼을 생성·저장한다. 실패는 로깅하고 삼키지 않는다(상태는 GENERATING 유지)."""
-    course = await _load_course(course_id)
+    course = await _load_course_after_spring_commit(course_id)
     if course is None:
         _LOG.error("[curriculum] course 없음 — courseId=%s", course_id)
         return
@@ -50,6 +53,23 @@ async def generate_and_store_curriculum(
             conn, course=course, lessons=lessons, planner_model=active_planner_model()
         )
     _LOG.info("[curriculum] 저장 완료 — courseId=%s, 강의 %d개", course_id, saved)
+
+
+async def _load_course_after_spring_commit(course_id: str) -> dict | None:
+    """Spring course INSERT 커밋 직후 호출되는 경우를 위해 짧게 재조회한다."""
+    for attempt in range(1, _SPRING_COMMIT_RETRY_ATTEMPTS + 1):
+        course = await _load_course(course_id)
+        if course is not None:
+            return course
+        if attempt < _SPRING_COMMIT_RETRY_ATTEMPTS:
+            _LOG.info(
+                "[curriculum] course 커밋 대기 — courseId=%s, retry=%d/%d",
+                course_id,
+                attempt,
+                _SPRING_COMMIT_RETRY_ATTEMPTS,
+            )
+            await asyncio.sleep(_SPRING_COMMIT_RETRY_DELAY_SEC)
+    return None
 
 
 async def _load_course(course_id: str) -> dict | None:

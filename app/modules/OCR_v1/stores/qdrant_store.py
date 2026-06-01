@@ -10,7 +10,7 @@ import asyncio
 import logging
 from typing import Any
 
-from ..config import qdrant_url
+from ..config import qdrant_api_key, qdrant_url
 
 _LOG = logging.getLogger(__name__)
 
@@ -57,7 +57,10 @@ class QdrantStore:
             if not _QDRANT_AVAILABLE:
                 raise RuntimeError("qdrant-client 미설치 — QdrantStore 사용 불가.")
             # ":memory:" URL이면 인메모리 클라이언트로 생성 (테스트용)
-            self._client = QdrantClient(":memory:") if url == ":memory:" else QdrantClient(url=url)
+            if url == ":memory:":
+                self._client = QdrantClient(":memory:")
+            else:
+                self._client = QdrantClient(url=url, api_key=qdrant_api_key())
             _LOG.info("Qdrant 클라이언트 생성: %s", url)
         return self._client
 

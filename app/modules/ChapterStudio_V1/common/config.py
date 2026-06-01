@@ -95,8 +95,8 @@ def gemini_api_key() -> str | None:
 
 
 def google_api_key() -> str | None:
-    """Google AI Studio API 키를 반환한다."""
-    return _optional_value("GOOGLE_API_KEY")
+    """Google AI Studio API 키를 반환한다. GEMINI_API_KEY를 대체 키로 허용한다."""
+    return _optional_value("GOOGLE_API_KEY") or gemini_api_key()
 
 
 def gemini_text_model() -> str:

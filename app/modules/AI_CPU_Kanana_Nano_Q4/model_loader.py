@@ -1,9 +1,9 @@
 """Llama 싱글톤 로더. Celery 워커 프로세스당 1회만 로드한다."""
+from __future__ import annotations
+
 import os
 import threading
 from pathlib import Path
-
-from llama_cpp import Llama
 
 from .config import CONTEXT_SIZE, N_GPU_LAYERS, THREADS
 
@@ -34,6 +34,8 @@ def get_llama() -> Llama:
                 f"Kanana 모델 파일을 찾을 수 없음: {model_path}. "
                 f"{_MODEL_PATH_ENV} 환경변수로 경로를 지정하거나 scripts/setup.sh 실행."
             )
+        from llama_cpp import Llama
+
         _STATE["llm"] = Llama(
             model_path=model_path,
             n_ctx=CONTEXT_SIZE,
