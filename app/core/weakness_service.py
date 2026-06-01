@@ -47,16 +47,16 @@ def _new_profile_id() -> str:
 # UPSERT SQL — PostgreSQL ON CONFLICT 문법 사용
 # subtopic이 NULL이 아닌 경우에만 UniqueConstraint가 동작하므로 WHERE 절로 한정
 _UPSERT_SQL = """
-INSERT INTO weakness_profile
+INSERT INTO chapter_studio.weakness_profile AS wp
     (id, user_id, topic, subtopic, error_pattern, frequency, severity, first_seen_at, last_seen_at)
 VALUES
     ($1, $2, $3, $4, $5, 1, $6, NOW(), NOW())
 ON CONFLICT (user_id, topic, subtopic)
     WHERE subtopic IS NOT NULL
 DO UPDATE SET
-    frequency   = weakness_profile.frequency + 1,
+    frequency   = wp.frequency + 1,
     last_seen_at = NOW(),
-    severity    = GREATEST(weakness_profile.severity, EXCLUDED.severity)
+    severity    = GREATEST(wp.severity, EXCLUDED.severity)
 RETURNING id
 """
 
@@ -104,7 +104,7 @@ _SELECT_UNRESOLVED_SQL = """
 SELECT
     id, user_id, topic, subtopic, error_pattern,
     frequency, severity, first_seen_at, last_seen_at
-FROM weakness_profile
+FROM chapter_studio.weakness_profile
 WHERE user_id = $1
   AND resolved_at IS NULL
 ORDER BY frequency DESC, last_seen_at DESC
@@ -125,7 +125,7 @@ async def get_user_weaknesses(
 
 
 _RESOLVE_SQL = """
-UPDATE weakness_profile
+UPDATE chapter_studio.weakness_profile
 SET resolved_at = NOW()
 WHERE id = $1
 """

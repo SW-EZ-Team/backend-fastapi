@@ -10,7 +10,9 @@ fire-and-forget(Void)으로 POST /api/mock-exams/generate 를 호출한다(응�
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Mapping
 
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel, Field
@@ -37,6 +39,8 @@ _DIFFICULTY_DISTRIBUTIONS: dict[str, dict[int, float]] = {
 
 # ExamForge source_text 최소 길이(100자) 미달 시 채우는 안전 패딩 안내 문구
 _SOURCE_MIN_LEN = 100
+_SPRING_COMMIT_RETRY_ATTEMPTS = 5
+_SPRING_COMMIT_RETRY_DELAY_SEC = 1.0
 
 
 class MockExamGenerateRequest(BaseModel):
@@ -65,12 +69,15 @@ async def _run_generation(req: MockExamGenerateRequest) -> None:
 
     실패는 로깅하고 삼키지 않는다(상태는 GENERATING 유지 → Spring이 미완료로 인지).
     """
+    ctx = await _load_exam_context_after_spring_commit(req.examId)
+    if ctx is None:
+        _LOG.error("[mock-exam] mock_exam 없음 — examId=%s", req.examId)
+        return
+
     async with get_connection() as conn:
-        ctx = await load_exam_context(conn, req.examId)
-        if ctx is None:
-            _LOG.error("[mock-exam] mock_exam 없음 — examId=%s", req.examId)
-            return
-        source_text = await build_source_text(conn, req.courseId, ctx.get("topic_text"))
+        source_text = await build_source_text(
+            conn, req.courseId, _context_optional_text(ctx, "topic_text")
+        )
 
     source_text = _ensure_min_source(source_text, ctx, req)
     forge_req = _build_forge_request(req, ctx, source_text)
@@ -90,12 +97,32 @@ async def _run_generation(req: MockExamGenerateRequest) -> None:
     _LOG.info("[mock-exam] 저장 완료 — examId=%s, 문항 %d개", req.examId, saved)
 
 
+async def _load_exam_context_after_spring_commit(exam_id: str) -> Mapping[str, object] | None:
+    """Spring 트랜잭션 커밋 지연으로 인한 일시적 미조회 상태를 짧게 재확인한다."""
+    for attempt in range(1, _SPRING_COMMIT_RETRY_ATTEMPTS + 1):
+        async with get_connection() as conn:
+            ctx = await load_exam_context(conn, exam_id)
+        if ctx is not None:
+            return ctx
+        if attempt < _SPRING_COMMIT_RETRY_ATTEMPTS:
+            _LOG.info(
+                "[mock-exam] mock_exam 커밋 대기 — examId=%s, retry=%d/%d",
+                exam_id,
+                attempt,
+                _SPRING_COMMIT_RETRY_ATTEMPTS,
+            )
+            await asyncio.sleep(_SPRING_COMMIT_RETRY_DELAY_SEC)
+    return None
+
+
 def _build_forge_request(
-    req: MockExamGenerateRequest, ctx: dict, source_text: str
+    req: MockExamGenerateRequest, ctx: Mapping[str, object], source_text: str
 ) -> ExamForgeRequest:
     """Spring 요청 + course 메타를 ExamForge 입력 스키마로 변환한다."""
-    subject = (ctx.get("subject") or ctx.get("course_name") or req.examType or "모의고사").strip()
-    distribution = _DIFFICULTY_DISTRIBUTIONS.get(req.difficulty.lower(), _DIFFICULTY_DISTRIBUTIONS["medium"])
+    subject = _first_context_text(ctx, ("subject", "course_name"), req.examType or "모의고사")
+    distribution = _DIFFICULTY_DISTRIBUTIONS.get(
+        req.difficulty.lower(), _DIFFICULTY_DISTRIBUTIONS["medium"]
+    )
     config = ExamConfig(
         # ExamForge는 최소 5문항을 요구한다 — Spring이 5 미만을 보내도 실패하지 않도록 보정한다.
         total_questions=max(5, req.questionCount),
@@ -108,15 +135,34 @@ def _build_forge_request(
     return ExamForgeRequest(source_text=source_text, subject=subject, exam_config=config)
 
 
-def _ensure_min_source(source_text: str, ctx: dict, req: MockExamGenerateRequest) -> str:
+def _ensure_min_source(
+    source_text: str, ctx: Mapping[str, object], req: MockExamGenerateRequest
+) -> str:
     """source_text가 ExamForge 최소 길이(100자) 미달이면 메타로 보강한다."""
     text = source_text.strip()
     if len(text) >= _SOURCE_MIN_LEN:
         return text
-    subject = (ctx.get("subject") or ctx.get("course_name") or "일반").strip()
+    subject = _first_context_text(ctx, ("subject", "course_name"), "일반")
     topics = ", ".join(req.focusTopics or []) or subject
     padding = (
         f"과목 {subject} 의 {req.examType or '모의고사'} 출제를 위한 학습 범위 요약. "
         f"집중 주제: {topics}. 위 주제를 중심으로 핵심 개념과 적용을 평가한다."
     )
     return (text + "\n" + padding).strip()
+
+
+def _first_context_text(
+    ctx: Mapping[str, object], keys: tuple[str, ...], default: str
+) -> str:
+    """DB context의 문자열 필드를 우선순위대로 읽고 공백 값을 배제한다."""
+    for key in keys:
+        value = ctx.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return default.strip()
+
+
+def _context_optional_text(ctx: Mapping[str, object], key: str) -> str | None:
+    """DB context 필드가 문자열일 때만 선택 텍스트로 전달한다."""
+    value = ctx.get(key)
+    return value if isinstance(value, str) else None
