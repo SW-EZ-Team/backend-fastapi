@@ -194,6 +194,16 @@ def kanana_polish_enabled() -> bool:
     return _bool_value("KANANA_POLISH_ENABLED", False)
 
 
+def tts_autogen_enabled() -> bool:
+    """튜터 음성 자동생성은 원격 TTS 비용 방지를 위해 명시 설정 때만 켠다."""
+    return _bool_value("TTS_AUTOGEN_ENABLED", False)
+
+
+def tts_selective_tilde_enabled() -> bool:
+    """합성용 대본에만 선택적 물결표를 적용할지 반환한다."""
+    return _bool_value("TTS_SELECTIVE_TILDE", True)
+
+
 def kanana_polish_max_concurrency() -> int:
     """교정은 Modal 원격 호출이므로 동시성을 제한해 비용과 큐 적체를 막는다."""
     return _int_value("KANANA_POLISH_MAX_CONCURRENCY", "8", 1, 16)

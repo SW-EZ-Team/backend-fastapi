@@ -25,6 +25,7 @@ class ChapterStudioState(TypedDict, total=False):
     tutor_name: str
     tutor_tagline: str
     is_default_tutor: bool
+    tutor_id: str
     voice_sample_url: str
     audience_level: str
     learning_goal: str

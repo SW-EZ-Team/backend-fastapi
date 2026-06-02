@@ -5,7 +5,7 @@
 persist_chapter_state)을 적용하고, 각 강의 완료 시 public.chapter의 total_slides·status를
 갱신해 Spring이 학습 가능 상태(AVAILABLE)를 조회할 수 있게 한다.
 
-음성(TTS)은 persist 단계에서 voice_script_queue로 분리 적재되므로 여기서는 텍스트 생성만 한다.
+음성(TTS)은 플래그가 켜진 경우 그래프에서 즉시 생성하고, 아니면 queue 기반 후처리로 남긴다.
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import logging
 from typing import Protocol
 
 from app.modules.ChapterStudio_V1.app.generation_context import GenerationContext
+from app.modules.ChapterStudio_V1.app.lesson_audio_backfill import backfill_lesson_audio
 from app.modules.ChapterStudio_V1.common.errors import StorageError
 from app.modules.ChapterStudio_V1.db.generation_context_loader import load_generation_context
 from app.modules.ChapterStudio_V1.db.persistence import persist_chapter_state

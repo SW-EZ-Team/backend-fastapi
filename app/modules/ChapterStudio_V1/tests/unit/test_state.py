@@ -27,6 +27,7 @@ def test_state_has_phase2_fields() -> None:
         "tutor_name",
         "tutor_tagline",
         "is_default_tutor",
+        "tutor_id",
         "voice_sample_url",
         "audience_level",
         "learning_goal",

@@ -8,6 +8,7 @@ from app.modules.ChapterStudio_V1.ai_connectors.schemas import ChapterAIRequest,
 from app.modules.ChapterStudio_V1.ai_connectors import registry
 from app.modules.ChapterStudio_V1.app.generation_context import GenerationInput
 from app.modules.ChapterStudio_V1.pipeline.graph import generate_chapter_response, get_compiled_graph
+from app.modules.ChapterStudio_V1.pipeline.graph import build_chapter_studio_graph
 
 
 class FakeTextConnector:
@@ -41,6 +42,10 @@ def fake_connector(monkeypatch: pytest.MonkeyPatch) -> None:
     # (test_generate_repair / test_content_verify)에서 다루므로 여기서는 끈다.
     monkeypatch.setenv("CHAPTERSTUDIO_LESSON_SELF_REPAIR", "false")
     monkeypatch.setenv("CHAPTERSTUDIO_CONTENT_VERIFY", "false")
+    # Kanana 교정·음성 자동생성은 실제 Modal 호출이라 그래프 배선 테스트에서는 끈다.
+    # (각 전용 테스트 test_kanana_polish_pipeline / test_synthesize_audio_node에서 mock으로 검증)
+    monkeypatch.setenv("KANANA_POLISH_ENABLED", "0")
+    monkeypatch.setenv("TTS_AUTOGEN_ENABLED", "0")
     yield
     registry.clear_cache()
     get_compiled_graph.cache_clear()
@@ -57,6 +62,15 @@ async def test_graph_generates_response() -> None:
     assert len(response.quizzes) == 10
     assert response.note.content.startswith("## 핵심")
     assert response.assignment.content.startswith("실습 과제")
+
+
+def test_graph_routes_synthesize_audio_before_postprocess() -> None:
+    graph = build_chapter_studio_graph().get_graph()
+    edges = {(edge.source, edge.target) for edge in graph.edges}
+
+    assert "synthesize_audio" in graph.nodes
+    assert ("content_verify", "synthesize_audio") in edges
+    assert ("synthesize_audio", "postprocess_slides") in edges
 
 
 def _payload(slide_count: int) -> dict[str, object]:
