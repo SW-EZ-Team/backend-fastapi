@@ -7,6 +7,7 @@ import pytest
 
 from ai_connectors.tts_schemas import TTSRequest, TTSResponse
 from app.modules.ChapterStudio_V1.pipeline import voice_audio
+from app.modules.ChapterStudio_V1.pipeline import tts_routing as tts_routing_module
 from app.modules.ChapterStudio_V1.pipeline.tts_routing import TutorVoiceProfile, resolve_tts_plan
 
 
@@ -56,17 +57,17 @@ class SlowLegacyTTSConnector:
         return {"audio_url": f"mock://audio/{text}", "duration_sec": 1.0}
 
 
-def test_resolve_tts_plan_routes_preset_and_custom_refs() -> None:
-    bear = resolve_tts_plan(_profile("tut_0000000000000PRESET_BEAR01"))
+def test_resolve_tts_plan_routes_cat_preset_custom_and_removed_bear() -> None:
     cat = resolve_tts_plan(_profile("tut_00000000000000PRESET_CAT01"))
+    bear = resolve_tts_plan(_profile("tut_0000000000000PRESET_BEAR01"))
     custom = resolve_tts_plan(_profile("custom-1", voice_sample_url="https://cdn.local/ref.wav"))
 
-    assert bear.engine == "qwen3-tts-modal"
-    assert bear.ref_source.endswith("preset_voice1.wav")
-    assert Path(bear.ref_source).is_file()
+    assert set(tts_routing_module._PRESET_VOICES) == {"tut_00000000000000PRESET_CAT01"}
     assert cat.engine == "qwen3-tts-modal"
     assert cat.ref_source.endswith("preset_voice2.wav")
     assert Path(cat.ref_source).is_file()
+    assert bear.engine == "gemini-tts"
+    assert bear.ref_source == ""
     assert custom.engine == "qwen3-tts-modal"
     assert custom.ref_source == "https://cdn.local/ref.wav"
 
@@ -82,7 +83,7 @@ def test_resolve_tts_plan_routes_unvoiced_default_to_gemini_style() -> None:
 
 
 @pytest.mark.asyncio
-async def test_synthesize_voice_audio_uses_qwen_preset_without_modal_call(
+async def test_synthesize_voice_audio_uses_cat_preset_without_modal_call(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -97,8 +98,8 @@ async def test_synthesize_voice_audio_uses_qwen_preset_without_modal_call(
     monkeypatch.setattr(voice_audio, "tts_output_dir", lambda: tmp_path)
 
     result = await voice_audio.synthesize_voice_audio(
-        [{"slide_idx": 0, "script_text": "곰 선생님 대본입니다."}],
-        tutor_profile=_profile("tut_0000000000000PRESET_BEAR01"),
+        [{"slide_idx": 0, "script_text": "냥 튜터 대본입니다."}],
+        tutor_profile=_profile("tut_00000000000000PRESET_CAT01"),
     )
 
     assert requested_names == ["qwen3-tts-modal"]
@@ -199,7 +200,7 @@ async def test_synthesize_voice_audio_uses_selective_tilde_for_routed_tts_only(
 
     result = await voice_audio.synthesize_voice_audio(
         [{"slide_idx": 0, "script_text": source}],
-        tutor_profile=_profile("tut_0000000000000PRESET_BEAR01"),
+        tutor_profile=_profile("tut_00000000000000PRESET_CAT01"),
     )
 
     expected = "안녕하세요~ 오른쪽이 더 커요. 천천히 따라와 보세요~"

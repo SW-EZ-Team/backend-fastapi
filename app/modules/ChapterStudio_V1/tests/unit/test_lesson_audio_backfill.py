@@ -57,12 +57,12 @@ async def test_backfill_lesson_audio_updates_audio_columns(monkeypatch: pytest.M
     monkeypatch.setattr(backfill, "load_generation_context", fake_load)
     monkeypatch.setattr(backfill, "synthesize_voice_audio", fake_synthesize)
 
-    result = await backfill.backfill_lesson_audio("lesson-1", tutor_id="tut_0000000000000PRESET_BEAR01")
+    result = await backfill.backfill_lesson_audio("lesson-1", tutor_id="tut_00000000000000PRESET_CAT01")
 
     queries = [query for query, _args in conn.executed]
     assert result == {"lesson_id": "lesson-1", "updated": 2, "failed": 0}
     assert len(profiles) == 2
-    assert profiles[0].tutor_id == "tut_0000000000000PRESET_BEAR01"
+    assert profiles[0].tutor_id == "tut_00000000000000PRESET_CAT01"
     assert any("UPDATE chapter_studio.voice_script" in query for query in queries)
     assert any("UPDATE chapter_studio.slide" in query for query in queries)
     assert any("UPDATE public.slide" in query for query in queries)

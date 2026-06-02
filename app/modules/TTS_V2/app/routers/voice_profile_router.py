@@ -48,7 +48,7 @@ async def create_voice_profile_endpoint(
 
     # 임시 ID로 파일을 먼저 저장해 경로를 확보한다
     temp_id = f"vpf_{uuid.uuid4().hex}"
-    ref_audio_url, sample_rate, duration_sec = save_audio(
+    ref_audio_url, sample_rate, duration_sec = await save_audio(
         body.user_id, temp_id, audio_bytes
     )
     # DB에 프로필을 삽입한다 — 파일 저장 경로를 ref_audio_url로 사용

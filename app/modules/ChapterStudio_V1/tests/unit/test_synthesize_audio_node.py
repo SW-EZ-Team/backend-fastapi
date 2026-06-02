@@ -38,7 +38,7 @@ async def test_synthesize_audio_node_fills_voice_audio_files(monkeypatch: pytest
     result = await node.synthesize_audio_node(
         {
             "voice_scripts": [_script(0)],
-            "tutor_id": "tut_0000000000000PRESET_BEAR01",
+            "tutor_id": "tut_00000000000000PRESET_CAT01",
             "is_default_tutor": True,
             "voice_sample_url": "https://cdn.local/ref.wav",
             "use_formal_speech": False,
@@ -50,7 +50,7 @@ async def test_synthesize_audio_node_fills_voice_audio_files(monkeypatch: pytest
     assert result == {"voice_audio_files": [{"slide_idx": 0, "audio_url": "mock://audio/0", "duration_hint_sec": 1.5}]}
     assert captured["voice_scripts"] == [_script(0)]
     assert isinstance(profile, TutorVoiceProfile)
-    assert profile.tutor_id == "tut_0000000000000PRESET_BEAR01"
+    assert profile.tutor_id == "tut_00000000000000PRESET_CAT01"
     assert profile.voice_sample_url == "https://cdn.local/ref.wav"
     assert profile.use_formal_speech is False
 

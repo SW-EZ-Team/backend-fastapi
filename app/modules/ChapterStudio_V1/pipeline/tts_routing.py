@@ -5,7 +5,6 @@ from pathlib import Path
 
 _VOICE_ASSET_DIR = Path(__file__).resolve().parents[2] / "TTS_V2" / "assets" / "voices"
 _PRESET_VOICES = {
-    "tut_0000000000000PRESET_BEAR01": "preset_voice1.wav",
     "tut_00000000000000PRESET_CAT01": "preset_voice2.wav",
 }
 

@@ -1,14 +1,17 @@
-"""사용자 업로드 음성 파일 로컬 저장·로드·삭제를 담당한다.
+"""사용자 업로드 음성 파일 저장·로드·삭제를 담당한다.
 
-저장 경로: app/modules/TTS_V2/user_voices/{user_id}/{profile_id}.wav
+로컬 저장 경로: app/modules/TTS_V2/user_voices/{user_id}/{profile_id}.wav
+S3 저장 key: voice-profiles/{user_id}/{profile_id}.wav
 입력 오디오는 24000Hz mono WAV 로 정규화해 저장한다.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
 import numpy as np
 
+from app.modules.ObjectStorage_V1 import put_object, s3_enabled
 from common.audio_io import (
     duration_sec as calc_duration,
     encode_wav_bytes,
@@ -21,6 +24,7 @@ _USER_VOICES_DIR = Path(__file__).resolve().parent.parent / "user_voices"
 
 # 정규화 저장 샘플레이트 (TTS ICL 모드 요구 사양)
 _TARGET_SR = 24000
+_REF_DOWNLOAD_TIMEOUT_SEC = 10.0
 
 
 def _ensure_user_dir(user_id: str) -> Path:
@@ -48,12 +52,19 @@ def _normalize_to_wav(audio_bytes: bytes) -> tuple[bytes, int, float]:
     return wav_bytes, _TARGET_SR, dur
 
 
-def save_audio(user_id: str, profile_id: str, audio_bytes: bytes) -> tuple[str, int, float]:
-    """오디오를 정규화해 저장하고 (파일 경로, sample_rate, duration_sec) 를 반환한다.
+async def save_audio(user_id: str, profile_id: str, audio_bytes: bytes) -> tuple[str, int, float]:
+    """오디오를 정규화해 저장하고 (ref_audio_url, sample_rate, duration_sec) 를 반환한다.
 
     반환된 경로는 DB 의 ref_audio_url 컬럼에 저장한다.
     """
     wav_bytes, sample_rate, dur = _normalize_to_wav(audio_bytes)
+    if s3_enabled():
+        url = await put_object(
+            wav_bytes,
+            key=f"voice-profiles/{user_id}/{profile_id}.wav",
+            content_type="audio/wav",
+        )
+        return url, sample_rate, dur
     dest = _profile_path(user_id, profile_id)
     dest.write_bytes(wav_bytes)
     return str(dest), sample_rate, dur
@@ -61,6 +72,10 @@ def save_audio(user_id: str, profile_id: str, audio_bytes: bytes) -> tuple[str, 
 
 def load_audio(ref_audio_url: str) -> bytes:
     """ref_audio_url 경로에서 WAV 바이트를 읽어 반환한다."""
+    if ref_audio_url.startswith(("http://", "https://")):
+        response = httpx.get(ref_audio_url, timeout=_REF_DOWNLOAD_TIMEOUT_SEC)
+        response.raise_for_status()
+        return response.content
     path = Path(ref_audio_url)
     if not path.exists():
         raise RuntimeError(f"레퍼런스 음성 파일이 없음: {ref_audio_url}")
@@ -69,6 +84,8 @@ def load_audio(ref_audio_url: str) -> bytes:
 
 def delete_audio(ref_audio_url: str) -> None:
     """ref_audio_url 경로의 파일을 삭제한다. 파일이 없으면 조용히 넘어간다."""
+    if ref_audio_url.startswith(("http://", "https://")):
+        return
     path = Path(ref_audio_url)
     if path.exists():
         path.unlink()
