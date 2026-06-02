@@ -209,6 +209,11 @@ def tts_synth_concurrency() -> int:
     return _int_value("TTS_SYNTH_CONCURRENCY", "8", 1, 16)
 
 
+def tts_warmup_enabled() -> bool:
+    """대량 TTS 합성 전 콜드스타트 흡수용 워밍업 호출 여부를 반환한다."""
+    return _bool_value("TTS_WARMUP_ENABLED", True)
+
+
 def kanana_polish_max_concurrency() -> int:
     """교정은 Modal 원격 호출이므로 동시성을 제한해 비용과 큐 적체를 막는다."""
     return _int_value("KANANA_POLISH_MAX_CONCURRENCY", "8", 1, 16)

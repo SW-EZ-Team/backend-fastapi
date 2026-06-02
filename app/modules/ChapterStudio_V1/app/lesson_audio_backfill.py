@@ -6,7 +6,11 @@ from collections.abc import Mapping, Sequence
 from typing import Protocol
 
 from app.modules.ChapterStudio_V1.app.generation_context import GenerationContext
-from app.modules.ChapterStudio_V1.common.config import database_schema, tts_synth_concurrency
+from app.modules.ChapterStudio_V1.common.config import (
+    database_schema,
+    tts_synth_concurrency,
+    tts_warmup_enabled,
+)
 from app.modules.ChapterStudio_V1.common.errors import ConversionError
 from app.modules.ChapterStudio_V1.db.audio_backfill_sql import (
     AudioBackfillTableColumns,
@@ -19,7 +23,10 @@ from app.modules.ChapterStudio_V1.db.audio_backfill_sql import (
 from app.modules.ChapterStudio_V1.db.generation_context_loader import load_generation_context
 from app.modules.ChapterStudio_V1.pipeline.state import StateRecord, StateRecords
 from app.modules.ChapterStudio_V1.pipeline.tts_routing import TutorVoiceProfile
-from app.modules.ChapterStudio_V1.pipeline.voice_audio import synthesize_voice_audio
+from app.modules.ChapterStudio_V1.pipeline.voice_audio import (
+    synthesize_voice_audio,
+    warmup_tutor_voice_audio,
+)
 from common.db import get_connection
 
 _LOG = logging.getLogger(__name__)
@@ -101,6 +108,7 @@ async def _synthesize_one(script: StateRecord, profile: TutorVoiceProfile) -> St
 
 async def _synthesize_many(voice_scripts: StateRecords, profile: TutorVoiceProfile) -> list[SynthesisOutcome]:
     """백필은 슬라이드별 실패를 보존하면서 env 동시성으로 합성한다."""
+    await _warmup_if_needed(voice_scripts, profile)
     semaphore = asyncio.Semaphore(tts_synth_concurrency())
 
     async def _run(script: StateRecord) -> SynthesisOutcome:
@@ -111,6 +119,16 @@ async def _synthesize_many(voice_scripts: StateRecords, profile: TutorVoiceProfi
                 return script, exc
 
     return list(await asyncio.gather(*[_run(script) for script in voice_scripts]))
+
+
+async def _warmup_if_needed(voice_scripts: StateRecords, profile: TutorVoiceProfile) -> None:
+    """대량 합성에서만 짧은 워밍업을 선행해 Modal 콜드스타트 타임아웃을 줄인다."""
+    if len(voice_scripts) < 3 or not tts_warmup_enabled():
+        return
+    try:
+        await warmup_tutor_voice_audio(profile)
+    except Exception as exc:
+        _LOG.warning("[lessons] TTS 워밍업 실패 — 본 합성은 계속합니다. error=%s", exc)
 
 async def _update_audio_record(
     conn: AudioBackfillConnection,

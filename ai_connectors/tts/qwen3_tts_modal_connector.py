@@ -10,6 +10,7 @@ import asyncio
 import base64
 import os
 import time
+from collections.abc import Sequence
 from typing import Protocol
 
 import modal
@@ -31,6 +32,9 @@ _LOG = get_logger(__name__)
 _SEGMENT_MAX_CHARS = 120
 _SERVER_CLASS = "Qwen3TTSServer"
 _DEFAULT_APP_NAME = "qwen3-tts-modal"
+_DEFAULT_TIMEOUT_SEC = 900.0
+_DEFAULT_SEGMENT_CONCURRENCY = 4
+_DEFAULT_POOL_SIZE = 6
 
 
 class _RemoteAio(Protocol):
@@ -60,13 +64,14 @@ class Qwen3TTSModalConnector:
     def __init__(
         self,
         endpoint: str | None = None,
-        timeout_sec: float = 300.0,
+        timeout_sec: float | None = None,
         app_name: str | None = None,
     ) -> None:
         if endpoint:
             _LOG.warning("기존 HTTP URL 경로는 네이티브 호출에서 사용하지 않습니다.")
         self._app_name = _resolve_app_name(app_name)
-        self._timeout_sec = timeout_sec
+        self._timeout_sec = _resolve_timeout_sec(timeout_sec)
+        self._segment_concurrency = _resolve_segment_concurrency()
         # Modal 클래스 조회는 비용이 있으므로 커넥터 인스턴스 안에서 재사용한다.
         self._server: _TtsServer | None = None
 
@@ -84,13 +89,9 @@ class Qwen3TTSModalConnector:
             # 단일 세그먼트 — 분할 없이 그대로 전달한다
             return await call_with_retry(lambda: self._call_endpoint(request))
 
-        # 여러 세그먼트 — 순차 합성 후 병합한다
+        # 여러 세그먼트 — Modal 풀을 고갈시키지 않도록 제한된 병렬 합성 후 병합한다
         started_at = time.perf_counter()
-        partial: list[TTSResponse] = []
-        for seg_text in segments:
-            seg_req = request.model_copy(update={"text": seg_text})
-            resp = await call_with_retry(lambda r=seg_req: self._call_endpoint(r))
-            partial.append(resp)
+        partial = await self._synthesize_segments_parallel(request, segments)
 
         sample_rate = partial[0].sample_rate
         first = partial[0]
@@ -144,6 +145,46 @@ class Qwen3TTSModalConnector:
         """기존 호출부 호환용 무동작 종료 훅이다."""
         self._server = None
 
+    async def _synthesize_segments_parallel(
+        self,
+        request: TTSRequest,
+        segments: Sequence[str],
+    ) -> list[TTSResponse]:
+        """분할된 텍스트를 제한된 병렬 호출로 합성하고 원래 순서로 되돌린다."""
+        semaphore = asyncio.Semaphore(self._segment_concurrency)
+        tasks = [
+            asyncio.create_task(
+                self._synthesize_segment(
+                    index,
+                    request.model_copy(update={"text": seg_text}),
+                    semaphore,
+                )
+            )
+            for index, seg_text in enumerate(segments)
+        ]
+        try:
+            indexed = await asyncio.gather(*tasks)
+        except Exception:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+        return [
+            response
+            for _index, response in sorted(indexed, key=lambda item: item[0])
+        ]
+
+    async def _synthesize_segment(
+        self,
+        index: int,
+        request: TTSRequest,
+        semaphore: asyncio.Semaphore,
+    ) -> tuple[int, TTSResponse]:
+        """단일 세그먼트를 세마포어 안에서 합성해 순서 인덱스와 함께 반환한다."""
+        async with semaphore:
+            response = await call_with_retry(lambda: self._call_endpoint(request))
+        return index, response
+
     def supports(self, feature: str) -> bool:
         """원격 실행 경로에서도 동일한 기능 플래그를 노출한다."""
         return feature in {"voice_cloning", "language_hint", "auto_transcribe", "quality_gate"}
@@ -195,3 +236,47 @@ def _resolve_app_name(app_name: str | None) -> str:
     """환경변수의 빈 문자열까지 방어해 Modal 앱 이름을 결정한다."""
     resolved = app_name or os.getenv("QWEN3_TTS_MODAL_APP_NAME", _DEFAULT_APP_NAME)
     return resolved.strip() or _DEFAULT_APP_NAME
+
+
+def _resolve_timeout_sec(timeout_sec: float | None) -> float:
+    """명시 인자 우선, 그다음 환경값, 마지막으로 콜드스타트용 기본값을 사용한다."""
+    if timeout_sec is not None:
+        return float(timeout_sec)
+    return _env_float("QWEN3_TTS_TIMEOUT_SEC", _DEFAULT_TIMEOUT_SEC)
+
+
+def _resolve_segment_concurrency() -> int:
+    """세그먼트 병렬 합성 동시성을 Modal 모델 풀 크기 안으로 제한한다."""
+    pool_size = _env_int("QWEN3_TTS_MODAL_POOL_SIZE", _DEFAULT_POOL_SIZE)
+    pool_size = _clamp(pool_size, 1, 16)
+    concurrency = _env_int("QWEN3_TTS_SEGMENT_CONCURRENCY", _DEFAULT_SEGMENT_CONCURRENCY)
+    return _clamp(concurrency, 1, pool_size)
+
+
+def _env_float(name: str, default: float) -> float:
+    """환경변수 float 파싱 실패 시 안전한 기본값으로 복구한다."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        _LOG.warning("%s=%r float 파싱 실패 — 기본값 %.1f 사용", name, raw, default)
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    """환경변수 int 파싱 실패 시 안전한 기본값으로 복구한다."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        _LOG.warning("%s=%r int 파싱 실패 — 기본값 %d 사용", name, raw, default)
+        return default
+
+
+def _clamp(value: int, min_value: int, max_value: int) -> int:
+    """환경 동시성 값이 Modal 풀 한계를 넘지 않게 보정한다."""
+    return max(min_value, min(max_value, value))

@@ -106,9 +106,14 @@ async def test_backfill_lesson_audio_uses_tts_synth_concurrency(monkeypatch: pyt
     conn.voice_rows = [_voice_row(0), _voice_row(1), _voice_row(2)]
     active = 0
     max_active = 0
+    warmup_calls = 0
 
     async def fake_load(db_conn: object, lesson_id: str) -> GenerationContext:
         return _context(lesson_id)
+
+    async def fake_warmup(profile: TutorVoiceProfile) -> None:
+        nonlocal warmup_calls
+        warmup_calls += 1
 
     async def fake_synthesize(
         scripts: list[dict[str, object]],
@@ -126,12 +131,90 @@ async def test_backfill_lesson_audio_uses_tts_synth_concurrency(monkeypatch: pyt
     monkeypatch.setenv("TTS_SYNTH_CONCURRENCY", "2")
     monkeypatch.setattr(backfill, "get_connection", lambda: FakeConnectionManager(conn))
     monkeypatch.setattr(backfill, "load_generation_context", fake_load)
+    monkeypatch.setattr(backfill, "warmup_tutor_voice_audio", fake_warmup)
     monkeypatch.setattr(backfill, "synthesize_voice_audio", fake_synthesize)
 
     result = await backfill.backfill_lesson_audio("lesson-1")
 
     assert result == {"lesson_id": "lesson-1", "updated": 3, "failed": 0}
+    assert warmup_calls == 1
     assert max_active == 2
+
+
+@pytest.mark.asyncio
+async def test_backfill_lesson_audio_warms_up_before_bulk_synthesis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn = FakeConnection()
+    conn.voice_rows = [_voice_row(0), _voice_row(1), _voice_row(2)]
+    events: list[str] = []
+
+    async def fake_load(db_conn: object, lesson_id: str) -> GenerationContext:
+        return _context(lesson_id)
+
+    async def fake_warmup(profile: TutorVoiceProfile) -> None:
+        events.append("warmup")
+
+    async def fake_synthesize(
+        scripts: list[dict[str, object]],
+        *,
+        tutor_profile: TutorVoiceProfile,
+    ) -> list[dict[str, object]]:
+        idx = int(scripts[0]["slide_idx"])
+        events.append(f"synth-{idx}")
+        return [{"slide_idx": idx, "audio_url": f"mock://audio/{idx}", "duration_hint_sec": 2.5}]
+
+    monkeypatch.delenv("TTS_WARMUP_ENABLED", raising=False)
+    monkeypatch.setattr(backfill, "get_connection", lambda: FakeConnectionManager(conn))
+    monkeypatch.setattr(backfill, "load_generation_context", fake_load)
+    monkeypatch.setattr(backfill, "warmup_tutor_voice_audio", fake_warmup)
+    monkeypatch.setattr(backfill, "synthesize_voice_audio", fake_synthesize)
+
+    result = await backfill.backfill_lesson_audio("lesson-1")
+
+    assert result == {"lesson_id": "lesson-1", "updated": 3, "failed": 0}
+    assert events[0] == "warmup"
+    assert events.count("warmup") == 1
+    assert {event for event in events[1:] if event.startswith("synth-")} == {
+        "synth-0",
+        "synth-1",
+        "synth-2",
+    }
+
+
+@pytest.mark.asyncio
+async def test_backfill_lesson_audio_skips_warmup_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn = FakeConnection()
+    conn.voice_rows = [_voice_row(0), _voice_row(1), _voice_row(2)]
+    warmup_calls = 0
+
+    async def fake_load(db_conn: object, lesson_id: str) -> GenerationContext:
+        return _context(lesson_id)
+
+    async def fake_warmup(profile: TutorVoiceProfile) -> None:
+        nonlocal warmup_calls
+        warmup_calls += 1
+
+    async def fake_synthesize(
+        scripts: list[dict[str, object]],
+        *,
+        tutor_profile: TutorVoiceProfile,
+    ) -> list[dict[str, object]]:
+        idx = int(scripts[0]["slide_idx"])
+        return [{"slide_idx": idx, "audio_url": f"mock://audio/{idx}", "duration_hint_sec": 2.5}]
+
+    monkeypatch.setenv("TTS_WARMUP_ENABLED", "false")
+    monkeypatch.setattr(backfill, "get_connection", lambda: FakeConnectionManager(conn))
+    monkeypatch.setattr(backfill, "load_generation_context", fake_load)
+    monkeypatch.setattr(backfill, "warmup_tutor_voice_audio", fake_warmup)
+    monkeypatch.setattr(backfill, "synthesize_voice_audio", fake_synthesize)
+
+    result = await backfill.backfill_lesson_audio("lesson-1")
+
+    assert result == {"lesson_id": "lesson-1", "updated": 3, "failed": 0}
+    assert warmup_calls == 0
 
 
 def _voice_row(slide_idx: int) -> dict[str, object]:

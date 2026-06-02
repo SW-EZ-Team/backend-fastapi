@@ -51,6 +51,15 @@ async def synthesize_voice_audio(
     return sorted(results, key=lambda record: _record_int(record, "slide_idx"))
 
 
+async def warmup_tutor_voice_audio(
+    tutor_profile: TutorVoiceProfile,
+    text: str = "안녕하세요",
+) -> None:
+    """대량 합성 전에 선택된 튜터 TTS 엔진을 짧은 문장으로 깨운다."""
+    plan = resolve_tts_plan(tutor_profile)
+    await _synthesize_by_plan(text, plan)
+
+
 async def _synthesize_one(
     record: StateRecord,
     connector: TTSConnector,
@@ -196,4 +205,4 @@ def _record_int(record: StateRecord, key: str) -> int:
     return value
 
 
-__all__ = ["synthesize_voice_audio"]
+__all__ = ["synthesize_voice_audio", "warmup_tutor_voice_audio"]
