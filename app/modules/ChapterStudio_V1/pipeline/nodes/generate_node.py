@@ -14,6 +14,7 @@ from app.modules.ChapterStudio_V1.pipeline.payload import (
 )
 from app.modules.ChapterStudio_V1.pipeline.parallel_generate import generate_lesson_parallel
 from app.modules.ChapterStudio_V1.pipeline.prompt import build_generation_request
+from app.modules.ChapterStudio_V1.pipeline.quiz_balance_pass import apply_quiz_balance_payload
 from app.modules.ChapterStudio_V1.pipeline.quality import check_payload
 from app.modules.ChapterStudio_V1.pipeline.repair import repair_payload
 from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState
@@ -35,6 +36,7 @@ async def generate_lesson_node(state: ChapterStudioState) -> ChapterStudioState:
     if connector.supports("batch"):
         payload = await generate_lesson_parallel(connector, state, slide_count)
         payload = await _self_repair(connector, payload, slide_count)
+        payload = apply_quiz_balance_payload(payload, state)
         return {"lesson_payload": payload.model_dump(), "generation_model": f"{connector.name}{_PARALLEL_MODEL_TAG}"}
     return await _generate_single_call(connector, state, slide_count)
 
@@ -47,6 +49,7 @@ async def _generate_single_call(
     response = await connector.generate(request)
     payload = await _parse_robust(connector, request, response.text, slide_count)
     payload = await _self_repair(connector, payload, slide_count)
+    payload = apply_quiz_balance_payload(payload, state)
     return {"lesson_payload": payload.model_dump(), "generation_model": response.model}
 
 

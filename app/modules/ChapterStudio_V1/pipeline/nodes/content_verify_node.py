@@ -13,6 +13,7 @@ from app.modules.ChapterStudio_V1.pipeline.payload import (
     GeneratedLessonPayload,
     payload_from_state_dict,
 )
+from app.modules.ChapterStudio_V1.pipeline.quiz_balance_pass import apply_quiz_balance_payload
 from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState
 from app.modules.ChapterStudio_V1.pipeline.state_mapping import payload_to_state
 from app.modules.ChapterStudio_V1.pipeline.voice_cohesion_pass import apply_voice_cohesion_payload
@@ -36,6 +37,7 @@ async def content_verify_node(state: ChapterStudioState) -> ChapterStudioState:
             payload = await verify_and_correct(connector, payload, slide_count)
     payload = await inspect_and_polish_payload(payload, tone_hint=_tone_hint(state))
     payload = await apply_voice_cohesion_payload(payload, topic=_topic_hint(state))
+    payload = apply_quiz_balance_payload(payload, state)
     return payload_to_state(payload)
 
 

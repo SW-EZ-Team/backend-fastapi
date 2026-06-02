@@ -325,6 +325,11 @@ def voice_cohesion_enabled() -> bool:
     return _bool_value("VOICE_COHESION_ENABLED", True)
 
 
+def quiz_balance_enabled() -> bool:
+    """퀴즈 보기 셔플 기반 정답 위치 균등화 활성 여부를 반환한다(기본 ON)."""
+    return _bool_value("QUIZ_BALANCE_ENABLED", True)
+
+
 def voice_min_chars() -> int:
     """voice_script 최소 문자 수를 반환한다(기본 900).
 
