@@ -46,9 +46,32 @@ def parse_failed_keys(questions: list[dict]) -> set[str]:
     return keys
 
 
+def verification_advisory_keys(questions: list[dict]) -> set[str]:
+    """advisory 모드에서 품질 게이트에 반영하지 않을 검증 실패 식별자를 모은다."""
+    keys: set[str] = set()
+    for question in questions:
+        verification = question.get("_verification")
+        if is_parse_failed(verification) or is_genuine_fail(verification):
+            keys.update(question_keys(question))
+    return keys
+
+
 def genuine_failed_ids(failed_ids: list[str], questions: list[dict]) -> list[str]:
     """기존 실패 목록에서 parse_failed 문항만 제외한다."""
     advisory_keys = parse_failed_keys(questions)
+    return [item for item in failed_ids if str(item) not in advisory_keys]
+
+
+def advisory_filtered_failed_ids(
+    failed_ids: list[str],
+    questions: list[dict],
+    *,
+    verification_advisory: bool,
+) -> list[str]:
+    """검증 advisory 모드면 검증기 판단에서 온 실패 ID를 재시도 대상에서 제외한다."""
+    if not verification_advisory:
+        return genuine_failed_ids(failed_ids, questions)
+    advisory_keys = verification_advisory_keys(questions)
     return [item for item in failed_ids if str(item) not in advisory_keys]
 
 

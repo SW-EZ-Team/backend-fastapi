@@ -87,7 +87,7 @@ def test_required_weak_rules_are_component_specific() -> None:
 
 
 def test_parallel_slide_prompt_requires_structured_visual_spec() -> None:
-    system, _ = slides_prompts("요청", "outline", 10, "concept_flow", **_ARGS)
+    system, user = slides_prompts("요청", "outline", 10, "concept_flow", **_ARGS)
 
     assert "html, css, markdown, mermaid, script, 외부 URL을 절대 생성하지 않는다" in system
     assert "visual은 {type, data} 객체" in system
@@ -105,7 +105,8 @@ def test_parallel_slide_prompt_requires_structured_visual_spec() -> None:
     assert "안녕하세요. 오늘 우리가...왜 하필" in system
     assert "narration은 화면 본문으로 바로 읽히는 2~4문장, 200~360자" in system
     assert "narration을 절대 비우거나 생략하면 실패" in system
-    assert "metric-card, comparison-table, flow-strip, example-box" in system
+    assert "category=text인 슬라이드는 visual.type을 metric-card, comparison-table, example_box 중 하나" in system
+    assert "text 슬라이드도 metric-card, comparison-table, example_box 중 하나의 visual marker" in user
     assert "few-shot text slide" in system
     assert "오개념 바로잡기" in system
 

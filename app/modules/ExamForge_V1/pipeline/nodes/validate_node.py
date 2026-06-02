@@ -6,6 +6,7 @@ import time
 from pydantic import ValidationError as PydanticValidationError
 
 from app.modules.ExamForge_V1.common.errors import ExamForgeError
+from app.modules.ExamForge_V1.common.config import verification_advisory_enabled
 from app.modules.ExamForge_V1.pipeline.state import ExamForgeState
 from app.modules.ExamForge_V1.templates.registry import get_template
 from app.modules.ExamForge_V1.quality.deduplicator import check_duplicates
@@ -48,9 +49,13 @@ async def validate_node(state: ExamForgeState) -> dict:
 
     plan = state.get("exam_plan", {})
     topic_weights = plan.get("topic_weights", {})
+    verification_advisory = _is_verification_advisory(state)
 
     # 1계층: 개별 구조 검증
-    results, failed_ids = _validate_structure(questions)
+    results, failed_ids = _validate_structure(
+        questions,
+        verification_advisory=verification_advisory,
+    )
 
     # 2계층: 교차 문제 검증
     global_issues, cross_failed, dedup_score = _validate_cross_question(questions)
@@ -62,7 +67,7 @@ async def validate_node(state: ExamForgeState) -> dict:
     coverage_score, uncovered = _validate_global(questions, topic_weights)
     if uncovered:
         global_issues.append(f"미커버 주제: {', '.join(uncovered[:5])}")
-    global_issues.extend(_verification_advisory_issues(questions))
+    global_issues.extend(_verification_advisory_issues(questions, verification_advisory))
     _apply_programming_code_gate(state, questions, failed_ids, global_issues)
 
     # 정답 정확률 계산
@@ -70,7 +75,7 @@ async def validate_node(state: ExamForgeState) -> dict:
     verification_summary = verification_counts(questions)
 
     # AKAR: 정확률 0.95 미만이면 미통과 문제를 재시도 목록에 추가
-    if accuracy_rate < 0.95:
+    if accuracy_rate < 0.95 and not verification_advisory:
         for q in questions:
             verification = q.get("_verification")
             if _needs_accuracy_retry(verification):
@@ -99,6 +104,8 @@ async def validate_node(state: ExamForgeState) -> dict:
 
 def _validate_structure(
     questions: list[dict],
+    *,
+    verification_advisory: bool = False,
 ) -> tuple[list[dict], list[str]]:
     """개별 문제의 구조를 검증한다."""
     results: list[dict] = []
@@ -113,9 +120,9 @@ def _validate_structure(
 
         # 교차 모델 검증 결과 포함
         verification = q.get("_verification", {})
-        if is_genuine_fail(verification):
+        if is_genuine_fail(verification) and not verification_advisory:
             issues.extend(verification.get("issues", []))
-        elif verification == {}:
+        elif verification == {} and not verification_advisory:
             issues.append("정답 검증 결과 없음")
 
         passed = len(issues) == 0
@@ -220,12 +227,34 @@ def _needs_accuracy_retry(verification: object) -> bool:
     return not is_verified_pass(verification)
 
 
-def _verification_advisory_issues(questions: list[dict]) -> list[str]:
+def _verification_advisory_issues(
+    questions: list[dict],
+    verification_advisory: bool,
+) -> list[str]:
     """검증 파싱 실패는 경고만 남기고 실패 목록에는 넣지 않는다."""
-    count = verification_counts(questions)["parse_failed"]
-    if count == 0:
+    counts = verification_counts(questions)
+    if verification_advisory:
+        if counts["failed"] == 0 and counts["parse_failed"] == 0 and counts["missing"] == 0:
+            return []
+        logger.warning(
+            "정답 검증 advisory 모드 — genuine fail %d건, parse_failed %d건, missing %d건 제외",
+            counts["failed"],
+            counts["parse_failed"],
+            counts["missing"],
+        )
+        return [
+            "정답 검증 advisory 모드 — "
+            f"genuine fail {counts['failed']}건, parse_failed {counts['parse_failed']}건, "
+            f"missing {counts['missing']}건을 재시도 게이트에서 제외"
+        ]
+    if counts["parse_failed"] == 0:
         return []
-    return [f"검증 응답 파싱 실패 {count}건 — 정답 오류가 아닌 advisory로 분리"]
+    return [f"검증 응답 파싱 실패 {counts['parse_failed']}건 — 정답 오류가 아닌 advisory로 분리"]
+
+
+def _is_verification_advisory(state: ExamForgeState) -> bool:
+    """상태 플래그나 env 설정 중 하나라도 advisory면 검증 게이트를 경고 전용으로 둔다."""
+    return state.get("verification_advisory") is True or verification_advisory_enabled()
 
 
 def _apply_programming_code_gate(

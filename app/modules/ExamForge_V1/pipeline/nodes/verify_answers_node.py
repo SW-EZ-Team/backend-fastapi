@@ -14,7 +14,12 @@ import time
 
 from app.modules.ExamForge_V1.pipeline.state import ExamForgeState
 from app.modules.ExamForge_V1.prompts.verification import VERIFICATION_SYSTEM, build_verification_prompt
-from app.modules.ExamForge_V1.common.config import active_verifier_model, verification_concurrency, verifier_max_tokens
+from app.modules.ExamForge_V1.common.config import (
+    active_verifier_model,
+    verification_advisory_enabled,
+    verification_concurrency,
+    verifier_max_tokens,
+)
 from app.modules.ExamForge_V1.common.ai_bridge import get_connector, ChapterAIRequest
 from app.modules.ExamForge_V1.common.logger import get_logger
 
@@ -128,6 +133,12 @@ async def verify_answers_node(state: ExamForgeState) -> dict:
         if is_genuine_fail(v.get("_verification"))
     ]
     parse_ratio = parse_failed_ratio(verified)
+    advisory_mode = verification_advisory_enabled()
+    if advisory_mode and failures:
+        logger.warning(
+            "검증 advisory 모드 — 검증기 genuine fail %d건은 관측 로그로만 남긴다.",
+            len(failures),
+        )
 
     logger.info("노드 완료: verify_answers_node (%.2fs)", time.time() - node_start)
     return {
@@ -137,7 +148,7 @@ async def verify_answers_node(state: ExamForgeState) -> dict:
             1 for q in verified if is_parse_failed(q.get("_verification"))
         ),
         "verification_parse_failed_ratio": parse_ratio,
-        "verification_advisory": parse_ratio >= 0.5 and not failures,
+        "verification_advisory": advisory_mode or (parse_ratio >= 0.5 and not failures),
         "pipeline_status": "validating",
     }
 

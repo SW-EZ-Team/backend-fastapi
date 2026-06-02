@@ -24,6 +24,7 @@ def test_root_env_example_declares_chapterstudio_runtime_contract() -> None:
     assert _value_for(env, "DATABASE_SCHEMA") == "chapter_studio"
     assert _value_for(env, "ACTIVE_PLANNER_MODEL") == "opus46"
     assert _value_for(env, "ACTIVE_TTS_MODEL") == "tts_v1"
+    assert _value_for(env, "EXAMFORGE_VERIFICATION_ADVISORY") == "false"
     assert "TTS_ENDPOINT=" in env
 
 
@@ -46,6 +47,7 @@ def test_module_env_example_uses_registered_text_connector() -> None:
 
     assert _value_for(env, "AI_MODEL") == "qwen27b_modal"
     assert _value_for(env, "ACTIVE_TEXT_MODEL") == "qwen27b_modal"
+    assert _value_for(env, "EXAMFORGE_VERIFICATION_ADVISORY") == "false"
 
 
 def _backend_env() -> str:

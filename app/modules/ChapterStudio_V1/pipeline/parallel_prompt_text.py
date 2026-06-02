@@ -34,9 +34,11 @@ def slides_prompts(brief: str, outline: str, slide_count: int, template_key: str
         "'안녕하세요. 오늘 우리가...왜 하필...' 같은 정형 인트로 반복 금지. "
         "각 슬라이드는 직전 내용에서 자연스럽게 이어지는 서로 다른 도입으로 시작한다. "
         "인사말은 첫 슬라이드에서만 허용한다. "
-        "visual은 {type, data} 객체다. type은 number_line, comparison, step_flow, fraction_bar, concept_map, example_box 중 하나다. "
+        "visual은 {type, data} 객체다. 기본 type은 number_line, comparison, step_flow, fraction_bar, concept_map, example_box 중 하나이며, category=text에서는 metric-card, comparison-table도 허용한다. "
         "visual.type 선택 가이드: 수의 위치·대소·수직선·절댓값은 number_line, 계산 절차·단계·유도는 step_flow, 두 개념·방법 비교와 오개념 대조는 comparison, 분수·비율은 fraction_bar, 구체 예제+풀이는 example_box, 개념 간 관계 개요는 concept_map이다. "
-        "category=text인 슬라이드도 빈 본문이나 추상 설명 금지다. metric-card, comparison-table, flow-strip, example-box 중 하나의 화면 패턴을 visual.data.pattern에 적고, metric-card/example-box는 example_box, comparison-table은 comparison, flow-strip은 step_flow로 렌더 가능한 visual.type에 매핑한다. "
+        "category=text인 슬라이드는 narration만으로 끝내면 실패이며 시각요소 marker가 되는 visual을 반드시 포함한다. "
+        "category=text인 슬라이드는 visual.type을 metric-card, comparison-table, example_box 중 하나로 고른다. "
+        "metric-card는 핵심 기준 카드, comparison-table은 오개념/정답 대조표, example_box는 구체 예제+풀이 카드로만 쓴다. "
         "concept_map은 남발 금지이며 단원당 1~2개만 쓴다. 같은 visual.type을 연속 사용하지 말고 한 강의에서 최소 3종 이상을 분포시킨다. "
         "중1 수학·수직선·정수 비교·절댓값·분수 단원처럼 수학 단원이면 number_line과 step_flow를 우선 사용하고, 정수 덧셈·크기비교는 concept_map보다 number_line, step_flow, comparison을 먼저 선택한다. "
         "number_line data={min,max,ticks:[{value,label}],points:[{value,label,color}],highlights:[{from,to,label}]} 형식이다. "
@@ -44,7 +46,7 @@ def slides_prompts(brief: str, outline: str, slide_count: int, template_key: str
         "comparison data={left:{title,items[]},right:{title,items[]},verdict} 형식이다. "
         "fraction_bar data={fractions:[{num,den,label}]} 형식이다. example_box data={problem,steps[],answer} 형식이다. concept_map data={nodes[],edges[]} 형식이다. "
         'few-shot: 정수 -3과 2 크기비교는 visual={"type":"number_line","data":{"min":-5,"max":5,"ticks":[{"value":-5,"label":"-5"},{"value":0,"label":"0"},{"value":5,"label":"5"}],"points":[{"value":-3,"label":"-3","color":"#2A5C7A"},{"value":2,"label":"2","color":"#207B4C"}],"highlights":[{"from":-3,"to":2,"label":"오른쪽 2가 더 큼"}]}}처럼 쓴다. '
-        'few-shot text slide: {"slide_idx":1,"title":"오개념 바로잡기","category":"text","narration":"음수 비교에서 가장 많이 하는 실수는 숫자만 보고 8이 3보다 크니까 -8이 -3보다 크다고 생각하는 것입니다. 수직선에서는 오른쪽에 있을수록 큰 수이므로 -3이 -8보다 큽니다. 0에서 멀어지는 정도와 실제 크기 비교를 분리해서 보면 부호가 붙은 수를 더 안정적으로 판단할 수 있습니다.","visual":{"type":"comparison","data":{"pattern":"comparison-table","left":{"title":"잘못된 판단","items":["숫자 8만 보고 -8이 더 크다고 결론","절댓값과 실제 크기를 섞어서 생각"]},"right":{"title":"올바른 판단","items":["수직선에서 더 오른쪽인 -3 선택","0과의 거리는 절댓값 비교에만 사용"]},"verdict":"음수 크기 비교는 수직선 위치가 기준입니다."}},"checkpoint":"-8과 -3 중 더 큰 수와 이유를 말할 수 있는가?"}. '
+        'few-shot text slide: {"slide_idx":1,"title":"오개념 바로잡기","category":"text","narration":"음수 비교에서 가장 많이 하는 실수는 숫자만 보고 8이 3보다 크니까 -8이 -3보다 크다고 생각하는 것입니다. 수직선에서는 오른쪽에 있을수록 큰 수이므로 -3이 -8보다 큽니다. 0에서 멀어지는 정도와 실제 크기 비교를 분리해서 보면 부호가 붙은 수를 더 안정적으로 판단할 수 있습니다.","visual":{"type":"comparison-table","data":{"left":{"title":"잘못된 판단","items":["숫자 8만 보고 -8이 더 크다고 결론","절댓값과 실제 크기를 섞어서 생각"]},"right":{"title":"올바른 판단","items":["수직선에서 더 오른쪽인 -3 선택","0과의 거리는 절댓값 비교에만 사용"]},"verdict":"음수 크기 비교는 수직선 위치가 기준입니다."}},"checkpoint":"-8과 -3 중 더 큰 수와 이유를 말할 수 있는가?"}. '
         "구성은 상황→시각화→비교→오개념 교정→확인 순서를 권장한다. 텍스트 문단만 있는 슬라이드는 실패다.\n"
         f"{personalization}"
     )
@@ -54,7 +56,7 @@ def slides_prompts(brief: str, outline: str, slide_count: int, template_key: str
         f"확정 슬라이드 역할:\n{outline}\n"
         f"{personalization}\n"
         f"위 역할에 맞춰 슬라이드 {slide_count}개를 구조화 visual 스펙으로 만든다. "
-        "화면에는 충분한 narration과 구체적 visual data를 남긴다. narration을 빈 문자열, 한 문장짜리 요약, '시각 자료' 같은 플레이스홀더로 쓰면 실패다. "
+        "화면에는 충분한 narration과 구체적 visual data를 남긴다. text 슬라이드도 metric-card, comparison-table, example_box 중 하나의 visual marker를 반드시 남긴다. narration을 빈 문자열, 한 문장짜리 요약, '시각 자료' 같은 플레이스홀더로 쓰면 실패다. "
         "수학 예시는 실제 숫자·눈금·비교값을 data에 넣어 Python 렌더러가 바로 그릴 수 있게 한다."
     )
     return system, user

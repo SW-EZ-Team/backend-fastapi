@@ -27,6 +27,9 @@ def _slide_input(row: StateRecord) -> SlideInput:
         "category": _record_text(row, "category"),
         "html": _record_text(row, "html"),
         "css": _optional_text(row, "css"),
+        "title": _optional_text(row, "title"),
+        "narration": _optional_text(row, "narration"),
+        "focus": _optional_text(row, "focus"),
     }
 
 

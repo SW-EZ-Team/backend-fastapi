@@ -9,8 +9,12 @@ from app.modules.ExamForge_V1.pipeline.nodes.programming_context import has_code
 from app.modules.ExamForge_V1.pipeline.nodes.programming_context import looks_like_programming_source
 from app.modules.ExamForge_V1.quality.metrics import compute_quality_metrics
 from app.modules.ExamForge_V1.quality.cjk_sanitizer import sanitize_exam_questions
+from app.modules.ExamForge_V1.common.config import verification_advisory_enabled
 from app.modules.ExamForge_V1.common.logger import get_logger
-from app.modules.ExamForge_V1.common.verification_status import genuine_failed_ids
+from app.modules.ExamForge_V1.common.verification_status import (
+    advisory_filtered_failed_ids,
+    verification_advisory_keys,
+)
 
 logger = get_logger(__name__)
 
@@ -188,12 +192,29 @@ def _missing_programming_code(state: ExamForgeState, questions: list[dict]) -> b
 
 def _active_failed_ids(state: ExamForgeState) -> list[str]:
     """최신 검증 리포트 기준의 실패 문항만 반환한다."""
+    questions = state.get("calibrated_questions", [])
+    verification_advisory = _is_verification_advisory(state)
     results = state.get("validation_report", {}).get("results")
     if not isinstance(results, list):
-        questions = state.get("calibrated_questions", [])
-        return genuine_failed_ids(state.get("failed_question_ids", []), questions)
-    return [
+        return advisory_filtered_failed_ids(
+            state.get("failed_question_ids", []),
+            questions,
+            verification_advisory=verification_advisory,
+        )
+    failed_ids = [
         r.get("question_id", "")
         for r in results
         if isinstance(r, dict) and not r.get("passed", False) and not r.get("parse_failed", False)
     ]
+    if not verification_advisory:
+        return failed_ids
+    advisory_keys = verification_advisory_keys(questions)
+    filtered = [item for item in failed_ids if str(item) not in advisory_keys]
+    if len(filtered) != len(failed_ids):
+        logger.warning("format_output_node: 검증 advisory 모드 — 최종 실패 ID에서 검증기 판단 제외")
+    return filtered
+
+
+def _is_verification_advisory(state: ExamForgeState) -> bool:
+    """상태 플래그나 env 설정으로 advisory 모드인지 확인한다."""
+    return state.get("verification_advisory") is True or verification_advisory_enabled()

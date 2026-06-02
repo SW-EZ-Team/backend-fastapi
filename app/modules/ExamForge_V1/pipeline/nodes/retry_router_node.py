@@ -5,9 +5,10 @@ import time
 
 from app.modules.ExamForge_V1.pipeline.state import ExamForgeState
 from app.modules.ExamForge_V1.common.ai_bridge import get_current_budget
+from app.modules.ExamForge_V1.common.config import verification_advisory_enabled
 from app.modules.ExamForge_V1.common.logger import get_logger
 from app.modules.ExamForge_V1.common.verification_status import (
-    genuine_failed_ids,
+    advisory_filtered_failed_ids,
     has_parse_failed_majority,
     verification_counts,
 )
@@ -64,7 +65,16 @@ def route_after_validation(state: ExamForgeState) -> str:
         or state.get("questions", [])
     )
     total = len(questions)
-    failed_ids = genuine_failed_ids(state.get("failed_question_ids", []), questions)
+    verification_advisory = _is_verification_advisory(state)
+    failed_ids = advisory_filtered_failed_ids(
+        state.get("failed_question_ids", []),
+        questions,
+        verification_advisory=verification_advisory,
+    )
+    if verification_advisory and verification_counts(questions)["failed"] > 0:
+        logger.warning(
+            "route_after_validation: 검증 advisory 모드 — genuine fail은 재시도율에서 제외"
+        )
 
     # 결정적 실패 감지: 에러 메시지가 있고 문제가 비어있으면 재시도해도 동일 결과
     if error_message and total == 0:
@@ -86,7 +96,7 @@ def route_after_validation(state: ExamForgeState) -> str:
 
     # --- 품질 지표 게이트: 검증 보고서 확인 ---
     validation_report = state.get("validation_report", {})
-    parse_failed_advisory = (
+    parse_failed_advisory = verification_advisory or (
         has_parse_failed_majority(questions)
         and verification_counts(questions)["failed"] == 0
         and not failed_ids
@@ -111,3 +121,8 @@ def route_after_validation(state: ExamForgeState) -> str:
         accuracy_rate, dedup_score, fail_rate * 100,
     )
     return "passed"
+
+
+def _is_verification_advisory(state: ExamForgeState) -> bool:
+    """상태 플래그나 env 설정으로 advisory 모드인지 확인한다."""
+    return state.get("verification_advisory") is True or verification_advisory_enabled()

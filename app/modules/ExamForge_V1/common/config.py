@@ -49,6 +49,14 @@ def _int_env(key: str, default: int) -> int:
         return default
 
 
+def _bool_env(key: str, default: bool) -> bool:
+    """불리언 환경 변수를 여러 표기 방식으로 읽는다."""
+    raw = _optional(key)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"false", "0", "no", "off"}
+
+
 def anthropic_api_key() -> str | None:
     """Anthropic API 키를 반환한다."""
     return _optional("ANTHROPIC_API_KEY")
@@ -117,6 +125,13 @@ def targeted_repair_enabled() -> bool:
     if raw is None:
         return True
     return raw.strip().lower() not in {"false", "0", "no", "off"}
+
+
+def verification_advisory_enabled() -> bool:
+    """신뢰 낮은 검증기에서는 검증 결과를 관측용으로만 사용한다."""
+    if _bool_env("EXAMFORGE_VERIFICATION_ADVISORY", False):
+        return True
+    return active_verifier_model().strip().lower() == "codex_cli"
 
 
 def verifier_max_tokens(base: int) -> int:

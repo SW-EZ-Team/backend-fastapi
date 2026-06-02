@@ -21,6 +21,7 @@ from app.modules.ExamForge_V1.common.json_utils import parse_llm_json
 from app.modules.ExamForge_V1.common.config import (
     active_verifier_model,
     targeted_repair_enabled,
+    verification_advisory_enabled,
     verification_concurrency,
     verifier_max_tokens,
 )
@@ -100,6 +101,10 @@ async def repair_questions_node(state: ExamForgeState) -> dict:
         return {}
     node_start = time.time()
     logger.info("노드 시작: repair_questions_node")
+
+    if state.get("verification_advisory") is True or verification_advisory_enabled():
+        logger.warning("repair_questions_node: 검증 advisory 모드 — 표적 교정 생략")
+        return {"repair_applied": False}
 
     # 안전 스위치: 끄면 즉시 blind 재생성 폴백 (변경 이전 동작과 동일).
     if not targeted_repair_enabled():

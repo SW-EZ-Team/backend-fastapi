@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from app.modules.ChapterStudio_V1.postprocess.iframe_sandboxer import wrap_iframe
 from app.modules.ChapterStudio_V1.postprocess.katex import katex_render
@@ -21,6 +21,10 @@ class SlideInput(TypedDict):
     category: str
     html: str
     css: str
+    title: NotRequired[str]
+    narration: NotRequired[str]
+    focus: NotRequired[str]
+    voice_script: NotRequired[str]
 
 
 class PostprocessResult(TypedDict):
@@ -33,7 +37,15 @@ class PostprocessResult(TypedDict):
 
 
 async def postprocess_slide(
-    slide_index: int, category: str, raw_html: str, raw_css: str
+    slide_index: int,
+    category: str,
+    raw_html: str,
+    raw_css: str,
+    *,
+    title: str = "",
+    narration: str = "",
+    focus: str = "",
+    voice_script: str = "",
 ) -> PostprocessResult:
     """슬라이드 원본을 검증 가능한 sandbox iframe 결과로 바꾼다."""
     warnings: list[str] = []
@@ -44,7 +56,15 @@ async def postprocess_slide(
     html = await _chart_step(category, html, warnings)
     html = _mark_flow_arrow_children(html)
     html = sanitize(html, category=category)
-    html, gate_warnings = ensure_visual_body(html, category, slide_index)
+    html, gate_warnings = ensure_visual_body(
+        html,
+        category,
+        slide_index,
+        title=title,
+        narration=narration,
+        focus=focus,
+        voice_script=voice_script,
+    )
     warnings.extend(gate_warnings)
     warnings.extend(visual_density_warnings(html, category))
     iframe_html = wrap_iframe(html, css=_compose_iframe_css(raw_css))
@@ -69,7 +89,16 @@ async def postprocess_all(
 
 async def _bounded(slide: SlideInput, semaphore: asyncio.Semaphore) -> PostprocessResult:
     async with semaphore:
-        return await postprocess_slide(slide["index"], slide["category"], slide["html"], slide["css"])
+        return await postprocess_slide(
+            slide["index"],
+            slide["category"],
+            slide["html"],
+            slide["css"],
+            title=slide.get("title", ""),
+            narration=slide.get("narration", ""),
+            focus=slide.get("focus", ""),
+            voice_script=slide.get("voice_script", ""),
+        )
 
 
 async def _code_step(category: str, html: str, warnings: list[str]) -> str:

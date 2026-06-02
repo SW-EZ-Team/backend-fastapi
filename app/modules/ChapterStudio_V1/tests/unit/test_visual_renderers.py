@@ -95,6 +95,17 @@ def test_fallback_visual_uses_actual_narration_when_title_is_generic() -> None:
     assert "핵심 조건을 다시 확인한다" not in html
 
 
+def test_fallback_visual_blocks_numbered_placeholder_title_and_generic_narration() -> None:
+    html = render_fallback_visual(
+        "슬라이드 1 시각 자료",
+        "text 핵심 내용을 예제 카드로 정리한다.",
+    )
+
+    assert "example-box-visual" in html
+    assert "슬라이드 1 시각 자료" not in html
+    assert "핵심 내용을 예제 카드로 정리한다" not in html
+
+
 def test_text_visual_pattern_aliases_render_specific_markup() -> None:
     metric_html = render_visual("metric-card", {"title": "기준", "value": "오른쪽이 큼"})
     flow_html = render_visual("flow-strip", {"steps": [{"label": "확인", "detail": "0 위치를 찾는다."}]})

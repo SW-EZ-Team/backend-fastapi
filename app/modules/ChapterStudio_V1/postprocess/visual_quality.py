@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from html import unescape
 
 from app.modules.ChapterStudio_V1.postprocess.visual_renderers import render_fallback_visual
 
@@ -32,18 +33,40 @@ _VISUAL_MARKERS = (
     "example-box-visual",
 )
 _TAG_RE = re.compile(r"<\s*(/)?\s*([a-zA-Z][\w:-]*)\b[^>]*?>")
+_HEADING_RE = re.compile(r"<h[1-6]\b[^>]*>(.*?)</h[1-6]>", re.IGNORECASE | re.DOTALL)
+_PLACEHOLDER_PATTERNS = (
+    re.compile(r"^시각 자료$"),
+    re.compile(r"^슬라이드\s*\d+\s*시각 자료$"),
+    re.compile(r"^[\w가-힣 -]*핵심 내용을 예제 카드로 정리한다\.?$"),
+    re.compile(r"^핵심 조건을 다시 확인한다\.?$"),
+)
 _VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
 
 
-def ensure_visual_body(html: str, category: str, slide_index: int) -> tuple[str, list[str]]:
+def ensure_visual_body(
+    html: str,
+    category: str,
+    slide_index: int,
+    *,
+    title: str = "",
+    narration: str = "",
+    focus: str = "",
+    voice_script: str = "",
+) -> tuple[str, list[str]]:
     """렌더된 body가 iframe에 넣어도 안전한지 보고, 실패하면 SVG 폴백으로 교체한다."""
     reasons = _quality_failures(html)
     if not reasons:
         return html, []
-    title = f"슬라이드 {slide_index + 1} 시각 자료"
-    narration = _fallback_narration(category, reasons)
+    fallback_title = _fallback_title(html, title)
+    fallback_narration = _fallback_narration(
+        html,
+        fallback_title,
+        narration,
+        focus,
+        voice_script,
+    )
     warning = "visual-quality: " + ", ".join(reasons)
-    return render_fallback_visual(title, narration), [warning]
+    return render_fallback_visual(fallback_title, fallback_narration), [warning]
 
 
 def _quality_failures(html: str) -> list[str]:
@@ -91,8 +114,61 @@ def _tags_balanced(html: str) -> bool:
     return not stack
 
 
-def _fallback_narration(category: str, reasons: list[str]) -> str:
-    return f"{category} 핵심 내용을 예제 카드로 정리한다."
+def _fallback_title(html: str, title: str) -> str:
+    """모델의 generic 제목 대신 슬라이드 안의 실제 제목 후보를 고른다."""
+    for candidate in (title, _heading_text(html), _compact_sentences(_plain_text(html), 40)):
+        specific = _specific_text(candidate)
+        if specific:
+            return specific
+    return "학습 포인트"
+
+
+def _fallback_narration(
+    html: str,
+    title: str,
+    narration: str,
+    focus: str,
+    voice_script: str,
+) -> str:
+    """본문 후보를 실제 설명 우선순위로 압축해 폴백 카드에 넣는다."""
+    for candidate in (narration, voice_script, focus, _plain_text(html)):
+        specific = _specific_text(candidate)
+        if specific:
+            return _compact_sentences(specific)
+    return f"{title}를 실제 예시와 연결해 확인합니다."
+
+
+def _heading_text(html: str) -> str:
+    """HTML heading 태그에서 첫 실제 제목을 추출한다."""
+    for match in _HEADING_RE.finditer(html):
+        specific = _specific_text(_plain_text(match.group(1)))
+        if specific:
+            return specific
+    return ""
+
+
+def _plain_text(html: str) -> str:
+    """태그를 제거하고 사람이 읽을 수 있는 텍스트만 남긴다."""
+    without_tags = re.sub(r"<[^>]+>", " ", html)
+    return re.sub(r"\s+", " ", unescape(without_tags)).strip()
+
+
+def _compact_sentences(text: str, max_chars: int = 220) -> str:
+    """긴 설명에서 폴백 카드에 들어갈 앞쪽 핵심 문장만 남긴다."""
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    sentences = re.findall(r"[^.!?。！？]+[.!?。！？]?", cleaned)
+    compact = " ".join(part.strip() for part in sentences[:2] if part.strip()) or cleaned
+    if len(compact) <= max_chars:
+        return compact
+    return compact[:max_chars].rsplit(" ", 1)[0].strip() or compact[:max_chars].strip()
+
+
+def _specific_text(value: str) -> str:
+    """기존 generic fallback 문구를 실제 콘텐츠 후보에서 제외한다."""
+    text = re.sub(r"\s+", " ", value).strip()
+    if not text:
+        return ""
+    return "" if any(pattern.match(text) for pattern in _PLACEHOLDER_PATTERNS) else text
 
 
 __all__ = ["ensure_visual_body"]

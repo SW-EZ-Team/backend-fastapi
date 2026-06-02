@@ -20,6 +20,12 @@ from app.modules.ChapterStudio_V1.postprocess.visual_renderer_utils import (
 
 Spec = dict[str, object]
 Renderer = Callable[[Spec], str]
+_PLACEHOLDER_PATTERNS = (
+    re.compile(r"^시각 자료$"),
+    re.compile(r"^슬라이드\s*\d+\s*시각 자료$"),
+    re.compile(r"^[\w가-힣 -]*핵심 내용을 예제 카드로 정리한다\.?$"),
+    re.compile(r"^핵심 조건을 다시 확인한다\.?$"),
+)
 
 
 def render_number_line(spec: Spec) -> str:
@@ -259,9 +265,10 @@ def _title_from_narration(narration: str) -> str:
 
 def _specific_text(value: str) -> str:
     """기존 generic fallback 문구를 실제 콘텐츠로 취급하지 않는다."""
-    text = value.strip()
-    placeholders = {"시각 자료", "핵심 조건을 다시 확인한다.", "핵심 조건을 다시 확인한다", ""}
-    return "" if text in placeholders else text
+    text = re.sub(r"\s+", " ", value).strip()
+    if not text:
+        return ""
+    return "" if any(pattern.match(text) for pattern in _PLACEHOLDER_PATTERNS) else text
 
 
 _RENDERERS: dict[str, Renderer] = {

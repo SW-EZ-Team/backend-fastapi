@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from app.modules.ChapterStudio_V1.postprocess.pipeline import postprocess_slide, postprocess_all
+from app.modules.ChapterStudio_V1.postprocess.visual_quality import ensure_visual_body
 
 
 @pytest.mark.asyncio
@@ -199,6 +200,39 @@ class TestPostprocessSlide:
 
         assert "example-box-visual" in result["html"]
         assert "<svg" in result["html"]
+
+    async def test_quality_gate_fallback_uses_slide_title_and_narration(self):
+        result = await postprocess_slide(
+            slide_index=0,
+            category="text",
+            raw_html="<section><p>텍스트만 있는 화면입니다.</p></section>",
+            raw_css="",
+            title="음수 비교",
+            narration="음수는 수직선에서 오른쪽에 있을수록 더 큰 수입니다.",
+        )
+
+        assert "example-box-visual" in result["html"]
+        assert "음수 비교" in result["html"]
+        assert "오른쪽에 있을수록 더 큰 수" in result["html"]
+        assert "슬라이드 1 시각 자료" not in result["html"]
+        assert "핵심 내용을 예제 카드로 정리한다" not in result["html"]
+
+
+def test_ensure_visual_body_never_outputs_generic_placeholder_for_text_slide():
+    html, warnings = ensure_visual_body(
+        "<section><p>시각 marker가 없는 본문입니다.</p></section>",
+        "text",
+        0,
+        title="절댓값 의미",
+        narration="절댓값은 0에서 떨어진 거리이고 실제 크기 비교와는 구분해야 합니다.",
+    )
+
+    assert warnings
+    assert "example-box-visual" in html
+    assert "절댓값 의미" in html
+    assert "0에서 떨어진 거리" in html
+    assert "슬라이드 1 시각 자료" not in html
+    assert "핵심 내용을 예제 카드로 정리한다" not in html
 
 
 @pytest.mark.asyncio
