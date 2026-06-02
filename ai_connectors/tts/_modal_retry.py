@@ -7,19 +7,16 @@
 from __future__ import annotations
 
 import asyncio
-import io
-import wave
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 from urllib.parse import unquote
 
 import httpx
-import numpy as np
 
-from common.audio_io import encode_wav_bytes, ensure_mono
 from common.logging import get_logger
 from ..errors import AuthError, ModelNotFoundError
 from ..tts_schemas import TTSRequest, TTSResponse
+from ._text_segmentation import merge_segment_responses as _merge_segment_response_bytes
 
 _LOG = get_logger(__name__)
 
@@ -63,16 +60,13 @@ async def call_with_retry(
     raise last_exc
 
 
-def merge_segment_responses(responses: list[TTSResponse], sample_rate: int) -> bytes:
-    """세그먼트별 WAV bytes 를 numpy concatenate 후 단일 WAV 로 병합한다."""
-    arrays: list[np.ndarray] = []
-    for resp in responses:
-        with wave.open(io.BytesIO(resp.audio_bytes)) as wf:
-            raw = wf.readframes(wf.getnframes())
-        pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32767.0
-        arrays.append(ensure_mono(pcm))
-    merged = np.concatenate(arrays).astype(np.float32)
-    return encode_wav_bytes(merged, sample_rate)
+def merge_segment_responses(
+    responses: list[TTSResponse],
+    sample_rate: int,
+    pause_ms: int | None = None,
+) -> bytes:
+    """기존 import 경로를 유지하면서 실제 병합 구현으로 위임한다."""
+    return _merge_segment_response_bytes(responses, sample_rate, pause_ms=pause_ms)
 
 
 def build_tts_response(

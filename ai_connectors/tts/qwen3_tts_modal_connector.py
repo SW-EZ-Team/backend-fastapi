@@ -16,7 +16,7 @@ from common.logging import get_logger
 from ..errors import AuthError, InferenceError, ModelLoadError, ModelNotFoundError
 from ..errors import TimeoutError as ConnectorTimeoutError
 from ..tts_schemas import TTSRequest, TTSResponse
-from ._text_segmentation import split_tts_segments
+from ._text_segmentation import default_segment_pause_ms, split_tts_segments
 from ._modal_retry import (
     build_tts_response,
     call_with_retry,
@@ -72,7 +72,11 @@ class Qwen3TTSModalConnector:
         sample_rate = partial[0].sample_rate
         first = partial[0]
         return TTSResponse(
-            audio_bytes=merge_segment_responses(partial, sample_rate),
+            audio_bytes=merge_segment_responses(
+                partial,
+                sample_rate,
+                pause_ms=default_segment_pause_ms(),
+            ),
             sample_rate=sample_rate,
             content_type="audio/wav",
             duration_sec=sum(r.duration_sec for r in partial),

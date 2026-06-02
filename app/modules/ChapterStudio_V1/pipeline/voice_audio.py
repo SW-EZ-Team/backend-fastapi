@@ -12,10 +12,15 @@ from ai_connectors.tts_schemas import TTSRequest, TTSResponse
 
 from app.modules.ChapterStudio_V1.ai_connectors.base import TTSConnector
 from app.modules.ChapterStudio_V1.ai_connectors.registry import get_tts_connector
-from app.modules.ChapterStudio_V1.common.config import tts_media_url, tts_output_dir
+from app.modules.ChapterStudio_V1.common.config import (
+    tts_media_url,
+    tts_output_dir,
+    tts_selective_tilde_enabled,
+)
 from app.modules.ChapterStudio_V1.common.errors import ConversionError
 from app.modules.ChapterStudio_V1.pipeline.state import StateRecord, StateRecords
 from app.modules.ChapterStudio_V1.pipeline.tts_routing import TutorVoiceProfile, TtsPlan, resolve_tts_plan
+from app.modules.ChapterStudio_V1.postprocess.voice_text import apply_selective_tilde
 
 _LOG = logging.getLogger(__name__)
 _REF_DOWNLOAD_TIMEOUT_SEC = 10.0
@@ -49,8 +54,9 @@ async def _synthesize_one(
 ) -> StateRecord:
     slide_idx = _record_int(record, "slide_idx")
     script_text = _record_text(record, "script_text")
+    synthesis_text = _synthesis_script_text(script_text)
     async with semaphore:
-        payload = await connector.synthesize(script_text, voice=voice)
+        payload = await connector.synthesize(synthesis_text, voice=voice)
     audio_url = payload.get("audio_url")
     duration_sec = payload.get("duration_sec")
     if not isinstance(audio_url, str) or audio_url == "":
@@ -108,10 +114,12 @@ async def _synthesize_one_routed(
 
 async def _synthesize_by_plan(script_text: str, plan: TtsPlan) -> TTSResponse:
     connector = get_root_tts_connector(plan.engine)
+    synthesis_text = _synthesis_script_text(script_text)
     if plan.engine == "qwen3-tts-modal":
-        request = TTSRequest(text=script_text, ref_audio_bytes=await _load_ref_audio(plan.ref_source))
+        ref_audio = await _load_ref_audio(plan.ref_source)
+        request = TTSRequest(text=synthesis_text, ref_audio_bytes=ref_audio)
         return await connector.synthesize(request)
-    request = TTSRequest(text=script_text, ref_audio_bytes=b"", style=plan.style)
+    request = TTSRequest(text=synthesis_text, ref_audio_bytes=b"", style=plan.style)
     return await connector.synthesize(request)
 
 
@@ -137,6 +145,13 @@ def _fallback_style(tutor_profile: TutorVoiceProfile) -> str:
     if tutor_profile.use_formal_speech:
         return "존댓말 과외톤"
     return "반말 친근 과외톤"
+
+
+def _synthesis_script_text(script_text: str) -> str:
+    """DB 저장값은 그대로 두고 합성 입력에만 말투 후처리를 적용한다."""
+    if not tts_selective_tilde_enabled():
+        return script_text
+    return apply_selective_tilde(script_text)
 
 
 def _safe_token(value: str) -> str:

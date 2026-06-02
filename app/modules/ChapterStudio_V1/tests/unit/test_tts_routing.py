@@ -33,6 +33,15 @@ class FakeRootTTSConnector:
         return feature in {"tts", "voice_cloning"}
 
 
+class FakeLegacyTTSConnector:
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+
+    async def synthesize(self, text: str, voice: str = "f1") -> dict[str, object]:
+        self.texts.append(text)
+        return {"audio_url": f"mock://audio/{voice}", "duration_sec": 1.0}
+
+
 def test_resolve_tts_plan_routes_preset_and_custom_refs() -> None:
     bear = resolve_tts_plan(_profile("tut_0000000000000PRESET_BEAR01"))
     cat = resolve_tts_plan(_profile("tut_00000000000000PRESET_CAT01"))
@@ -109,6 +118,49 @@ async def test_synthesize_voice_audio_falls_back_to_gemini_when_qwen_fails(
     assert requested_names == ["qwen3-tts-modal", "gemini-tts"]
     assert gemini.requests[0].style == "반말 친근 과외톤"
     assert result[0]["voice"] == "gemini-tts"
+
+
+@pytest.mark.asyncio
+async def test_synthesize_voice_audio_keeps_original_when_selective_tilde_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connector = FakeLegacyTTSConnector()
+    source = "안녕하세요. 오른쪽이 더 커요. 천천히 따라와 보세요."
+    monkeypatch.setattr(voice_audio, "tts_selective_tilde_enabled", lambda: False)
+
+    result = await voice_audio.synthesize_voice_audio(
+        [{"slide_idx": 0, "script_text": source}],
+        connector=connector,
+    )
+
+    assert connector.texts == [source]
+    assert result[0]["script_text"] == source
+
+
+@pytest.mark.asyncio
+async def test_synthesize_voice_audio_uses_selective_tilde_for_routed_tts_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    connector = FakeRootTTSConnector("qwen3-tts-modal")
+    source = "안녕하세요. 오른쪽이 더 커요. 천천히 따라와 보세요."
+
+    def fake_get_connector(name: str) -> FakeRootTTSConnector:
+        assert name == "qwen3-tts-modal"
+        return connector
+
+    monkeypatch.setattr(voice_audio, "get_root_tts_connector", fake_get_connector)
+    monkeypatch.setattr(voice_audio, "tts_output_dir", lambda: tmp_path)
+    monkeypatch.setattr(voice_audio, "tts_selective_tilde_enabled", lambda: True)
+
+    result = await voice_audio.synthesize_voice_audio(
+        [{"slide_idx": 0, "script_text": source}],
+        tutor_profile=_profile("tut_0000000000000PRESET_BEAR01"),
+    )
+
+    expected = "안녕하세요~ 오른쪽이 더 커요. 천천히 따라와 보세요~"
+    assert connector.requests[0].text == expected
+    assert result[0]["script_text"] == source
 
 
 def _profile(tutor_id: str, *, formal: bool = True, voice_sample_url: str = "") -> TutorVoiceProfile:
