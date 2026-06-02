@@ -10,6 +10,7 @@ from __future__ import annotations
 from app.modules.ChapterStudio_V1.pipeline.personalization import personalization_contract
 
 _JSON_RULE = "출력은 단일 JSON 객체 한 개뿐이며 markdown fence·설명문·사고과정·<think> 블록을 금지한다. "
+_CJK_BAN_RULE = "한자·중국어 문자 절대 금지, 순수 한글/숫자/영문만 사용한다. "
 
 
 def slides_prompts(brief: str, outline: str, slide_count: int, template_key: str, *, weak_points: str, audience_level: str, tone: int, pace: int, tutor_depth: int, socratic: int, learning_goal: str, use_formal_speech: bool = True, use_emoji: bool = False, tutor_name: str = "", tutor_tagline: str = "", is_default_tutor: bool = True, voice_sample_url: str = "") -> tuple[str, str]:
@@ -18,6 +19,7 @@ def slides_prompts(brief: str, outline: str, slide_count: int, template_key: str
     system = (
         "너는 ChapterStudio_V1의 슬라이드 생성기다. "
         + _JSON_RULE
+        + _CJK_BAN_RULE
         + "최상위 키는 slides 하나만 쓴다. "
         f"slides는 정확히 {slide_count}개이고 slide_idx는 0..{slide_count - 1} 완전집합이다. "
         "slides[i] 키는 정확히 slide_idx, title, category, narration, visual, checkpoint 여섯 개다. "
@@ -134,6 +136,7 @@ def voice_prompt(
     system = (
         "너는 ChapterStudio_V1의 음성대본 생성기다. "
         + _JSON_RULE
+        + _CJK_BAN_RULE
         + "키는 정확히 slide_idx, script_text 두 개다. "
         # 분량 하한을 숫자로 못 박고 4단 구조를 강제 — xgrammar minLength 미강제 보완.
         "script_text는 반드시 900~1600자 범위여야 한다(900자 미만이면 실패로 간주한다). "

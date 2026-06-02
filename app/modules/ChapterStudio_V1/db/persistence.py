@@ -20,6 +20,7 @@ from app.modules.ChapterStudio_V1.db.persistence_values import (
     id_for as _id,
     json_text as _json,
     optional_number as _optional_number,
+    optional_records as _optional_records,
     optional_text as _optional_text,
     record_default_int as _record_default_int,
     record_default_str_list as _record_default_str_list,
@@ -34,7 +35,8 @@ from app.modules.ChapterStudio_V1.db.persistence_values import (
     voice_rows as _voice_rows,
 )
 from app.modules.ChapterStudio_V1.db.public_persistence import persist_public_content
-from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState
+from app.modules.ChapterStudio_V1.db.title_fallback import slide_title_from_context
+from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState, StateRecord
 
 
 class PersistenceConnection(Protocol):
@@ -71,6 +73,9 @@ async def _delete_existing(conn: PersistenceConnection, lesson_id: str, chapter_
 
 
 async def _insert_slides(conn: PersistenceConnection, context: GenerationContext, chapter_id: str, state: ChapterStudioState, schema: str) -> None:
+    drafts = _indexed_optional_records(state, "slide_drafts")
+    voices = {_record_int(row, "slide_idx"): row for row in _voice_rows(state)}
+    outlines = _indexed_optional_records(state, "slide_outline")
     for row in _records(state, "slides"):
         idx = _record_int(row, "slide_idx")
         await conn.execute(
@@ -83,7 +88,7 @@ async def _insert_slides(conn: PersistenceConnection, context: GenerationContext
             context.tutoring_id,
             context.lesson_id,
             idx,
-            f"{context.chapter_title} {idx + 1}",
+            _slide_title(drafts.get(idx), row, voices.get(idx, {}), outlines.get(idx), context, idx),
             _state_text(state, "template_key"),
             _json({"warnings": row.get("warnings", [])}),
         )
@@ -168,3 +173,20 @@ async def _insert_voice_scripts(conn: PersistenceConnection, context: Generation
 
 async def _mark_done(conn: PersistenceConnection, context: GenerationContext, chapter_id: str, state: ChapterStudioState, schema: str) -> None:
     await conn.execute(status_sql(schema), context.lesson_id, context.tutoring_id, chapter_id, _state_text(state, "generation_model"), _json(_summary(state)))
+
+
+def _indexed_optional_records(state: ChapterStudioState, key: str) -> dict[int, StateRecord]:
+    """slide_idx 기준으로 선택적 상태 목록을 빠르게 찾을 수 있게 만든다."""
+    return {_record_int(row, "slide_idx"): row for row in _optional_records(state, key)}
+
+
+def _slide_title(
+    draft: StateRecord | None,
+    slide: StateRecord,
+    voice: StateRecord,
+    outline: StateRecord | None,
+    context: GenerationContext,
+    idx: int,
+) -> str:
+    """chapter_studio.slide도 public.slide와 같은 내용 기반 제목을 쓴다."""
+    return slide_title_from_context(draft, slide, voice, outline, context.chapter_title, idx)

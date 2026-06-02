@@ -3,7 +3,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-_CJK_RE = re.compile(r"[一-鿿぀-ヿ]")
+from app.modules.ChapterStudio_V1.pipeline.cjk_text import CJK_RE, strip_cjk
+
 _TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣]+")
 _SENTENCE_RE = re.compile(r"[^.!?。！？]+[.!?。！？]?")
 _QUESTION_RE = re.compile(r"(?P<token>[가-힣]*(?:까요|나요|을까|ㄹ까|까))(?P<tail>[.\s]|$)")
@@ -85,7 +86,7 @@ def inspect_lesson(
 def _cjk_issues(text: str) -> list[TextIssue]:
     return [
         TextIssue("cjk", "한국어 강의 텍스트에 한자·가나 문자가 섞여 있다.", match.group(), match.start(), match.end())
-        for match in _CJK_RE.finditer(text)
+        for match in CJK_RE.finditer(text)
     ]
 
 
@@ -193,4 +194,5 @@ __all__ = [
     "apply_spelling_fixes",
     "inspect_lesson",
     "inspect_text",
+    "strip_cjk",
 ]

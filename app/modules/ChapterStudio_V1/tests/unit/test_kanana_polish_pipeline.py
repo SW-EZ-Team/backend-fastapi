@@ -24,6 +24,8 @@ async def test_kanana_polish_disabled_applies_deterministic_fix_without_connecto
 
     assert "절댓값" in result["voice_scripts"][0]["script_text"]
     assert "절댓값" in result["slide_drafts"][0]["narration"]
+    assert "的" not in result["voice_scripts"][0]["script_text"]
+    assert "世界" not in result["slide_drafts"][0]["html"]
 
 
 @pytest.mark.anyio
@@ -39,8 +41,8 @@ async def test_kanana_polish_enabled_updates_voice_and_slide_narration(monkeypat
 
     assert "절댓값" in result["voice_scripts"][0]["script_text"]
     assert "的" not in result["voice_scripts"][0]["script_text"]
-    assert result["slide_drafts"][0]["narration"].startswith("정수의 세계")
-    assert "정수의 세계" in result["slide_drafts"][0]["html"]
+    assert "世界" not in result["slide_drafts"][0]["narration"]
+    assert "世界" not in result["slide_drafts"][0]["html"]
     assert len(connector.calls) == _SLIDE_COUNT * 2
     assert set(connector.tone_hints) == {"존댓말"}
 
@@ -60,6 +62,7 @@ async def test_kanana_polish_enabled_reapplies_deterministic_fix_after_connector
     assert "절대값" not in result["voice_scripts"][0]["script_text"]
     assert "절댓값" in result["slide_drafts"][0]["narration"]
     assert "절대값" not in result["slide_drafts"][0]["narration"]
+    assert "的" not in result["voice_scripts"][0]["script_text"]
 
 
 @pytest.mark.anyio
@@ -73,8 +76,10 @@ async def test_kanana_polish_failure_keeps_original_text_except_deterministic_fi
 
     result = await content_verify_node(_state(_payload()))
 
-    assert "정수的世界里" in result["voice_scripts"][0]["script_text"]
+    assert "的" not in result["voice_scripts"][0]["script_text"]
+    assert "世界" not in result["voice_scripts"][0]["script_text"]
     assert "절댓값" in result["slide_drafts"][0]["narration"]
+    assert "世界" not in result["slide_drafts"][0]["html"]
 
 
 class _FakePolishConnector:

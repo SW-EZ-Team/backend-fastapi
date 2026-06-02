@@ -105,6 +105,16 @@ def test_parallel_slide_prompt_requires_structured_visual_spec() -> None:
     assert "안녕하세요. 오늘 우리가...왜 하필" in system
 
 
+def test_slide_and_voice_system_prompts_ban_cjk_characters() -> None:
+    slide_system, _ = slides_prompts("요청", "outline", 10, "concept_flow", **_ARGS)
+    voice_system, _ = voice_prompt("요청", "제목", "초점", "요약", 0, **_ARGS)
+
+    assert "한자·중국어 문자 절대 금지" in slide_system
+    assert "순수 한글/숫자/영문만 사용" in slide_system
+    assert "한자·중국어 문자 절대 금지" in voice_system
+    assert "순수 한글/숫자/영문만 사용" in voice_system
+
+
 def test_single_call_prompt_includes_missing_personalization_fields() -> None:
     request = build_generation_request(_state())
 

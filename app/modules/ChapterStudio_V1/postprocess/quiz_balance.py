@@ -14,6 +14,18 @@ _POSITION_TOKEN_RE = re.compile(
     r"|(?:[1-4]\s*번|[①②③④])"
     r"|(?:첫|두|세|네)\s*번째\s*(?:보기|선택지)?"
 )
+_ANSWER_POSITION_PREFIX_RE = re.compile(
+    r"^\s*(?:정답|답)\s*(?:은|는)?\s*[:：]?\s*"
+    r"(?:[1-4]\s*번|[①②③④]|[A-Da-d]\s*(?:번|보기|선택지)?)"
+    r"\s*(?:이야|입니다|이에요|이다|예요|야|임)?\s*"
+    r"(?:[.。!！?？,:：;-]\s*|\s+)"
+)
+
+
+def strip_answer_position_reference(explanation: str) -> str:
+    """해설 첫머리의 정답 위치 지칭만 제거하고 개념 설명은 보존한다."""
+    stripped = _ANSWER_POSITION_PREFIX_RE.sub("", explanation, count=1).strip()
+    return stripped if stripped else explanation
 
 
 def balanced_target_positions(count: int, num_choices: int = 4, seed: int = 0) -> list[int]:
@@ -48,6 +60,7 @@ def balance_quiz_answers(quizzes: list[GeneratedQuiz], seed_key: str = "") -> li
     target_iter = iter(targets)
     balanced: list[GeneratedQuiz] = []
     for quiz in quizzes:
+        quiz = _without_intro_position(quiz)
         if _has_position_token(quiz.explanation):
             _log_skip(quiz)
             balanced.append(quiz)
@@ -70,8 +83,16 @@ def _validate_choice_args(choices: list[str], answer_idx: int, target_idx: int) 
 
 
 def _eligible_quizzes(quizzes: list[GeneratedQuiz]) -> list[GeneratedQuiz]:
-    """해설에 위치 지칭이 없는 문항만 셔플 대상으로 고른다."""
-    return [quiz for quiz in quizzes if not _has_position_token(quiz.explanation)]
+    """도입 위치구 제거 뒤에도 위치 지칭이 없는 문항만 셔플 대상으로 고른다."""
+    return [quiz for quiz in quizzes if not _has_position_token(strip_answer_position_reference(quiz.explanation))]
+
+
+def _without_intro_position(quiz: GeneratedQuiz) -> GeneratedQuiz:
+    """해설 도입부의 정답 위치 표현을 제거한 quiz를 만든다."""
+    explanation = strip_answer_position_reference(quiz.explanation)
+    if explanation == quiz.explanation:
+        return quiz
+    return quiz.model_copy(update={"explanation": explanation})
 
 
 def _has_position_token(text: str) -> bool:
@@ -102,5 +123,6 @@ def _log_distribution(before: list[GeneratedQuiz], after: list[GeneratedQuiz]) -
 __all__ = [
     "balance_quiz_answers",
     "balanced_target_positions",
+    "strip_answer_position_reference",
     "shuffle_quiz_choices",
 ]

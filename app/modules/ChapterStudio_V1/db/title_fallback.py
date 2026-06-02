@@ -33,10 +33,15 @@ def slide_title_from_context(
     idx: int,
 ) -> str:
     """명시 title 우선, 없으면 화면·대본·outline에서 짧은 제목을 만든다."""
-    explicit = _title_candidate(_text(draft, "title"), chapter_title, idx)
+    return meaningful_slide_title(_text(draft, "title"), chapter_title, idx, *_fallback_sources(draft, slide, voice, outline))
+
+
+def meaningful_slide_title(raw_title: str, chapter_title: str, idx: int, *content_sources: str) -> str:
+    """제네릭 제목이면 내용 후보에서 의미 있는 짧은 제목을 결정한다."""
+    explicit = _title_candidate(raw_title, chapter_title, idx)
     if explicit:
         return explicit[:200]
-    for source in _fallback_sources(draft, slide, voice, outline):
+    for source in content_sources:
         phrase = _phrase_from_text(source)
         if phrase:
             return phrase[:200]
@@ -68,7 +73,10 @@ def _title_candidate(title: str, chapter_title: str, idx: int) -> str:
 
 
 def _is_placeholder(title: str, chapter_title: str, idx: int) -> bool:
-    if title in {f"{chapter_title} {idx + 1}", f"슬라이드 {idx}", f"슬라이드 {idx + 1}"}:
+    chapter_pattern = rf"{re.escape(chapter_title)}\s*\d+"
+    if re.fullmatch(chapter_pattern, title):
+        return True
+    if title in {f"슬라이드 {idx}", f"슬라이드 {idx + 1}"}:
         return True
     return bool(re.fullmatch(r"슬라이드\s*\d+", title))
 
@@ -126,4 +134,4 @@ class _HtmlTextExtractor(HTMLParser):
             self.parts.append(text)
 
 
-__all__ = ["slide_title_from_context"]
+__all__ = ["meaningful_slide_title", "slide_title_from_context"]

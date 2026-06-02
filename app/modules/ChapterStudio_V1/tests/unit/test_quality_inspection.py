@@ -4,11 +4,27 @@ from app.modules.ChapterStudio_V1.pipeline.quality_inspection import (
     apply_spelling_fixes,
     inspect_lesson,
     inspect_text,
+    strip_cjk,
 )
 
 
 def test_apply_spelling_fixes_rewrites_absolute_value_deterministically() -> None:
     assert apply_spelling_fixes("음수의 절대값이") == "음수의 절댓값이"
+
+
+def test_strip_cjk_removes_cjk_runs_and_compacts_spacing() -> None:
+    cleaned = strip_cjk("가장 最容易한 개념입니다. 특별히 注意하세요.")
+
+    assert cleaned == "가장 한 개념입니다. 특별히 하세요."
+    assert "最容易" not in cleaned
+    assert "注意" not in cleaned
+    assert "  " not in cleaned
+
+
+def test_strip_cjk_keeps_plain_korean_text() -> None:
+    text = "가장 쉬운 개념을 차근차근 설명합니다."
+
+    assert strip_cjk(text) == text
 
 
 def test_inspect_text_detects_cjk_spelling_and_missing_question_mark() -> None:

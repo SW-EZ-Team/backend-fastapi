@@ -11,6 +11,7 @@ from app.modules.ChapterStudio_V1.pipeline.quality_inspection import (
     QualityInspectionReport,
     apply_spelling_fixes,
     inspect_lesson,
+    strip_cjk,
 )
 from app.modules.ChapterStudio_V1.postprocess.visual_renderers import render_visual_slide
 
@@ -106,7 +107,7 @@ async def _polish_text(
 
 
 def _apply_deterministic_spelling_payload(payload: GeneratedLessonPayload) -> GeneratedLessonPayload:
-    """Modal 호출 없이 슬라이드 내레이션과 음성대본의 확정 표기를 보정한다."""
+    """Modal 호출 없이 슬라이드와 음성대본의 확정 표기·CJK 누출을 보정한다."""
     slides = [_apply_deterministic_spelling_slide(slide) for slide in payload.slides]
     voices = [_apply_deterministic_spelling_voice(script) for script in payload.voice_scripts]
     if slides == payload.slides and voices == payload.voice_scripts:
@@ -116,21 +117,29 @@ def _apply_deterministic_spelling_payload(payload: GeneratedLessonPayload) -> Ge
 
 def _apply_deterministic_spelling_slide(slide: GeneratedSlide) -> GeneratedSlide:
     if not slide.narration:
+        html = strip_cjk(slide.html)
+        return slide if html == slide.html else slide.model_copy(update={"html": html})
+    narration = _deterministic_text_fixes(slide.narration)
+    html_source = _rerender_slide_html(slide, narration) if narration != slide.narration else slide.html
+    html = strip_cjk(html_source)
+    if narration == slide.narration and html == slide.html:
         return slide
-    narration = apply_spelling_fixes(slide.narration)
-    if narration == slide.narration:
-        return slide
-    update = {"narration": narration, "html": _rerender_slide_html(slide, narration)}
+    update = {"narration": narration, "html": html}
     if slide.focus == slide.narration:
         update["focus"] = narration
     return slide.model_copy(update=update)
 
 
 def _apply_deterministic_spelling_voice(script: GeneratedVoiceScript) -> GeneratedVoiceScript:
-    script_text = apply_spelling_fixes(script.script_text)
+    script_text = _deterministic_text_fixes(script.script_text)
     if script_text == script.script_text:
         return script
     return script.model_copy(update={"script_text": script_text})
+
+
+def _deterministic_text_fixes(text: str) -> str:
+    """확정 표기 치환 뒤 CJK 문자를 제거해 LLM 토글과 무관한 결과를 만든다."""
+    return strip_cjk(apply_spelling_fixes(text))
 
 
 def _rerender_slide_html(slide: GeneratedSlide, narration: str) -> str:

@@ -64,6 +64,16 @@ async def test_persist_chapter_state_replaces_existing_lesson_rows() -> None:
 
 
 @pytest.mark.anyio
+async def test_persist_chapter_state_writes_meaningful_chapter_studio_slide_title() -> None:
+    conn = FakeConnection()
+
+    await persist_chapter_state(conn, _context(), "chapter_lesson-1", _state())
+
+    slide_args = _args_for(conn, "INSERT INTO chapter_studio.slide")
+    assert slide_args[8] == "핵심 흐름"
+
+
+@pytest.mark.anyio
 async def test_persist_chapter_state_writes_status_summary() -> None:
     conn = FakeConnection()
 
