@@ -1,6 +1,54 @@
 from __future__ import annotations
 
-from app.modules.ChapterStudio_V1.db.title_fallback import meaningful_slide_title
+from app.modules.ChapterStudio_V1.db.title_fallback import extract_heading_title, meaningful_slide_title
+
+
+def test_extract_heading_title_reads_escaped_iframe_srcdoc_h2() -> None:
+    html = (
+        '<iframe sandbox="allow-scripts" '
+        'srcdoc="&lt;!DOCTYPE html&gt;&lt;html&gt;&lt;body&gt;'
+        '&lt;h2&gt;정수 개념의 전체 구조 파악&lt;/h2&gt;'
+        '&lt;/body&gt;&lt;/html&gt;"></iframe>'
+    )
+
+    assert extract_heading_title(html) == "정수 개념의 전체 구조 파악"
+
+
+def test_extract_heading_title_reads_plain_h2_with_attributes() -> None:
+    html = '<section><h2 class="x">자연수의 한계와 음수의 필요성</h2></section>'
+
+    assert extract_heading_title(html) == "자연수의 한계와 음수의 필요성"
+
+
+def test_heading_missing_falls_back_to_voice_phrase() -> None:
+    html = '<iframe srcdoc="&lt;section&gt;&lt;p&gt;본문 설명입니다.&lt;/p&gt;&lt;/section&gt;"></iframe>'
+    title = meaningful_slide_title(
+        "정수의 세계 1",
+        "정수의 세계",
+        0,
+        html,
+        "음수는 기준점보다 작은 위치를 나타냅니다.",
+    )
+
+    assert extract_heading_title(html) == ""
+    assert title.startswith("음수 기준점보다")
+
+
+def test_meaningful_slide_title_prefers_heading_over_voice_phrase() -> None:
+    html = (
+        '<iframe sandbox="allow-scripts" '
+        'srcdoc="&lt;section&gt;&lt;h2&gt;정수 개념의 전체 구조 파악&lt;/h2&gt;&lt;/section&gt;">'
+        "</iframe>"
+    )
+    title = meaningful_slide_title(
+        "정수의 세계 2",
+        "정수의 세계",
+        1,
+        "살펴본 수직선 기억나죠. 음수 위치를 다시 봅니다.",
+        html,
+    )
+
+    assert title == "정수 개념의 전체 구조 파악"
 
 
 def test_meaningful_slide_title_replaces_chapter_number_placeholder() -> None:
