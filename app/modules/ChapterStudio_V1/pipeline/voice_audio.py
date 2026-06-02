@@ -10,6 +10,9 @@ import httpx
 from ai_connectors.registry import get_tts_connector as get_root_tts_connector
 from ai_connectors.tts_schemas import TTSRequest, TTSResponse
 
+from app.modules.ObjectStorage_V1 import (
+    ObjectStorageConfigError, ObjectStorageUploadError, put_object, s3_enabled
+)
 from app.modules.ChapterStudio_V1.ai_connectors.base import TTSConnector
 from app.modules.ChapterStudio_V1.ai_connectors.registry import get_tts_connector
 from app.modules.ChapterStudio_V1.common.config import (
@@ -108,7 +111,7 @@ async def _synthesize_one_routed(
     return {
         "slide_idx": slide_idx,
         "script_text": script_text,
-        "audio_url": _save_audio_bytes(response.audio_bytes, slide_idx, used_plan.engine),
+        "audio_url": await _save_audio_bytes(response.audio_bytes, slide_idx, used_plan.engine),
         "duration_hint_sec": float(response.duration_sec),
         "voice": used_plan.engine,
     }
@@ -134,13 +137,31 @@ async def _load_ref_audio(ref_source: str) -> bytes:
     return Path(ref_source).expanduser().read_bytes()
 
 
-def _save_audio_bytes(audio_bytes: bytes, slide_idx: int, engine: str) -> str:
+async def _save_audio_bytes(audio_bytes: bytes, slide_idx: int, engine: str) -> str:
+    filename = _audio_filename(slide_idx, engine)
+    if s3_enabled():
+        return await _save_audio_to_s3(audio_bytes, filename)
+    return _save_audio_to_local(audio_bytes, filename)
+
+
+async def _save_audio_to_s3(audio_bytes: bytes, filename: str) -> str:
+    key = f"tts/{filename}"
+    try:
+        return await put_object(audio_bytes, key=key, content_type="audio/wav")
+    except (ObjectStorageConfigError, ObjectStorageUploadError) as exc:
+        raise ConversionError(f"TTS 오디오 S3 저장 실패: {exc}") from exc
+
+
+def _save_audio_to_local(audio_bytes: bytes, filename: str) -> str:
     output_dir = tts_output_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{int(time() * 1000)}_{slide_idx}_{_safe_token(engine)}_{uuid4().hex[:8]}.wav"
     path = output_dir / filename
     path.write_bytes(audio_bytes)
     return tts_media_url(filename)
+
+
+def _audio_filename(slide_idx: int, engine: str) -> str:
+    return f"{int(time() * 1000)}_{slide_idx}_{_safe_token(engine)}_{uuid4().hex[:8]}.wav"
 
 
 def _fallback_style(tutor_profile: TutorVoiceProfile) -> str:

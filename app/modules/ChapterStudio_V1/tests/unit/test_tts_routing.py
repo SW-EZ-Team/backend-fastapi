@@ -135,6 +135,36 @@ async def test_synthesize_voice_audio_falls_back_to_gemini_when_qwen_fails(
 
 
 @pytest.mark.asyncio
+async def test_synthesize_voice_audio_uploads_to_s3_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connector = FakeRootTTSConnector("gemini-tts")
+    uploaded: list[dict[str, object]] = []
+
+    def fake_get_connector(name: str) -> FakeRootTTSConnector:
+        assert name == "gemini-tts"
+        return connector
+
+    async def fake_put_object(data: bytes, key: str, content_type: str) -> str:
+        uploaded.append({"data": data, "key": key, "content_type": content_type})
+        return f"https://cdn.example/{key}"
+
+    monkeypatch.setattr(voice_audio, "get_root_tts_connector", fake_get_connector)
+    monkeypatch.setattr(voice_audio, "s3_enabled", lambda: True)
+    monkeypatch.setattr(voice_audio, "put_object", fake_put_object)
+
+    result = await voice_audio.synthesize_voice_audio(
+        [{"slide_idx": 3, "script_text": "S3 업로드 대본입니다."}],
+        tutor_profile=_profile("custom-2", formal=False),
+    )
+
+    assert str(uploaded[0]["key"]).startswith("tts/")
+    assert str(uploaded[0]["key"]).endswith(".wav")
+    assert uploaded[0]["content_type"] == "audio/wav"
+    assert result[0]["audio_url"] == f"https://cdn.example/{uploaded[0]['key']}"
+
+
+@pytest.mark.asyncio
 async def test_synthesize_voice_audio_keeps_original_when_selective_tilde_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
