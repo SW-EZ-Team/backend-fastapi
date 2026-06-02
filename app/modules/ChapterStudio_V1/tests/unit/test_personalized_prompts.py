@@ -103,6 +103,11 @@ def test_parallel_slide_prompt_requires_structured_visual_spec() -> None:
     assert "정형 인트로 반복 금지" in system
     assert "인사말은 첫 슬라이드에서만" in system
     assert "안녕하세요. 오늘 우리가...왜 하필" in system
+    assert "narration은 화면 본문으로 바로 읽히는 2~4문장, 200~360자" in system
+    assert "narration을 절대 비우거나 생략하면 실패" in system
+    assert "metric-card, comparison-table, flow-strip, example-box" in system
+    assert "few-shot text slide" in system
+    assert "오개념 바로잡기" in system
 
 
 def test_slide_and_voice_system_prompts_ban_cjk_characters() -> None:

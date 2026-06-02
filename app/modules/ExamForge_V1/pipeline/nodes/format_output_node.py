@@ -10,6 +10,7 @@ from app.modules.ExamForge_V1.pipeline.nodes.programming_context import looks_li
 from app.modules.ExamForge_V1.quality.metrics import compute_quality_metrics
 from app.modules.ExamForge_V1.quality.cjk_sanitizer import sanitize_exam_questions
 from app.modules.ExamForge_V1.common.logger import get_logger
+from app.modules.ExamForge_V1.common.verification_status import genuine_failed_ids
 
 logger = get_logger(__name__)
 
@@ -189,9 +190,10 @@ def _active_failed_ids(state: ExamForgeState) -> list[str]:
     """최신 검증 리포트 기준의 실패 문항만 반환한다."""
     results = state.get("validation_report", {}).get("results")
     if not isinstance(results, list):
-        return state.get("failed_question_ids", [])
+        questions = state.get("calibrated_questions", [])
+        return genuine_failed_ids(state.get("failed_question_ids", []), questions)
     return [
         r.get("question_id", "")
         for r in results
-        if isinstance(r, dict) and not r.get("passed", False)
+        if isinstance(r, dict) and not r.get("passed", False) and not r.get("parse_failed", False)
     ]

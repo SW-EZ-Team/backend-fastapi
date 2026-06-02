@@ -6,6 +6,11 @@ import time
 from app.modules.ExamForge_V1.pipeline.state import ExamForgeState
 from app.modules.ExamForge_V1.common.ai_bridge import get_current_budget
 from app.modules.ExamForge_V1.common.logger import get_logger
+from app.modules.ExamForge_V1.common.verification_status import (
+    genuine_failed_ids,
+    has_parse_failed_majority,
+    verification_counts,
+)
 
 logger = get_logger(__name__)
 
@@ -49,7 +54,6 @@ def route_after_validation(state: ExamForgeState) -> str:
         logger.warning("LLM 예산 소진 (%d/%d) — 재시도 차단", budget.count, budget.budget)
         return "exhausted"
 
-    failed_ids = state.get("failed_question_ids", [])
     retry_count = state.get("retry_count", 0)
     max_retries = state.get("max_retries", 3)
     error_message = state.get("error_message")
@@ -60,6 +64,7 @@ def route_after_validation(state: ExamForgeState) -> str:
         or state.get("questions", [])
     )
     total = len(questions)
+    failed_ids = genuine_failed_ids(state.get("failed_question_ids", []), questions)
 
     # 결정적 실패 감지: 에러 메시지가 있고 문제가 비어있으면 재시도해도 동일 결과
     if error_message and total == 0:
@@ -81,11 +86,16 @@ def route_after_validation(state: ExamForgeState) -> str:
 
     # --- 품질 지표 게이트: 검증 보고서 확인 ---
     validation_report = state.get("validation_report", {})
+    parse_failed_advisory = (
+        has_parse_failed_majority(questions)
+        and verification_counts(questions)["failed"] == 0
+        and not failed_ids
+    )
 
     # validate_node 이후에는 품질 게이트를 적용하되, 테스트 더블/중간 상태처럼
     # validation_report 자체가 없으면 구조적 실패율만으로 판단한다.
     accuracy_rate = validation_report.get("answer_accuracy_rate")
-    if isinstance(accuracy_rate, (int, float)) and accuracy_rate < 0.95:
+    if isinstance(accuracy_rate, (int, float)) and accuracy_rate < 0.95 and not parse_failed_advisory:
         _dest = "exhausted" if retry_count >= max_retries else "retry"
         logger.info("route_after_validation: 정확률 %.2f (< 0.95) — %s", accuracy_rate, _dest)
         return _dest

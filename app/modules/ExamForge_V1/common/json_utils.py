@@ -94,6 +94,12 @@ def parse_llm_json(text: str) -> Any:
             data, _ = decoder.raw_decode(stripped)
             return data
         except json.JSONDecodeError:
+            for candidate in _candidate_json_blocks(strip_thinking(text)):
+                fixed = _fix_unescaped_backslashes(candidate)
+                try:
+                    return json.loads(fixed)
+                except json.JSONDecodeError:
+                    continue
             yaml_data = parse_yaml_jsonish(stripped)
             if yaml_data is not None:
                 return yaml_data
@@ -161,6 +167,21 @@ def _trim_to_first_json(text: str) -> str:
     if end == -1:
         return text[start_idx:].strip()
     return text[start_idx:end + 1].strip()
+
+
+def _candidate_json_blocks(text: str) -> list[str]:
+    """설명문 속 모든 JSON 객체/배열 후보를 앞에서부터 반환한다."""
+    candidates: list[str] = []
+    for index, char in enumerate(text):
+        if char == "{":
+            end = _find_matching_close(text, index, "{", "}")
+        elif char == "[":
+            end = _find_matching_close(text, index, "[", "]")
+        else:
+            continue
+        if end != -1:
+            candidates.append(text[index:end + 1].strip())
+    return candidates
 
 
 def _find_matching_close(

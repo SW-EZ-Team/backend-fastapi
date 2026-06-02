@@ -46,6 +46,17 @@ class TestRobustJsonExtraction:
         parsed = parse_llm_json(raw)
         assert parsed["topics"][0]["name"] == "Rust"
 
+    def test_parse_llm_json_handles_inline_json_fence(self) -> None:
+        """줄바꿈 없는 json 코드펜스에서도 객체를 추출한다."""
+        parsed = parse_llm_json('```json{"passed": true, "issues": []}```')
+        assert parsed == {"passed": True, "issues": []}
+
+    def test_parse_llm_json_skips_markdown_bracket_before_object(self) -> None:
+        """설명용 대괄호가 JSON 배열로 오인돼도 뒤쪽 객체를 다시 찾는다."""
+        raw = '[검증 결과]\n정답은 맞습니다.\n{"passed": true, "issues": []}'
+        parsed = parse_llm_json(raw)
+        assert parsed["passed"] is True
+
     def test_parse_llm_json_uses_yaml_for_jsonish_output(self) -> None:
         """따옴표 없는 키를 섞은 JSON 유사 출력도 마지막 수단으로 파싱한다."""
         parsed = parse_llm_json('[{stem: Rust move, difficulty: 3}]')

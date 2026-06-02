@@ -8,7 +8,7 @@ from typing import cast
 
 def svg_block(class_name: str, view_box: str, body: str) -> str:
     """공통 SVG 껍데기를 만든다."""
-    return f'<svg class="{class_name}" xmlns="http://www.w3.org/2000/svg" viewBox="{view_box}" role="img" aria-label="시각 자료">{body}</svg>'
+    return f'<svg class="{class_name}" xmlns="http://www.w3.org/2000/svg" viewBox="{view_box}" role="img" aria-label="학습 도식">{body}</svg>'
 
 
 def card(data: Mapping[str, object]) -> str:

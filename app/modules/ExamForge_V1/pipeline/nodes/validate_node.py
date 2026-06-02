@@ -15,6 +15,14 @@ from app.modules.ExamForge_V1.quality.explanation_checker import check_explanati
 from app.modules.ExamForge_V1.common.logger import get_logger
 from app.modules.ExamForge_V1.pipeline.nodes.programming_context import has_code_snippets
 from app.modules.ExamForge_V1.pipeline.nodes.programming_context import looks_like_programming_source
+from app.modules.ExamForge_V1.common.verification_status import (
+    answer_accuracy_rate,
+    is_genuine_fail,
+    is_parse_failed,
+    is_verified_pass,
+    parse_failed_ratio,
+    verification_counts,
+)
 
 logger = get_logger(__name__)
 
@@ -54,16 +62,18 @@ async def validate_node(state: ExamForgeState) -> dict:
     coverage_score, uncovered = _validate_global(questions, topic_weights)
     if uncovered:
         global_issues.append(f"미커버 주제: {', '.join(uncovered[:5])}")
+    global_issues.extend(_verification_advisory_issues(questions))
     _apply_programming_code_gate(state, questions, failed_ids, global_issues)
 
     # 정답 정확률 계산
     accuracy_rate = _compute_accuracy_rate(questions)
+    verification_summary = verification_counts(questions)
 
     # AKAR: 정확률 0.95 미만이면 미통과 문제를 재시도 목록에 추가
     if accuracy_rate < 0.95:
         for q in questions:
             verification = q.get("_verification")
-            if verification is None or not verification.get("passed", False):
+            if _needs_accuracy_retry(verification):
                 draft_id = q.get("draft_id", q.get("question_id", ""))
                 if draft_id and draft_id not in failed_ids:
                     failed_ids.append(draft_id)
@@ -74,6 +84,9 @@ async def validate_node(state: ExamForgeState) -> dict:
         "coverage_score": coverage_score,
         "dedup_score": dedup_score,
         "answer_accuracy_rate": accuracy_rate,
+        "answer_verification_parse_failed_count": verification_summary["parse_failed"],
+        "answer_verification_parse_failed_ratio": parse_failed_ratio(questions),
+        "answer_verification_evaluable_count": verification_summary["evaluable"],
     }
 
     logger.info("노드 완료: validate_node (%.2fs)", time.time() - node_start)
@@ -100,8 +113,10 @@ def _validate_structure(
 
         # 교차 모델 검증 결과 포함
         verification = q.get("_verification", {})
-        if not verification.get("passed", False):
+        if is_genuine_fail(verification):
             issues.extend(verification.get("issues", []))
+        elif verification == {}:
+            issues.append("정답 검증 결과 없음")
 
         passed = len(issues) == 0
         if not passed:
@@ -111,6 +126,7 @@ def _validate_structure(
             "question_id": q_id,
             "passed": passed,
             "issues": issues,
+            "parse_failed": is_parse_failed(verification),
         })
 
     return results, failed_ids
@@ -194,13 +210,22 @@ def _validate_global(
 
 def _compute_accuracy_rate(questions: list[dict]) -> float:
     """교차 검증 통과율을 계산한다."""
-    if not questions:
-        return 0.0
-    verified_count = sum(
-        1 for q in questions
-        if q.get("_verification", {}).get("passed", False)
-    )
-    return verified_count / len(questions)
+    return answer_accuracy_rate(questions)
+
+
+def _needs_accuracy_retry(verification: object) -> bool:
+    """정확률 게이트에서 재시도 대상으로 볼 검증 상태인지 확인한다."""
+    if is_parse_failed(verification):
+        return False
+    return not is_verified_pass(verification)
+
+
+def _verification_advisory_issues(questions: list[dict]) -> list[str]:
+    """검증 파싱 실패는 경고만 남기고 실패 목록에는 넣지 않는다."""
+    count = verification_counts(questions)["parse_failed"]
+    if count == 0:
+        return []
+    return [f"검증 응답 파싱 실패 {count}건 — 정답 오류가 아닌 advisory로 분리"]
 
 
 def _apply_programming_code_gate(

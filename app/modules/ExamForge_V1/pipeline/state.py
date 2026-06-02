@@ -13,6 +13,7 @@ class ValidationResult(TypedDict):
     # validate_node가 항상 생성하지 않으므로 선택 필드로 선언
     fix_instructions: NotRequired[str]
     retry_count: NotRequired[int]
+    parse_failed: NotRequired[bool]
 
 
 class ValidationReport(TypedDict):
@@ -23,6 +24,9 @@ class ValidationReport(TypedDict):
     coverage_score: float
     dedup_score: float
     answer_accuracy_rate: float
+    answer_verification_parse_failed_count: NotRequired[int]
+    answer_verification_parse_failed_ratio: NotRequired[float]
+    answer_verification_evaluable_count: NotRequired[int]
 
 
 class ExamForgeState(TypedDict, total=False):
@@ -79,6 +83,9 @@ class ExamForgeState(TypedDict, total=False):
     # verify_answers 출력
     verified_questions: list[dict]
     verification_failures: list[str]
+    verification_parse_failed_count: int
+    verification_parse_failed_ratio: float
+    verification_advisory: bool
 
     # validate 출력
     validation_report: dict

@@ -228,3 +228,17 @@ class TestMetrics:
         assert "dedup_score" in metrics
         assert "coverage_score" in metrics
         assert metrics["answer_accuracy_rate"] == 1.0
+
+    def test_parse_failed_verification_is_advisory_metric(self) -> None:
+        """검증 파싱 실패만 있으면 정답 실패율로 계산하지 않는다."""
+        metrics = compute_quality_metrics(
+            questions=[{"question_id": "q1", "stem": "문제", "topic": "A", "bloom_level": "이해"}],
+            topic_weights={"A": 1.0},
+            verification_results=[{"passed": None, "parse_failed": True}],
+            generation_time_sec=1.0,
+            retry_count=0,
+        )
+
+        assert metrics["answer_accuracy_rate"] == 1.0
+        assert metrics["answer_verification_parse_failed_count"] == 1
+        assert metrics["answer_verification_evaluable_count"] == 0

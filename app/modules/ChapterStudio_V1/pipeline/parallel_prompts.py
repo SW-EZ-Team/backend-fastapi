@@ -1,6 +1,7 @@
 """컴포넌트 병렬 생성용 프롬프트 빌더와 응답 파서."""
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Literal, cast
 
@@ -62,7 +63,7 @@ class _VisualSlideResult(BaseModel):
     slide_idx: int = Field(ge=0, le=14)
     title: str = Field(min_length=1)
     category: VisualSlideCategory
-    narration: str = Field(min_length=1, max_length=220)
+    narration: str = Field(min_length=1, max_length=420)
     visual: _VisualSpecResult
     checkpoint: str = Field(min_length=1)
 
@@ -248,7 +249,7 @@ def _fallback_slide(data: dict[object, object]) -> GeneratedSlide:
     if not isinstance(slide_idx, int):
         raise ValueError("slide_idx 정수가 필요하다.")
     title = _text_value(data.get("title"), f"슬라이드 {slide_idx + 1}")
-    narration = _text_value(data.get("narration"), "핵심 내용을 예제 카드로 정리한다.")
+    narration = _fallback_narration(data, title)
     checkpoint = _text_value(data.get("checkpoint"), "핵심 조건을 말로 확인할 수 있는가?")
     category = _category_value(data.get("category"))
     html = render_fallback_visual(title, narration)
@@ -267,6 +268,74 @@ def _fallback_slide(data: dict[object, object]) -> GeneratedSlide:
 
 def _text_value(value: object, default: str) -> str:
     return value if isinstance(value, str) and value else default
+
+
+def _fallback_narration(data: dict[object, object], title: str) -> str:
+    """빈 narration을 실제 슬라이드 맥락에서 만든 문장으로 대체한다."""
+    raw = _text_value(data.get("narration"), "")
+    if _is_specific_narration(raw):
+        return raw.strip()
+    voice_text = _voice_text(data.get("voice_script")) or _text_value(data.get("script_text"), "")
+    if _is_specific_narration(voice_text):
+        return _compact_sentences(voice_text)
+    focus_text = _first_specific_text(data, ("focus", "summary", "description", "role"))
+    if focus_text:
+        return _title_focus_sentence(title, focus_text)
+    return _title_focus_sentence(title, "")
+
+
+def _voice_text(value: object) -> str:
+    """voice_script가 같은 객체에 들어온 legacy 응답이면 본문 후보로 꺼낸다."""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, Mapping):
+        script = value.get("script_text")
+        return script.strip() if isinstance(script, str) else ""
+    return ""
+
+
+def _first_specific_text(data: dict[object, object], keys: tuple[str, ...]) -> str:
+    """focus·summary 계열 필드에서 플레이스홀더가 아닌 첫 문장을 찾는다."""
+    for key in keys:
+        value = _text_value(data.get(key), "")
+        if _is_specific_narration(value):
+            return value.strip()
+    return ""
+
+
+def _title_focus_sentence(title: str, focus: str) -> str:
+    """voice가 없을 때 제목과 초점만으로도 화면 본문이 비지 않게 만든다."""
+    if focus:
+        normalized = focus.rstrip(".!?。！？")
+        return _compact_sentences(f"{title}에서는 {normalized}. 이 기준을 실제 예시에 적용해 확인합니다.")
+    return f"{title}에서는 핵심 기준을 실제 예시와 연결해 확인합니다."
+
+
+def _compact_sentences(text: str, max_chars: int = 360) -> str:
+    """긴 음성대본에서 앞쪽 1~2문장만 뽑아 화면 본문 길이로 줄인다."""
+    cleaned = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).strip()
+    sentences = re.findall(r"[^.!?。！？]+[.!?。！？]?", cleaned)
+    compact = " ".join(part.strip() for part in sentences[:2] if part.strip()) or cleaned
+    if len(compact) <= max_chars:
+        return compact
+    return compact[:max_chars].rsplit(" ", 1)[0].strip() or compact[:max_chars].strip()
+
+
+def _is_specific_narration(value: str) -> bool:
+    """빈 값과 기존 generic fallback 문구를 실제 본문 후보에서 제외한다."""
+    text = value.strip()
+    if not text:
+        return False
+    placeholders = {
+        "시각 자료",
+        "핵심 조건을 다시 확인한다",
+        "핵심 조건을 다시 확인한다.",
+        "핵심 내용을 예제 카드로 정리한다",
+        "핵심 내용을 예제 카드로 정리한다.",
+        "핵심을 시각적으로 확인한다",
+        "핵심을 시각적으로 확인한다.",
+    }
+    return text not in placeholders
 
 
 def _category_value(value: object) -> SlideCategory:

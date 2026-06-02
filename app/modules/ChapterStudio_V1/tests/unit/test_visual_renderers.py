@@ -13,6 +13,7 @@ from app.modules.ChapterStudio_V1.postprocess.visual_renderers import (
     render_fraction_bar,
     render_number_line,
     render_step_flow,
+    render_visual,
     render_visual_slide,
 )
 
@@ -84,3 +85,27 @@ def test_fallback_visual_hides_internal_recovery_message() -> None:
     assert "example-box-visual" in html
     assert internal_card_message not in html
     assert internal_recovery_word not in html
+
+
+def test_fallback_visual_uses_actual_narration_when_title_is_generic() -> None:
+    html = render_fallback_visual("시각 자료", "음수는 수직선에서 오른쪽에 있을수록 더 큽니다.")
+
+    assert "시각 자료" not in html
+    assert "음수는 수직선에서 오른쪽에 있을수록 더 큽니다" in html
+    assert "핵심 조건을 다시 확인한다" not in html
+
+
+def test_text_visual_pattern_aliases_render_specific_markup() -> None:
+    metric_html = render_visual("metric-card", {"title": "기준", "value": "오른쪽이 큼"})
+    flow_html = render_visual("flow-strip", {"steps": [{"label": "확인", "detail": "0 위치를 찾는다."}]})
+    table_html = render_visual(
+        "comparison-table",
+        {
+            "left": {"title": "오개념", "items": ["절댓값만 본다"]},
+            "right": {"title": "정답", "items": ["수직선 위치를 본다"]},
+        },
+    )
+
+    assert "metric-card" in metric_html
+    assert "flow-strip" in flow_html
+    assert "comparison-table" in table_html

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from app.modules.ChapterStudio_V1.postprocess.visual_renderer_utils import (
@@ -144,6 +145,45 @@ def render_example_box(spec: Spec) -> str:
     return f'<div class="example-box-visual">{icon}<div><h3>{problem}</h3><ol>{rows}</ol><p class="visual-answer">{answer}</p></div></div>'
 
 
+def render_metric_card(spec: Spec) -> str:
+    """핵심 수치·기준을 카드형 텍스트 시각화로 렌더링한다."""
+    title = _text(spec.get("title"), _text(spec.get("problem"), "학습 포인트"))
+    value = _text(spec.get("value"), _first_item_text(spec, "핵심 기준"))
+    caption = _text(spec.get("caption"), _text(spec.get("answer"), value))
+    return (
+        '<article class="metric-card">'
+        f"<h3>{title}</h3><strong>{value}</strong><p>{caption}</p>"
+        "</article>"
+    )
+
+
+def render_comparison_table(spec: Spec) -> str:
+    """comparison-table 패턴을 실제 표 형태로 렌더링한다."""
+    left = _mapping(spec.get("left"))
+    right = _mapping(spec.get("right"))
+    left_title = _text(left.get("title"), "비교 A")
+    right_title = _text(right.get("title"), "비교 B")
+    rows = _comparison_rows(_items(left.get("items")), _items(right.get("items")))
+    body = "".join(f"<tr><td>{a}</td><td>{b}</td></tr>" for a, b in rows)
+    verdict = _text(spec.get("verdict"), f"{left_title}와 {right_title}의 차이를 확인한다.")
+    return (
+        '<table class="comparison-table"><thead><tr>'
+        f"<th>{left_title}</th><th>{right_title}</th></tr></thead>"
+        f"<tbody>{body}</tbody></table><p class=\"visual-verdict\">{verdict}</p>"
+    )
+
+
+def render_flow_strip(spec: Spec) -> str:
+    """flow-strip 패턴을 가로 흐름 카드로 렌더링한다."""
+    steps = _records(spec.get("steps")) or [{"label": "확인", "detail": _first_item_text(spec, "핵심을 확인한다.")}]
+    cards = []
+    for idx, step in enumerate(steps[:5]):
+        label = _text(step.get("label"), f"{idx + 1}단계")
+        detail = _text(step.get("detail"), _text(step.get("result"), "다음 기준을 확인한다."))
+        cards.append(f'<article><b>{label}</b><span>{detail}</span></article>')
+    return f'<div class="flow-strip">{"".join(cards)}</div>'
+
+
 def render_visual(visual_type: str, data: Spec) -> str:
     """visual.type에 맞는 렌더러를 선택한다."""
     renderer = _RENDERERS.get(visual_type, render_example_box)
@@ -159,31 +199,95 @@ def render_visual_slide(title: str, narration: str, visual_type: str, data: Spec
     )
 
 
-def render_fallback_visual(title: str = "시각 자료", narration: str = "핵심 조건을 다시 확인한다.") -> str:
+def render_fallback_visual(title: str = "학습 포인트", narration: str = "") -> str:
     """렌더 실패나 HTML 품질 실패 시 쓸 안전한 SVG 폴백을 만든다."""
+    actual_title = _specific_text(title) or _title_from_narration(narration)
+    actual_narration = _specific_text(narration) or f"{actual_title}를 실제 예시와 연결해 확인합니다."
     data = {
-        "problem": title,
-        "steps": [narration, "핵심 조건을 표시하고 답을 확인한다."],
-        "answer": "핵심 포인트를 차근차근 확인한다.",
+        "problem": actual_title,
+        "steps": _fallback_steps(actual_title, actual_narration),
+        "answer": f"{actual_title} 기준을 적용해 스스로 설명합니다.",
     }
-    return render_visual_slide(title, narration, "example_box", data)
+    return render_visual_slide(actual_title, actual_narration, "example_box", data)
+
+
+def _comparison_rows(left: list[str], right: list[str]) -> list[tuple[str, str]]:
+    """좌우 항목 길이가 달라도 표 행을 잃지 않게 맞춘다."""
+    size = max(len(left), len(right), 1)
+    return [
+        (
+            _text(left[idx], "") if idx < len(left) else "",
+            _text(right[idx], "") if idx < len(right) else "",
+        )
+        for idx in range(size)
+    ]
+
+
+def _first_item_text(spec: Spec, default: str) -> str:
+    """items·steps 계열에서 첫 의미 있는 텍스트를 꺼낸다."""
+    items = _items(spec.get("items"))
+    if items:
+        return items[0]
+    steps = _records(spec.get("steps"))
+    if steps:
+        step = steps[0]
+        return _text(step.get("detail"), _text(step.get("label"), default))
+    return default
+
+
+def _fallback_steps(title: str, narration: str) -> list[str]:
+    """전달된 본문을 예제 박스 단계로 재사용한다."""
+    first = _first_sentence(narration)
+    second = f"{title}에서 확인한 기준을 한 번 더 적용합니다."
+    return [first, second] if first != second else [first]
+
+
+def _first_sentence(text: str) -> str:
+    """긴 본문에서 첫 문장만 단계 카드에 넣는다."""
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    match = re.match(r"[^.!?。！？]+[.!?。！？]?", cleaned)
+    return match.group(0).strip() if match else cleaned
+
+
+def _title_from_narration(narration: str) -> str:
+    """제목이 generic이면 narration 앞부분을 제목 후보로 압축한다."""
+    text = _specific_text(narration)
+    if not text:
+        return "학습 포인트"
+    return _first_sentence(text)[:24].strip() or "학습 포인트"
+
+
+def _specific_text(value: str) -> str:
+    """기존 generic fallback 문구를 실제 콘텐츠로 취급하지 않는다."""
+    text = value.strip()
+    placeholders = {"시각 자료", "핵심 조건을 다시 확인한다.", "핵심 조건을 다시 확인한다", ""}
+    return "" if text in placeholders else text
 
 
 _RENDERERS: dict[str, Renderer] = {
     "number_line": render_number_line,
     "comparison": render_comparison,
+    "comparison-table": render_comparison_table,
+    "comparison_table": render_comparison_table,
     "step_flow": render_step_flow,
+    "flow-strip": render_flow_strip,
+    "flow_strip": render_flow_strip,
     "fraction_bar": render_fraction_bar,
     "concept_map": render_concept_map,
     "example_box": render_example_box,
+    "example-box": render_example_box,
+    "metric-card": render_metric_card,
+    "metric_card": render_metric_card,
 }
 
 __all__ = [
     "render_comparison",
     "render_concept_map",
     "render_example_box",
+    "render_flow_strip",
     "render_fallback_visual",
     "render_fraction_bar",
+    "render_metric_card",
     "render_number_line",
     "render_step_flow",
     "render_visual",

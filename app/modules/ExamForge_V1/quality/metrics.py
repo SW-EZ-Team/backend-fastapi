@@ -3,6 +3,11 @@ from __future__ import annotations
 
 import math
 
+from app.modules.ExamForge_V1.common.verification_status import (
+    is_genuine_fail,
+    is_parse_failed,
+    is_verified_pass,
+)
 from .deduplicator import check_duplicates
 from .difficulty_scorer import score_bloom_distribution
 from .coverage_analyzer import analyze_coverage
@@ -16,12 +21,7 @@ def compute_quality_metrics(
     retry_count: int,
 ) -> dict:
     """모든 품질 지표를 계산하여 딕셔너리로 반환한다."""
-    # 정답 정확률 (검증 통과율)
-    if verification_results:
-        passed = sum(1 for v in verification_results if v.get("passed"))
-        accuracy_rate = passed / len(verification_results)
-    else:
-        accuracy_rate = 0.0
+    accuracy_rate, verification_summary = _verification_accuracy(verification_results)
 
     # 중복 점수
     dedup_score, _ = check_duplicates(questions)
@@ -40,6 +40,9 @@ def compute_quality_metrics(
 
     return {
         "answer_accuracy_rate": round(accuracy_rate, 3),
+        "answer_verification_parse_failed_count": verification_summary["parse_failed"],
+        "answer_verification_parse_failed_ratio": round(verification_summary["parse_failed_ratio"], 3),
+        "answer_verification_evaluable_count": verification_summary["evaluable"],
         "dedup_score": round(dedup_score, 3),
         "coverage_score": round(coverage_score, 3),
         "distractor_plausibility_score": round(dps, 3),
@@ -48,6 +51,35 @@ def compute_quality_metrics(
         "retry_count": retry_count,
         "generation_time_sec": round(generation_time_sec, 2),
     }
+
+
+def _verification_accuracy(verification_results: list[dict]) -> tuple[float, dict[str, int | float]]:
+    """parse_failed를 정답 실패율에서 제외하고 별도 지표로 집계한다."""
+    summary: dict[str, int | float] = {
+        "passed": 0,
+        "failed": 0,
+        "parse_failed": 0,
+        "evaluable": 0,
+        "parse_failed_ratio": 0.0,
+    }
+    for result in verification_results:
+        if is_parse_failed(result):
+            summary["parse_failed"] += 1
+            continue
+        if is_verified_pass(result):
+            summary["passed"] += 1
+            summary["evaluable"] += 1
+            continue
+        if is_genuine_fail(result):
+            summary["failed"] += 1
+            summary["evaluable"] += 1
+    total = len(verification_results)
+    summary["parse_failed_ratio"] = summary["parse_failed"] / total if total else 0.0
+    if summary["evaluable"]:
+        return summary["passed"] / summary["evaluable"], summary
+    if total and summary["parse_failed"] == total:
+        return 1.0, summary
+    return 0.0, summary
 
 
 def _compute_distractor_plausibility(questions: list[dict]) -> float:

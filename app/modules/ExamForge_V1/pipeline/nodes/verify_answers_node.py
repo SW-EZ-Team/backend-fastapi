@@ -1,6 +1,12 @@
 """교차 모델 정답 검증 노드."""
 from __future__ import annotations
 from app.modules.ExamForge_V1.common.json_utils import parse_llm_json
+from app.modules.ExamForge_V1.common.verification_status import (
+    has_parse_failed_majority,
+    is_genuine_fail,
+    is_parse_failed,
+    parse_failed_ratio,
+)
 
 import asyncio
 import json
@@ -39,7 +45,7 @@ async def verify_answers_node(state: ExamForgeState) -> dict:
         semaphore = asyncio.Semaphore(verification_concurrency())
     except Exception as exc:
         logger.error("검증 커넥터 초기화 실패: %s", exc)
-        # 검증 불가 시 모든 문제를 실패로 표시해 품질 게이트가 무력화되지 않도록 한다
+        # 커넥터 초기화 실패는 파싱 문제가 아니라 인프라 장애이므로 기존 품질 게이트를 유지한다.
         verified = []
         for q in questions:
             q_copy = q.copy()
@@ -78,17 +84,11 @@ async def verify_answers_node(state: ExamForgeState) -> dict:
                 return q_copy
             try:
                 result = parse_llm_json(resp.text)
-                # LLM 응답이 dict가 아닌 경우 방어 — 리스트나 문자열 반환 시 실패 처리
                 if not isinstance(result, dict):
                     raise ValueError("검증 응답이 dict가 아님")
-                q_copy["_verification"] = result
-            except (ValueError, KeyError, TypeError):
-                # 파싱 실패 시 통과 처리 대신 실패로 표시해 재검증을 유도한다.
-                # 검증 불가 문제를 묵묵히 통과시키면 품질 게이트가 무력화된다.
-                q_copy["_verification"] = {
-                    "passed": False,
-                    "issues": ["검증 응답 파싱 실패 — 재검증 필요"],
-                }
+                q_copy["_verification"] = _normalize_verification(result)
+            except (ValueError, KeyError, TypeError) as exc:
+                q_copy["_verification"] = _parse_failed_verification(exc)
             return q_copy
 
     raw_results = await asyncio.gather(
@@ -108,16 +108,69 @@ async def verify_answers_node(state: ExamForgeState) -> dict:
             fallback["_verification"] = {"passed": False, "issues": ["검증 커넥터 예외 발생 — 재검증 필요"]}
             verified.append(fallback)
 
-    # 실패 목록은 gather 완료 후 검증 결과만 읽어 구성 (경쟁 조건 없음)
+    if has_parse_failed_majority(verified):
+        logger.warning("검증 응답 파싱 실패 다수 감지 — parse_failed 문항 1회 재검증")
+        retry_results = await asyncio.gather(
+            *[_verify_one(questions[i]) for i, q in enumerate(verified) if is_parse_failed(q.get("_verification"))],
+            return_exceptions=True,
+        )
+        _replace_parse_failed_results(verified, retry_results)
+        if has_parse_failed_majority(verified):
+            logger.warning(
+                "검증기 응답 포맷 신뢰불가(parse_failed %.1f%%) — 파싱 실패는 advisory로 분리",
+                parse_failed_ratio(verified) * 100,
+            )
+
+    # 실패 목록은 genuine fail만 담는다. parse_failed는 advisory라 재생성 실패율에 넣지 않는다.
     failures = [
         v.get("question_id", "")
         for v in verified
-        if not v.get("_verification", {}).get("passed", False)
+        if is_genuine_fail(v.get("_verification"))
     ]
+    parse_ratio = parse_failed_ratio(verified)
 
     logger.info("노드 완료: verify_answers_node (%.2fs)", time.time() - node_start)
     return {
         "verified_questions": verified,
         "verification_failures": failures,
+        "verification_parse_failed_count": sum(
+            1 for q in verified if is_parse_failed(q.get("_verification"))
+        ),
+        "verification_parse_failed_ratio": parse_ratio,
+        "verification_advisory": parse_ratio >= 0.5 and not failures,
         "pipeline_status": "validating",
     }
+
+
+def _normalize_verification(result: dict) -> dict:
+    """검증 응답 dict를 내부 계약에 맞게 정규화한다."""
+    passed = result.get("passed")
+    if not isinstance(passed, bool):
+        raise ValueError("검증 응답 passed 불리언 누락")
+    normalized = dict(result)
+    issues = normalized.get("issues", [])
+    if not isinstance(issues, list):
+        issues = [str(issues)]
+    normalized["issues"] = [str(issue) for issue in issues]
+    normalized["parse_failed"] = False
+    return normalized
+
+
+def _parse_failed_verification(exc: Exception) -> dict:
+    """파싱 실패를 genuine fail이 아닌 별도 검증불가 상태로 표시한다."""
+    return {
+        "passed": None,
+        "parse_failed": True,
+        "issues": [f"검증 응답 파싱 실패 — advisory 재검증 필요: {exc}"],
+    }
+
+
+def _replace_parse_failed_results(verified: list[dict], retry_results: list[object]) -> None:
+    """재검증 결과를 기존 parse_failed 위치에만 덮어쓴다."""
+    retry_iter = iter(retry_results)
+    for index, question in enumerate(verified):
+        if not is_parse_failed(question.get("_verification")):
+            continue
+        result = next(retry_iter, None)
+        if isinstance(result, dict):
+            verified[index] = result
