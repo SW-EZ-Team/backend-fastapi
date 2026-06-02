@@ -84,8 +84,9 @@ def _profile(context: GenerationContext | None, tutor_id: str | None) -> TutorVo
             use_formal_speech=use_formal_speech,
             tutor_tagline=tutor_tagline,
         )
+    resolved_tutor_id = context.tutor_id if context is not None else ""
     return TutorVoiceProfile(
-        tutor_id="",
+        tutor_id=resolved_tutor_id,
         is_default_tutor=context.is_default_tutor if context is not None else True,
         voice_sample_url=context.voice_sample_url if context is not None else "",
         use_formal_speech=use_formal_speech,

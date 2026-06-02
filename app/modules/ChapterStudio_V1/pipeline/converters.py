@@ -42,6 +42,7 @@ def generation_input_to_initial_state(req: GenerationInput) -> ChapterStudioStat
         "tutor_name": req.tutor_name,
         "tutor_tagline": req.tutor_tagline,
         "is_default_tutor": req.is_default_tutor,
+        "tutor_id": req.tutor_id,
         "voice_sample_url": req.voice_sample_url,
         "audience_level": req.audience_level,
         "learning_goal": req.learning_goal,

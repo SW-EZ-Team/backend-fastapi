@@ -26,6 +26,7 @@ class GenerationInput(BaseModel):
     tutor_name: str = ""
     tutor_tagline: str = ""
     is_default_tutor: bool = True
+    tutor_id: str = ""
     voice_sample_url: str = ""
     audience_level: str = "일반 학습자"
     learning_goal: str = "핵심 개념 이해와 실습"
@@ -61,6 +62,7 @@ class GenerationContext(BaseModel):
     tutor_name: str = Field(default="", max_length=80)
     tutor_tagline: str = Field(default="", max_length=160)
     is_default_tutor: bool = True
+    tutor_id: str = Field(default="", max_length=30)
     voice_sample_url: str = Field(default="", max_length=1000)
     audience_level: str = Field(default="일반 학습자", max_length=80)
     learning_goal: str = Field(default="핵심 개념 이해와 실습", max_length=160)
@@ -89,6 +91,7 @@ class GenerationContext(BaseModel):
             tutor_name=self.tutor_name,
             tutor_tagline=self.tutor_tagline,
             is_default_tutor=self.is_default_tutor,
+            tutor_id=self.tutor_id,
             voice_sample_url=self.voice_sample_url,
             audience_level=self.audience_level,
             learning_goal=self.learning_goal,

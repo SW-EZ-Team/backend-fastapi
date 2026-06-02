@@ -20,6 +20,9 @@ x-fastapi-common: &fastapi-common
     AGENT_JOB_STORE: ${AGENT_JOB_STORE:-redis}
     AGENT_JOB_STORE_STRICT: ${AGENT_JOB_STORE_STRICT:-1}
     AGENT_JOB_EXECUTOR: ${AGENT_JOB_EXECUTOR:-celery}
+    MEDIA_ROOT_DIR: ${MEDIA_ROOT_DIR:-/app/media}
+  volumes:
+    - fastapi-media:/app/media
   restart: unless-stopped
   networks:
     - sw-ez-shared
@@ -55,3 +58,6 @@ services:
     command: ["celery", "-A", "app.celery_app", "beat", "-l", "info"]
     depends_on:
       - api
+
+volumes:
+  fastapi-media:

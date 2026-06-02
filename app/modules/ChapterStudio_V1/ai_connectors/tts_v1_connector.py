@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from time import time
-from uuid import uuid4
 
 import httpx
 
 from app.modules.ChapterStudio_V1.ai_connectors.errors import ConnectorError, TimeoutError
-from app.modules.ChapterStudio_V1.common.config import tts_endpoint, tts_output_dir, tts_ref_audio_path, tts_ref_text, tts_timeout_sec
+from app.modules.ChapterStudio_V1.ai_connectors.tts_audio_storage import save_tts_wav_bytes
+from app.modules.ChapterStudio_V1.common.config import tts_endpoint, tts_ref_audio_path, tts_ref_text, tts_timeout_sec
 
 
 class TTSV1Connector:
@@ -21,7 +20,6 @@ class TTSV1Connector:
         self._endpoint = endpoint
         self._ref_audio_path = tts_ref_audio_path()
         self._ref_text = tts_ref_text()
-        self._output_dir = tts_output_dir()
         self._client = httpx.AsyncClient(timeout=tts_timeout_sec())
 
     async def synthesize(self, text: str, voice: str = "f1") -> dict[str, str | float]:
@@ -53,7 +51,7 @@ class TTSV1Connector:
                 files={"ref_audio": (ref_path.name, ref_path.read_bytes(), _media_type(ref_path))},
             )
             response.raise_for_status()
-            return _saved_audio_payload(response, self._output_dir, voice, text)
+            return await _saved_audio_payload(response, voice, text)
         except httpx.TimeoutException as e:
             raise TimeoutError(f"TTS V1 타임아웃: {e}") from e
         except httpx.HTTPStatusError as e:
@@ -84,6 +82,8 @@ def _validated_payload(payload: object) -> dict[str, str | float]:
     duration_sec = payload.get("duration_sec")
     if not isinstance(audio_url, str):
         raise ConnectorError("TTS V1 응답에 audio_url이 없다.")
+    if audio_url.startswith("file://"):
+        raise ConnectorError("TTS V1 응답 audio_url은 file:// 일 수 없다.")
     if not isinstance(duration_sec, int | float) or duration_sec <= 0:
         raise ConnectorError("TTS V1 응답에 duration_sec가 없다.")
     return {"audio_url": audio_url, "duration_sec": float(duration_sec)}
@@ -96,15 +96,12 @@ def _audio_form_data(text: str, voice: str, ref_text: str | None) -> dict[str, s
     return data
 
 
-def _saved_audio_payload(response: httpx.Response, output_dir: Path, voice: str, text: str) -> dict[str, str | float]:
+async def _saved_audio_payload(response: httpx.Response, voice: str, text: str) -> dict[str, str | float]:
     content_type = response.headers.get("content-type", "audio/wav").split(";")[0]
     if not content_type.startswith("audio/"):
         raise ConnectorError("TTS V1 응답이 오디오 형식이 아니다.")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    audio_path = output_dir / f"{int(time() * 1000)}_{_safe_token(voice)}_{uuid4().hex[:8]}.wav"
-    audio_path.write_bytes(response.content)
     return {
-        "audio_url": audio_path.resolve().as_uri(),
+        "audio_url": await save_tts_wav_bytes(response.content, voice),
         "duration_sec": _duration_sec(response, text),
     }
 
@@ -128,7 +125,3 @@ def _media_type(path: Path) -> str:
     if suffix == ".m4a":
         return "audio/mp4"
     return "audio/wav"
-
-
-def _safe_token(value: str) -> str:
-    return "".join(char for char in value if char.isalnum() or char in {"-", "_"})[:32] or "voice"

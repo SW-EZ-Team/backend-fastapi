@@ -42,13 +42,20 @@ def _state() -> ChapterStudioState:
 
 
 def test_request_to_initial_state() -> None:
-    req = GenerationInput(topic="정렬", chapter_brief="정렬", slide_count=10, weak_points="재귀")
+    req = GenerationInput(
+        topic="정렬",
+        chapter_brief="정렬",
+        slide_count=10,
+        weak_points="재귀",
+        tutor_id="tut_00000000000000PRESET_CAT01",
+    )
 
     state = generation_input_to_initial_state(req)
 
     assert state["topic"] == "정렬"
     assert state["slide_count"] == 10
     assert state["weak_points"] == "재귀"
+    assert state["tutor_id"] == "tut_00000000000000PRESET_CAT01"
     assert state["slides"] == []
 
 

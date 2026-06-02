@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from types import TracebackType
 from typing import AsyncIterator
@@ -17,6 +18,7 @@ from fastapi import HTTPException
 
 _LOG = logging.getLogger(__name__)
 _POOL_CREATE_ERRORS = (asyncpg.PostgresError, OSError, TimeoutError, ValueError)
+_SCHEMA_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 # global 대신 딕셔너리 홀더 패턴 사용 — 모듈 수준 변수 재바인딩 부작용 방지
 _DB_STATE: dict[str, asyncpg.Pool | None] = {"pool": None}
@@ -71,7 +73,12 @@ async def _create_pool_with_retry(dsn: str, reason: str) -> asyncpg.Pool | None:
 
     for attempt in range(1, attempts + 1):
         try:
-            return await asyncpg.create_pool(dsn, min_size=2, max_size=10)
+            return await asyncpg.create_pool(
+                dsn,
+                min_size=2,
+                max_size=10,
+                server_settings=_server_settings(),
+            )
         except _POOL_CREATE_ERRORS as exc:
             last_error = exc
             if attempt == attempts:
@@ -95,6 +102,19 @@ async def _create_pool_with_retry(dsn: str, reason: str) -> asyncpg.Pool | None:
             exc_info=_exc_info(last_error),
         )
     return None
+
+
+def _server_settings() -> dict[str, str]:
+    """공유 풀의 unqualified 쿼리가 ChapterStudio 스키마를 먼저 보게 한다."""
+    return {"search_path": f"{_database_schema()},public"}
+
+
+def _database_schema() -> str:
+    """DATABASE_SCHEMA를 안전한 PostgreSQL 식별자 형태로 제한한다."""
+    schema = os.getenv("DATABASE_SCHEMA") or "chapter_studio"
+    if _SCHEMA_RE.fullmatch(schema) is None:
+        raise ValueError("DATABASE_SCHEMA 형식이 안전하지 않다.")
+    return schema
 
 
 async def _ensure_pool(reason: str) -> asyncpg.Pool | None:

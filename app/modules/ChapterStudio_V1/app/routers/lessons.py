@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel, Field
 
+from app.modules.ChapterStudio_V1.app.lesson_audio_backfill import backfill_lesson_audio
 from app.modules.ChapterStudio_V1.app.lessons_generate import generate_lesson_for_chapter, generate_lessons_for_course
 
 router = APIRouter(prefix="/api/lessons", tags=["lessons"])
@@ -37,6 +38,12 @@ class LessonGenerateOneRequest(BaseModel):
     tutorTagline: str | None = Field(default=None, max_length=160)
     isDefaultTutor: bool | None = None
     voiceSampleUrl: str | None = Field(default=None, max_length=1000)
+
+
+class LessonAudioBackfillRequest(BaseModel):
+    """저장된 강의 음성만 후처리로 채우는 요청 바디."""
+
+    tutorId: str | None = Field(default=None, min_length=1, max_length=30)
 
 
 @router.post("/generate", status_code=202)
@@ -71,3 +78,15 @@ async def generate_one_lesson(
         voice_sample_url=req.voiceSampleUrl,
     )
     return {"accepted": True, "courseId": req.courseId, "lessonId": req.lessonId}
+
+
+@router.post("/{lessonId}/audio-backfill", status_code=202)
+async def backfill_lesson_audio_route(
+    lessonId: str,
+    background_tasks: BackgroundTasks,
+    req: LessonAudioBackfillRequest | None = None,
+) -> dict[str, object]:
+    """강의 재생성 없이 저장된 음성대본의 오디오 URL 생성을 예약한다."""
+    tutor_id = req.tutorId if req is not None else None
+    background_tasks.add_task(backfill_lesson_audio, lessonId, tutor_id)
+    return {"accepted": True, "lessonId": lessonId}

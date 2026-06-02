@@ -35,7 +35,9 @@ def test_generation_context_sql_uses_configured_schema() -> None:
 
     assert "FROM custom_schema.curriculum_unit cu" in sql
     assert "JOIN custom_schema.curriculum_plan cp" in sql
+    assert "LEFT JOIN public.course co ON co.id = cp.tutoring_id" in sql
     assert "LEFT JOIN custom_schema.lesson_generation_status lgs" in sql
+    assert "COALESCE(co.tutor_id, '') AS tutor_id" in sql
 
 
 @pytest.mark.asyncio
@@ -50,6 +52,8 @@ async def test_load_generation_context_reads_db_snapshot() -> None:
     assert context.to_generation_input().use_formal_speech is False
     assert context.to_generation_input().use_emoji is True
     assert context.to_generation_input().tutor_name == "냥 튜터"
+    assert context.tutor_id == "tut_00000000000000PRESET_CAT01"
+    assert context.to_generation_input().tutor_id == "tut_00000000000000PRESET_CAT01"
 
 
 @pytest.mark.asyncio
@@ -130,6 +134,7 @@ def _row() -> Mapping[str, object]:
         "learning_goal": "검정과 추정을 분리해 이해",
         "slide_count": 12,
         "template": "statistics_inference",
+        "tutor_id": "tut_00000000000000PRESET_CAT01",
         "generation_context": {
             "duration_days": 60,
             "teacher": "fox",

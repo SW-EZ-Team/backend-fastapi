@@ -15,6 +15,7 @@ from typing import Protocol
 
 from app.modules.ChapterStudio_V1.app.generation_context import GenerationContext
 from app.modules.ChapterStudio_V1.app.lesson_audio_backfill import backfill_lesson_audio
+from app.modules.ChapterStudio_V1.common.config import tts_autogen_enabled
 from app.modules.ChapterStudio_V1.common.errors import StorageError
 from app.modules.ChapterStudio_V1.db.generation_context_loader import load_generation_context
 from app.modules.ChapterStudio_V1.db.persistence import persist_chapter_state
@@ -179,11 +180,23 @@ async def _generate_loaded_context(context: GenerationContext) -> bool:
         async with get_connection() as conn:
             await persist_chapter_state(conn, context, chapter_id, state)
             await _mark_public_chapter_available(conn, context.lesson_id, len(response.slides))
+        await _backfill_audio_when_needed(context)
         _LOG.info("[lessons] 강의 완료 — lesson_id=%s, 슬라이드 %d", context.lesson_id, len(response.slides))
         return True
     except Exception as exc:
         await _record_generation_failure(context, chapter_id, stage, exc)
         return False
+
+
+async def _backfill_audio_when_needed(context: GenerationContext) -> None:
+    """그래프 TTS가 꺼진 기본 배포에서 저장 후 음성을 채우되 강의 성공은 보존한다."""
+    if tts_autogen_enabled():
+        return
+    try:
+        result = await backfill_lesson_audio(context.lesson_id)
+        _LOG.info("[lessons] 음성 백필 완료 — lesson_id=%s, result=%s", context.lesson_id, result)
+    except Exception as exc:
+        _LOG.warning("[lessons] 음성 백필 실패 — lesson_id=%s, error=%s", context.lesson_id, exc)
 
 
 async def _mark_public_chapter_available(conn: ExecuteConnection, lesson_id: str, slide_count: int) -> None:

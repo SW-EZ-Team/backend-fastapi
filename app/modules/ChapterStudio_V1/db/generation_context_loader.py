@@ -41,9 +41,11 @@ SELECT
     cu.learning_goal,
     COALESCE(lgs.requested_slide_count, cu.slide_count) AS slide_count,
     COALESCE(lgs.requested_template, 'auto') AS template,
+    COALESCE(co.tutor_id, '') AS tutor_id,
     COALESCE(lgs.generation_context, '{{}}'::jsonb) AS generation_context
 FROM {_table(schema, 'curriculum_unit')} cu
 JOIN {_table(schema, 'curriculum_plan')} cp ON cp.id = cu.curriculum_plan_id
+LEFT JOIN public.course co ON co.id = cp.tutoring_id
 LEFT JOIN {_table(schema, 'lesson_generation_status')} lgs ON lgs.lesson_id = cu.lesson_id
 WHERE cu.lesson_id = $1
 """
@@ -72,6 +74,7 @@ def row_to_generation_context(row: Mapping[str, object]) -> GenerationContext:
         tutor_name=_text(context, "tutor_name", ""),
         tutor_tagline=_text(context, "tutor_tagline", ""),
         is_default_tutor=_bool(context, "is_default_tutor", True),
+        tutor_id=_text(row, "tutor_id", _text(context, "tutor_id", "")),
         voice_sample_url=_text(context, "voice_sample_url", ""),
         audience_level=_text(context, "audience_level", "일반 학습자"),
         learning_goal=_text(row, "learning_goal", _text(context, "learning_goal", "핵심 개념 이해와 실습")),

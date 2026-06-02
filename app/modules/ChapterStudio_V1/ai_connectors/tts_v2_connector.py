@@ -8,15 +8,12 @@ WAV 파일을 저장한 뒤 경로와 재생 시간을 반환한다.
 from __future__ import annotations
 
 import struct
-from pathlib import Path
-from time import time
-from uuid import uuid4
 
 import numpy as np
 
 from app.modules.ChapterStudio_V1.ai_connectors.errors import ConnectorError
+from app.modules.ChapterStudio_V1.ai_connectors.tts_audio_storage import save_tts_wav_bytes
 from app.modules.ChapterStudio_V1.common.config import (
-    tts_output_dir,
     tts_ref_audio_path,
     tts_ref_text,
 )
@@ -46,21 +43,20 @@ class TTSV2Connector:
             raise ConnectorError("TTS_REF_AUDIO_PATH 가 설정되지 않았거나 파일이 없다.")
         self._ref_bytes: bytes = ref_path.read_bytes()
         self._ref_text: str = tts_ref_text() or ""
-        self._output_dir: Path = tts_output_dir()
         _LOG.info("TTSV2Connector 초기화 완료 (ref=%s)", ref_path.name)
 
     async def synthesize(self, text: str, voice: str = "f1") -> dict[str, str | float]:
         """단일 텍스트를 합성해 WAV 파일 저장 후 결과를 반환한다.
 
-        반환 형식은 TTSConnector 프로토콜과 동일:
-        {"audio_url": "file:///...", "duration_sec": float}
+        반환 형식은 TTSConnector 프로토콜과 동일하다.
+        audio_url은 브라우저가 GET 가능한 공개 URL만 허용한다.
         """
         audio_np, sample_rate = self._run_synthesis(text)
         audio_np = postfx_pipeline(audio_np, sample_rate)
         duration_sec = len(audio_np) / max(sample_rate, 1)
-        audio_path = self._save_wav(audio_np, sample_rate, voice)
+        wav_bytes = _encode_wav(audio_np, sample_rate)
         return {
-            "audio_url": audio_path.resolve().as_uri(),
+            "audio_url": await save_tts_wav_bytes(wav_bytes, voice),
             "duration_sec": float(duration_sec),
         }
 
@@ -72,15 +68,6 @@ class TTSV2Connector:
             language="ko",
         ) as session:
             return session.synthesize_chunk(text)
-
-    def _save_wav(self, audio_np: np.ndarray, sample_rate: int, voice: str) -> Path:
-        """float32 numpy 배열을 16bit PCM WAV 로 저장한다."""
-        self._output_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"{int(time() * 1000)}_{_safe_token(voice)}_{uuid4().hex[:8]}.wav"
-        path = self._output_dir / filename
-        wav_bytes = _encode_wav(audio_np, sample_rate)
-        path.write_bytes(wav_bytes)
-        return path
 
     def supports(self, feature: str) -> bool:
         """지원 기능 플래그를 반환한다."""
@@ -115,8 +102,3 @@ def _encode_wav(audio: np.ndarray, sample_rate: int) -> bytes:
         len(data),
     )
     return header + data
-
-
-def _safe_token(value: str) -> str:
-    """파일명에 안전한 토큰 문자열을 생성한다."""
-    return "".join(c for c in value if c.isalnum() or c in {"-", "_"})[:32] or "voice"

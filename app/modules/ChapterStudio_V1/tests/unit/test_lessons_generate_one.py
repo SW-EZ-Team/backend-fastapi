@@ -10,8 +10,11 @@ from app.modules.ChapterStudio_V1.app.routers import lessons as lessons_router
 
 
 class FakeConnectionManager:
+    def __init__(self, conn: object | None = None) -> None:
+        self.conn = conn or object()
+
     async def __aenter__(self) -> object:
-        return object()
+        return self.conn
 
     async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
         return None
@@ -102,6 +105,68 @@ def test_generate_one_route_returns_202(monkeypatch: pytest.MonkeyPatch) -> None
     assert captured["kwargs"]["voice_sample_url"] == "https://cdn.local/cat.wav"
 
 
+@pytest.mark.asyncio
+async def test_generate_loaded_context_triggers_audio_backfill_after_persist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    context = _context("lesson-1")
+
+    async def fake_generate(input_payload: object) -> dict[str, object]:
+        events.append("generate")
+        return {"voice_scripts": []}
+
+    def fake_response(state: object, chapter_id: str) -> object:
+        events.append("response")
+        return type("Response", (), {"slides": [object(), object()]})()
+
+    async def fake_persist(conn: object, ctx: GenerationContext, chapter_id: str, state: object) -> None:
+        events.append("persist")
+
+    async def fake_mark(conn: object, lesson_id: str, slide_count: int) -> None:
+        events.append("mark")
+
+    async def fake_backfill(ctx: GenerationContext) -> None:
+        events.append("backfill")
+
+    monkeypatch.setattr(lessons_generate, "generate_chapter_state", fake_generate)
+    monkeypatch.setattr(lessons_generate, "state_to_response", fake_response)
+    monkeypatch.setattr(lessons_generate, "persist_chapter_state", fake_persist)
+    monkeypatch.setattr(lessons_generate, "_mark_public_chapter_available", fake_mark)
+    monkeypatch.setattr(lessons_generate, "_backfill_audio_when_needed", fake_backfill)
+    monkeypatch.setattr(lessons_generate, "get_connection", lambda: FakeConnectionManager())
+
+    result = await lessons_generate._generate_loaded_context(context)
+
+    assert result is True
+    assert events == ["generate", "response", "persist", "mark", "backfill"]
+
+
+def test_audio_backfill_route_returns_202(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_backfill(lesson_id: str, tutor_id: str | None = None) -> dict[str, object]:
+        captured["lesson_id"] = lesson_id
+        captured["tutor_id"] = tutor_id
+        return {"lesson_id": lesson_id, "updated": 1, "failed": 0}
+
+    monkeypatch.setattr(lessons_router, "backfill_lesson_audio", fake_backfill)
+    app = FastAPI()
+    app.include_router(lessons_router.router)
+
+    response = TestClient(app).post(
+        "/api/lessons/lesson-1/audio-backfill",
+        json={"tutorId": "tut_00000000000000PRESET_CAT01"},
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {"accepted": True, "lessonId": "lesson-1"}
+    assert captured == {
+        "lesson_id": "lesson-1",
+        "tutor_id": "tut_00000000000000PRESET_CAT01",
+    }
+
+
 def _context(lesson_id: str) -> GenerationContext:
     return GenerationContext(
         lesson_id=lesson_id,
@@ -113,4 +178,5 @@ def _context(lesson_id: str) -> GenerationContext:
         chapter_title="통계 추론",
         chapter_brief="p-value와 신뢰구간",
         slide_count=10,
+        tutor_id="tut_00000000000000PRESET_CAT01",
     )

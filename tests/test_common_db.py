@@ -55,9 +55,16 @@ async def test_init_pool_logs_and_does_not_raise_when_database_is_unready(
 ) -> None:
     """DATABASE_URL이 있어도 DB 미기동이면 startup 예외 없이 로그만 남긴다."""
     attempts: list[str] = []
+    settings: list[dict[str, str]] = []
 
-    async def fail_create_pool(dsn: str, min_size: int, max_size: int) -> asyncpg.Pool:
+    async def fail_create_pool(
+        dsn: str,
+        min_size: int,
+        max_size: int,
+        server_settings: dict[str, str],
+    ) -> asyncpg.Pool:
         attempts.append(dsn)
+        settings.append(server_settings)
         raise OSError("테스트용 DB 연결 실패")
 
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@127.0.0.1:1/app")
@@ -69,6 +76,7 @@ async def test_init_pool_logs_and_does_not_raise_when_database_is_unready(
     await common_db.init_pool()
 
     assert attempts == ["postgresql://user:pass@127.0.0.1:1/app"] * 2
+    assert settings == [{"search_path": "chapter_studio,public"}] * 2
     assert common_db._DB_STATE["pool"] is None
     assert "DATABASE_URL이 설정됐지만 DB 풀 생성에 실패했습니다" in caplog.text
 
@@ -79,15 +87,23 @@ async def test_get_connection_retries_lazily_after_startup_failure(
 ) -> None:
     """startup 이후에도 첫 DB 요청에서 lazy pool 생성을 다시 시도한다."""
     attempts: list[str] = []
+    settings: list[dict[str, str]] = []
     fake_pool = cast(asyncpg.Pool, _FakePool())
 
-    async def fail_then_succeed(dsn: str, min_size: int, max_size: int) -> asyncpg.Pool:
+    async def fail_then_succeed(
+        dsn: str,
+        min_size: int,
+        max_size: int,
+        server_settings: dict[str, str],
+    ) -> asyncpg.Pool:
         attempts.append(dsn)
+        settings.append(server_settings)
         if len(attempts) == 1:
             raise OSError("테스트용 DB 연결 실패")
         return fake_pool
 
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@127.0.0.1:5432/app")
+    monkeypatch.setenv("DATABASE_SCHEMA", "custom_schema")
     monkeypatch.setenv("DB_POOL_INIT_RETRIES", "1")
     monkeypatch.setenv("DB_POOL_INIT_BACKOFF_SEC", "0")
     monkeypatch.setenv("DB_POOL_INIT_MAX_BACKOFF_SEC", "0")
@@ -100,7 +116,16 @@ async def test_get_connection_retries_lazily_after_startup_failure(
         assert isinstance(conn, _FakeConnection)
 
     assert attempts == ["postgresql://user:pass@127.0.0.1:5432/app"] * 2
+    assert settings == [{"search_path": "custom_schema,public"}] * 2
     assert common_db._DB_STATE["pool"] is fake_pool
+
+
+def test_server_settings_rejects_unsafe_database_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    """공유 풀 search_path에 SQL 조각이 들어가지 않게 차단한다."""
+    monkeypatch.setenv("DATABASE_SCHEMA", "; DROP TABLE x;--")
+
+    with pytest.raises(ValueError, match="DATABASE_SCHEMA"):
+        common_db._server_settings()
 
 
 @pytest.mark.asyncio

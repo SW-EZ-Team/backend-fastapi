@@ -72,6 +72,7 @@ async def test_backfill_lesson_audio_updates_audio_columns(monkeypatch: pytest.M
 @pytest.mark.asyncio
 async def test_backfill_lesson_audio_keeps_other_slides_when_one_tts_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     conn = FakeConnection()
+    profiles: list[TutorVoiceProfile] = []
 
     async def fake_load(db_conn: object, lesson_id: str) -> GenerationContext:
         return _context(lesson_id)
@@ -81,6 +82,7 @@ async def test_backfill_lesson_audio_keeps_other_slides_when_one_tts_fails(monke
         *,
         tutor_profile: TutorVoiceProfile,
     ) -> list[dict[str, object]]:
+        profiles.append(tutor_profile)
         idx = int(scripts[0]["slide_idx"])
         if idx == 1:
             raise RuntimeError("tts-disabled")
@@ -93,6 +95,7 @@ async def test_backfill_lesson_audio_keeps_other_slides_when_one_tts_fails(monke
     result = await backfill.backfill_lesson_audio("lesson-1")
 
     assert result == {"lesson_id": "lesson-1", "updated": 1, "failed": 1}
+    assert profiles[0].tutor_id == "tut_00000000000000PRESET_CAT01"
     assert any(args[1] == 0 for _query, args in conn.executed)
     assert not any(args[1] == 1 for _query, args in conn.executed)
 
@@ -156,4 +159,5 @@ def _context(lesson_id: str) -> GenerationContext:
         slide_count=10,
         use_formal_speech=False,
         tutor_tagline="친근한 말투",
+        tutor_id="tut_00000000000000PRESET_CAT01",
     )
