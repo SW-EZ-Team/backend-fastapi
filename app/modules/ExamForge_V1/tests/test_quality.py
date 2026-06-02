@@ -10,6 +10,7 @@ from app.modules.ExamForge_V1.quality.difficulty_scorer import score_bloom_distr
 from app.modules.ExamForge_V1.quality.coverage_analyzer import analyze_coverage
 from app.modules.ExamForge_V1.quality.explanation_checker import check_explanation_quality
 from app.modules.ExamForge_V1.quality.metrics import compute_quality_metrics
+from app.modules.ExamForge_V1.quality.cjk_sanitizer import sanitize_exam_question
 
 
 class TestDeduplicator:
@@ -131,6 +132,30 @@ class TestExplanationChecker:
         }
         issues = check_explanation_quality(question)
         assert any("오답별 해설 누락" in issue for issue in issues)
+
+
+class TestCjkSanitizer:
+    """모의고사 표시 텍스트 CJK 정리 테스트."""
+
+    def test_sanitizes_stem_explanation_and_option_text(self) -> None:
+        """발문·해설·보기 텍스트에서 한자·가나 런을 제거한다."""
+        question = {
+            "stem": "정렬 순서가 颠倒되면 무엇이 문제인가?",
+            "correct_answer": "2",
+            "explanation": "정답 근거는 颠倒了 상태를 바로잡는 것이다.",
+            "options": [
+                {"label": "1", "text": "그대로 둔다 颠倒了", "is_correct": False},
+                {"label": "2", "text": "순서를 바로잡는다", "is_correct": True},
+            ],
+        }
+
+        sanitized = sanitize_exam_question(question)
+
+        assert "颠倒" not in sanitized["stem"]
+        assert "颠倒了" not in sanitized["explanation"]
+        assert "颠倒了" not in sanitized["options"][0]["text"]
+        assert sanitized["correct_answer"] == "2"
+        assert sanitized["options"][0]["label"] == "1"
 
 
 class TestDifficultyScorer:

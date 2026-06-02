@@ -17,6 +17,7 @@ from app.modules.ExamForge_V1.common.ai_bridge import (
 )
 from app.modules.ExamForge_V1.common.logger import get_logger
 from app.modules.ExamForge_V1.quality.answer_positions import balance_correct_answer_positions
+from app.modules.ExamForge_V1.quality.cjk_sanitizer import sanitize_exam_questions
 
 logger = get_logger(__name__)
 
@@ -57,7 +58,7 @@ async def generate_distractors_node(state: ExamForgeState) -> dict:
 
     if not mcq_questions:
         # MCQ 가 없으면 오답 생성 없이 다음 단계(정답/해설 생성)로 진행
-        return {"questions_with_distractors": questions, "pipeline_status": "answering"}
+        return {"questions_with_distractors": sanitize_exam_questions(questions), "pipeline_status": "answering"}
 
     try:
         semaphore = asyncio.Semaphore(generation_concurrency())
@@ -130,7 +131,7 @@ async def generate_distractors_node(state: ExamForgeState) -> dict:
             # 예외 발생한 건은 원본 사용
             improved.append(mcq_questions[i])
 
-    all_questions = balance_correct_answer_positions(improved) + non_mcq_questions
+    all_questions = sanitize_exam_questions(balance_correct_answer_positions(improved) + non_mcq_questions)
     logger.info("노드 완료: generate_distractors_node (%.2fs)", time.time() - node_start)
     return {"questions_with_distractors": all_questions, "pipeline_status": "answering"}
 

@@ -13,6 +13,7 @@ from app.modules.ExamForge_V1.pipeline.nodes._plan_prompts import PLAN_PROMPT as
 from app.modules.ExamForge_V1.pipeline.nodes.concept_blueprint import build_question_blueprint
 
 logger = get_logger(__name__)
+_DEFAULT_QUESTION_TYPES = ["ko_multiple_choice_5"]
 
 
 async def plan_exam_node(state: ExamForgeState) -> dict:
@@ -44,9 +45,7 @@ async def plan_exam_node(state: ExamForgeState) -> dict:
             topics_json=json.dumps(topics, ensure_ascii=False),
             config_json=json.dumps(config, ensure_ascii=False),
             subject=subject,
-            template_contract=allocation_contract(
-                config.get("question_types", ["ko_multiple_choice_5"])
-            ),
+            template_contract=allocation_contract(_question_types(config)),
         ),
         max_tokens=3000,
         temperature=0.3,
@@ -188,7 +187,7 @@ def _build_fallback_plan(
     topics: list[dict],
 ) -> dict:
     """AI 파싱 실패 시 기본 계획을 구성한다."""
-    q_types = config.get("question_types", ["ko_multiple_choice_5"])
+    q_types = _question_types(config)
     per_type = total // len(q_types)
     remainder_total = total % len(q_types)
     allocations = []
@@ -222,3 +221,15 @@ def _build_fallback_plan(
         "passing_score": config.get("passing_score", 60.0),
         "bloom_distribution": {},
     }
+
+
+def _question_types(config: dict) -> list[str]:
+    """빈 유형 목록이 직접 유입돼도 기본 객관식으로 수렴시킨다."""
+    raw = config.get("question_types")
+    if not isinstance(raw, list):
+        return list(_DEFAULT_QUESTION_TYPES)
+    q_types = [item.strip() for item in raw if isinstance(item, str) and item.strip()]
+    if not q_types:
+        logger.warning("question_types가 비어 있어 기본 유형으로 보정합니다.")
+        return list(_DEFAULT_QUESTION_TYPES)
+    return q_types

@@ -11,7 +11,7 @@ class ExamConfig(BaseModel):
     time_limit_minutes: int = Field(ge=10, le=300, default=60)
     locale: str = "ko"
     category: str = "korean"
-    question_types: list[str] = Field(default_factory=lambda: ["ko_multiple_choice_5"])
+    question_types: list[str] = Field(default_factory=lambda: ["ko_multiple_choice_5"], min_length=1)
     difficulty_distribution: dict[int, float] = {
         1: 0.2,
         2: 0.3,

@@ -8,6 +8,7 @@ from app.modules.ChapterStudio_V1.common.config import kanana_polish_enabled, ka
 from app.modules.ChapterStudio_V1.common.logging import logger
 from app.modules.ChapterStudio_V1.pipeline.payload import GeneratedLessonPayload, GeneratedSlide, GeneratedVoiceScript
 from app.modules.ChapterStudio_V1.pipeline.quality_inspection import (
+    CJK_RE,
     QualityInspectionReport,
     apply_spelling_fixes,
     inspect_lesson,
@@ -30,16 +31,18 @@ async def inspect_and_polish_payload(payload: GeneratedLessonPayload, *, tone_hi
     )
     _log_report(report)
     payload = _apply_deterministic_spelling_payload(payload)
-    if not kanana_polish_enabled():
-        return payload
-    connector = registry.get_polish_connector()
-    semaphore = asyncio.Semaphore(kanana_polish_max_concurrency())
-    slides, voices = await asyncio.gather(
-        _polish_slides(payload.slides, connector, semaphore, tone_hint),
-        _polish_voices(payload.voice_scripts, connector, semaphore, tone_hint),
-    )
-    polished = payload.model_copy(update={"slides": slides, "voice_scripts": voices})
-    return _apply_deterministic_spelling_payload(polished)
+    if kanana_polish_enabled():
+        connector = registry.get_polish_connector()
+        semaphore = asyncio.Semaphore(kanana_polish_max_concurrency())
+        slides, voices = await asyncio.gather(
+            _polish_slides(payload.slides, connector, semaphore, tone_hint),
+            _polish_voices(payload.voice_scripts, connector, semaphore, tone_hint),
+        )
+        payload = _apply_deterministic_spelling_payload(
+            payload.model_copy(update={"slides": slides, "voice_scripts": voices})
+        )
+    _log_remaining_cjk(payload)
+    return payload
 
 
 async def _polish_slides(
@@ -167,6 +170,35 @@ def _log_report(report: QualityInspectionReport) -> None:
         len(report.duplicate_intro_groups),
         " | ".join(summary[:30]),
     )
+
+
+def _log_remaining_cjk(payload: GeneratedLessonPayload) -> None:
+    paths = _remaining_cjk_paths(payload.model_dump(), "payload")
+    if paths:
+        logger.warning(
+            "Kanana2 quality inspection: CJK 잔존 {}건 — {}",
+            len(paths),
+            " | ".join(paths[:30]),
+        )
+
+
+def _remaining_cjk_paths(value: object, path: str) -> list[str]:
+    if isinstance(value, str):
+        match = CJK_RE.search(value)
+        return [f"{path}:{match.group()}"] if match else []
+    if isinstance(value, dict):
+        return [
+            found
+            for key, nested in value.items()
+            for found in _remaining_cjk_paths(nested, f"{path}.{key}")
+        ]
+    if isinstance(value, list):
+        return [
+            found
+            for index, nested in enumerate(value)
+            for found in _remaining_cjk_paths(nested, f"{path}[{index}]")
+        ]
+    return []
 
 
 __all__ = ["inspect_and_polish_payload"]

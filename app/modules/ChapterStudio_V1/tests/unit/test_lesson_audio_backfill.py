@@ -60,7 +60,7 @@ async def test_backfill_lesson_audio_updates_audio_columns(monkeypatch: pytest.M
     result = await backfill.backfill_lesson_audio("lesson-1", tutor_id="tut_00000000000000PRESET_CAT01")
 
     queries = [query for query, _args in conn.executed]
-    assert result == {"lesson_id": "lesson-1", "updated": 2, "failed": 0}
+    assert result == {"lesson_id": "lesson-1", "updated": 2, "failed": 0, "failed_slide_idxs": []}
     assert len(profiles) == 2
     assert profiles[0].tutor_id == "tut_00000000000000PRESET_CAT01"
     assert any("UPDATE chapter_studio.voice_script" in query for query in queries)
@@ -94,7 +94,7 @@ async def test_backfill_lesson_audio_keeps_other_slides_when_one_tts_fails(monke
 
     result = await backfill.backfill_lesson_audio("lesson-1")
 
-    assert result == {"lesson_id": "lesson-1", "updated": 1, "failed": 1}
+    assert result == {"lesson_id": "lesson-1", "updated": 1, "failed": 1, "failed_slide_idxs": [1]}
     assert profiles[0].tutor_id == "tut_00000000000000PRESET_CAT01"
     assert any(args[1] == 0 for _query, args in conn.executed)
     assert not any(args[1] == 1 for _query, args in conn.executed)
@@ -136,7 +136,7 @@ async def test_backfill_lesson_audio_uses_tts_synth_concurrency(monkeypatch: pyt
 
     result = await backfill.backfill_lesson_audio("lesson-1")
 
-    assert result == {"lesson_id": "lesson-1", "updated": 3, "failed": 0}
+    assert result == {"lesson_id": "lesson-1", "updated": 3, "failed": 0, "failed_slide_idxs": []}
     assert warmup_calls == 1
     assert max_active == 2
 
@@ -172,7 +172,7 @@ async def test_backfill_lesson_audio_warms_up_before_bulk_synthesis(
 
     result = await backfill.backfill_lesson_audio("lesson-1")
 
-    assert result == {"lesson_id": "lesson-1", "updated": 3, "failed": 0}
+    assert result == {"lesson_id": "lesson-1", "updated": 3, "failed": 0, "failed_slide_idxs": []}
     assert events[0] == "warmup"
     assert events.count("warmup") == 1
     assert {event for event in events[1:] if event.startswith("synth-")} == {
@@ -213,7 +213,7 @@ async def test_backfill_lesson_audio_skips_warmup_when_disabled(
 
     result = await backfill.backfill_lesson_audio("lesson-1")
 
-    assert result == {"lesson_id": "lesson-1", "updated": 3, "failed": 0}
+    assert result == {"lesson_id": "lesson-1", "updated": 3, "failed": 0, "failed_slide_idxs": []}
     assert warmup_calls == 0
 
 

@@ -8,6 +8,7 @@ from app.modules.ExamForge_V1.pipeline.nodes._html_builder import build_exam_htm
 from app.modules.ExamForge_V1.pipeline.nodes.programming_context import has_code_snippets
 from app.modules.ExamForge_V1.pipeline.nodes.programming_context import looks_like_programming_source
 from app.modules.ExamForge_V1.quality.metrics import compute_quality_metrics
+from app.modules.ExamForge_V1.quality.cjk_sanitizer import sanitize_exam_questions
 from app.modules.ExamForge_V1.common.logger import get_logger
 
 logger = get_logger(__name__)
@@ -25,7 +26,7 @@ async def format_output_node(state: ExamForgeState) -> dict:
     node_start = time.time()
     logger.info("노드 시작: format_output_node")
     plan = state.get("exam_plan", {})
-    questions = _apply_plan_points(state.get("calibrated_questions", []), plan)
+    questions = sanitize_exam_questions(_apply_plan_points(state.get("calibrated_questions", []), plan))
     retry_count = state.get("retry_count", 0)
     timings = state.get("timings", {})
     start_time = timings.get("start", time.time())

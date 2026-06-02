@@ -82,6 +82,25 @@ async def test_kanana_polish_failure_keeps_original_text_except_deterministic_fi
     assert "世界" not in result["slide_drafts"][0]["html"]
 
 
+@pytest.mark.anyio
+async def test_kanana_polish_logs_remaining_cjk_after_deterministic_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger = _CaptureLogger()
+    payload = _payload()
+    quizzes = [
+        payload.quizzes[0].model_copy(update={"explanation": "정답 근거는 颠倒了 표현을 제거해야 알 수 있습니다."}),
+        *payload.quizzes[1:],
+    ]
+
+    monkeypatch.setenv("KANANA_POLISH_ENABLED", "0")
+    monkeypatch.setattr(kanana_polish, "logger", logger)
+
+    await kanana_polish.inspect_and_polish_payload(payload.model_copy(update={"quizzes": quizzes}))
+
+    assert any("CJK 잔존" in warning for warning in logger.warnings)
+
+
 class _FakePolishConnector:
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -101,6 +120,17 @@ class _FailingPolishConnector:
 class _RegressingPolishConnector:
     async def polish(self, text: str, *, tone_hint: str = "") -> str:
         return text.replace("정수的世界里", "정수의 세계").replace("절댓값", "절대값")
+
+
+class _CaptureLogger:
+    def __init__(self) -> None:
+        self.warnings: list[str] = []
+
+    def info(self, message: str, *args: object) -> None:
+        return None
+
+    def warning(self, message: str, *args: object) -> None:
+        self.warnings.append(message.format(*args))
 
 
 def _raise_if_called() -> object:

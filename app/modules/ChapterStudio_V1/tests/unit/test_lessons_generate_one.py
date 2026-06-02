@@ -142,6 +142,64 @@ async def test_generate_loaded_context_triggers_audio_backfill_after_persist(
     assert events == ["generate", "response", "persist", "mark", "backfill"]
 
 
+@pytest.mark.asyncio
+async def test_backfill_audio_when_needed_marks_partial_audio_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    context = _context("lesson-1")
+
+    async def fake_backfill(lesson_id: str) -> dict[str, object]:
+        return {"lesson_id": lesson_id, "updated": 9, "failed": 1, "failed_slide_idxs": [3]}
+
+    async def fake_mark(conn: object, ctx: GenerationContext, result: dict[str, object], error: Exception | None = None) -> None:
+        captured["conn"] = conn
+        captured["context"] = ctx
+        captured["result"] = result
+        captured["error"] = error
+
+    monkeypatch.setattr(lessons_generate, "tts_autogen_enabled", lambda: False)
+    monkeypatch.setattr(lessons_generate, "backfill_lesson_audio", fake_backfill)
+    monkeypatch.setattr(lessons_generate, "mark_audio_backfill_pending", fake_mark)
+    monkeypatch.setattr(lessons_generate, "get_connection", lambda: FakeConnectionManager("conn"))
+
+    await lessons_generate._backfill_audio_when_needed(context)
+
+    assert captured["conn"] == "conn"
+    assert captured["context"] == context
+    assert captured["result"] == {"lesson_id": "lesson-1", "updated": 9, "failed": 1, "failed_slide_idxs": [3]}
+    assert captured["error"] is None
+
+
+@pytest.mark.asyncio
+async def test_backfill_audio_when_needed_marks_exception_audio_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    context = _context("lesson-1")
+
+    async def fake_backfill(lesson_id: str) -> dict[str, object]:
+        raise RuntimeError(f"{lesson_id}: tts down")
+
+    async def fake_mark(conn: object, ctx: GenerationContext, result: dict[str, object], error: Exception | None = None) -> None:
+        captured["conn"] = conn
+        captured["context"] = ctx
+        captured["result"] = result
+        captured["error"] = error
+
+    monkeypatch.setattr(lessons_generate, "tts_autogen_enabled", lambda: False)
+    monkeypatch.setattr(lessons_generate, "backfill_lesson_audio", fake_backfill)
+    monkeypatch.setattr(lessons_generate, "mark_audio_backfill_pending", fake_mark)
+    monkeypatch.setattr(lessons_generate, "get_connection", lambda: FakeConnectionManager("conn"))
+
+    await lessons_generate._backfill_audio_when_needed(context)
+
+    assert captured["conn"] == "conn"
+    assert captured["context"] == context
+    assert captured["result"] == {}
+    assert isinstance(captured["error"], RuntimeError)
+
+
 def test_audio_backfill_route_returns_202(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 

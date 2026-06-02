@@ -49,6 +49,7 @@ async def backfill_lesson_audio(lesson_id: str, tutor_id: str | None = None) -> 
     schema = database_schema()
     updated = 0
     failed = 0
+    failed_slide_idxs: list[int] = []
     async with get_connection() as conn:
         context = await _load_context(conn, lesson_id)
         voice_scripts, invalid_count = _voice_script_records(await conn.fetch(voice_script_sql(schema), lesson_id))
@@ -59,19 +60,27 @@ async def backfill_lesson_audio(lesson_id: str, tutor_id: str | None = None) -> 
             if isinstance(outcome, Exception):
                 slide_idx = script.get("slide_idx")
                 _LOG.warning("[lessons] 음성 백필 실패 — lesson_id=%s, slide_idx=%s, error=%s", lesson_id, slide_idx, outcome)
+                if isinstance(slide_idx, int):
+                    failed_slide_idxs.append(slide_idx)
                 failed += 1
                 continue
             try:
                 touched = await _update_audio_record(conn, schema, columns, lesson_id, outcome)
             except Exception as exc:
-                _LOG.warning("[lessons] 음성 백필 실패 — lesson_id=%s, error=%s", lesson_id, exc)
+                slide_idx = outcome.get("slide_idx")
+                _LOG.warning("[lessons] 음성 백필 실패 — lesson_id=%s, slide_idx=%s, error=%s", lesson_id, slide_idx, exc)
+                if isinstance(slide_idx, int):
+                    failed_slide_idxs.append(slide_idx)
                 failed += 1
                 continue
             if touched:
                 updated += 1
             else:
+                slide_idx = outcome.get("slide_idx")
+                if isinstance(slide_idx, int):
+                    failed_slide_idxs.append(slide_idx)
                 failed += 1
-    return {"lesson_id": lesson_id, "updated": updated, "failed": failed}
+    return {"lesson_id": lesson_id, "updated": updated, "failed": failed, "failed_slide_idxs": failed_slide_idxs}
 
 async def _load_context(conn: AudioBackfillConnection, lesson_id: str) -> GenerationContext | None:
     try:

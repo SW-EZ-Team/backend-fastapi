@@ -8,7 +8,11 @@ from app.modules.ChapterStudio_V1.pipeline.state import StateRecord
 
 _TOKEN_RE = re.compile(r"[가-힣A-Za-z0-9+#/.-]{2,}")
 _PUNCT_RE = re.compile(r"[.!?。！？\n]")
-_INTRO_RE = re.compile(r"^(?:안녕하세요|안녕|반갑습니다|반가워요|다들\s*안녕|자)[,\s.]*")
+_INTRO_RE = re.compile(
+    r"^\s*(?:안녕하세요|안녕|반갑습니다|반가워요|다들\s*안녕|"
+    r"튜터야|얘들아|여러분|방금|앞서|지난번에?|아까|앞에서|"
+    r"오늘은?|이제|그럼|그러면|먼저|자)\s*[,!?.，。！？:：;-]*\s*"
+)
 _STOP_WORDS = {
     "이번",
     "화면",
@@ -21,6 +25,9 @@ _STOP_WORDS = {
     "이제",
     "다음",
     "안녕하세",
+    "튜터야",
+    "얘들아",
+    "여러분",
 }
 
 
@@ -82,10 +89,25 @@ def _is_placeholder(title: str, chapter_title: str, idx: int) -> bool:
 
 
 def _phrase_from_text(text: str) -> str:
-    first_sentence = _INTRO_RE.sub("", _PUNCT_RE.split(text.strip(), maxsplit=1)[0])
-    words = [_clean_token(token) for token in _TOKEN_RE.findall(first_sentence)]
-    kept = [word for word in words if _is_title_word(word)]
-    return _fit_title(kept)
+    for sentence in _sentences(text):
+        words = [_clean_token(token) for token in _TOKEN_RE.findall(_strip_intro(sentence))]
+        kept = [word for word in words if _is_title_word(word)]
+        if kept:
+            return _fit_title(kept)
+    return ""
+
+
+def _sentences(text: str) -> list[str]:
+    return [part.strip() for part in _PUNCT_RE.split(text.strip()) if part.strip()]
+
+
+def _strip_intro(sentence: str) -> str:
+    stripped = sentence.strip()
+    previous = ""
+    while stripped and stripped != previous:
+        previous = stripped
+        stripped = _INTRO_RE.sub("", stripped).strip()
+    return stripped
 
 
 def _clean_token(token: str) -> str:

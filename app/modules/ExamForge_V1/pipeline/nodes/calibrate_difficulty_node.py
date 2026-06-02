@@ -13,6 +13,7 @@ from app.modules.ExamForge_V1.prompts.difficulty_calibration import (
 )
 from app.modules.ExamForge_V1.common.ai_bridge import get_planner_connector, ChapterAIRequest
 from app.modules.ExamForge_V1.common.logger import get_logger
+from app.modules.ExamForge_V1.quality.cjk_sanitizer import sanitize_exam_questions
 
 logger = get_logger(__name__)
 
@@ -34,7 +35,7 @@ async def calibrate_difficulty_node(state: ExamForgeState) -> dict:
     except Exception as exc:
         logger.warning("블룸 분포 계산 실패 — 보정 생략: %s", exc)
         return {
-            "calibrated_questions": questions,
+            "calibrated_questions": sanitize_exam_questions(questions),
             "pipeline_status": "formatting",
             "error_message": f"블룸 분포 계산 실패 — 난이도 보정 생략: {exc}",
         }
@@ -43,7 +44,7 @@ async def calibrate_difficulty_node(state: ExamForgeState) -> dict:
     if _is_balanced(current_dist, target_bloom):
         logger.info("노드 완료: calibrate_difficulty_node (%.2fs) → 보정 생략", time.time() - node_start)
         return {
-            "calibrated_questions": questions,
+            "calibrated_questions": sanitize_exam_questions(questions),
             "pipeline_status": "formatting",
         }
 
@@ -53,7 +54,7 @@ async def calibrate_difficulty_node(state: ExamForgeState) -> dict:
     except Exception as exc:
         logger.warning("난이도 보정 커넥터 초기화 실패 — 보정 생략: %s", exc)
         return {
-            "calibrated_questions": questions,
+            "calibrated_questions": sanitize_exam_questions(questions),
             "pipeline_status": "formatting",
             "error_message": f"난이도 보정 커넥터 초기화 실패 — 보정 생략: {exc}",
         }
@@ -78,7 +79,7 @@ async def calibrate_difficulty_node(state: ExamForgeState) -> dict:
         # AI 커넥터 장애 시 보정 없이 원본 문제를 그대로 사용한다
         logger.warning("난이도 보정 AI 호출 실패 — 원본 유지: %s", exc)
         return {
-            "calibrated_questions": questions,
+            "calibrated_questions": sanitize_exam_questions(questions),
             "pipeline_status": "formatting",
             "error_message": f"난이도 보정 AI 호출 실패 — 원본 유지: {exc}",
         }
@@ -109,7 +110,7 @@ async def calibrate_difficulty_node(state: ExamForgeState) -> dict:
 
     logger.info("노드 완료: calibrate_difficulty_node (%.2fs)", time.time() - node_start)
     result: dict = {
-        "calibrated_questions": questions,
+        "calibrated_questions": sanitize_exam_questions(questions),
         "pipeline_status": "formatting",
     }
     if calibration_error:

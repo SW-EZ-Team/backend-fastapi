@@ -37,6 +37,12 @@ def test_strip_answer_position_reference_removes_intro_position_phrase() -> None
     assert strip_answer_position_reference(explanation) == "출금은 돈이 계좌에서 나가는 상황이라 핵심 개념과 맞습니다."
 
 
+def test_strip_answer_position_reference_removes_zero_index_intro_phrase() -> None:
+    explanation = "정답은 0번이야. 수직선 왼쪽 이동이 음수 덧셈의 핵심 근거입니다."
+
+    assert strip_answer_position_reference(explanation) == "수직선 왼쪽 이동이 음수 덧셈의 핵심 근거입니다."
+
+
 def test_strip_answer_position_reference_keeps_explanation_without_position() -> None:
     explanation = "출금은 돈이 계좌에서 나가는 상황이라 핵심 개념과 맞습니다."
 
@@ -73,6 +79,31 @@ def test_balance_quiz_answers_strips_intro_position_and_balances_all_demo_items(
     assert all(quiz.choices[quiz.answer_idx] == before_answers[quiz.slide_idx] for quiz in balanced)
 
 
+def test_balance_quiz_answers_strips_zero_index_intro_and_keeps_consistency() -> None:
+    quizzes = [_quiz_with_zero_index_intro(idx) for idx in range(4)]
+    before_answers = {quiz.slide_idx: quiz.choices[quiz.answer_idx] for quiz in quizzes}
+
+    balanced = balance_quiz_answers(quizzes, seed_key="zero-index-position-intro")
+
+    assert Counter(quiz.answer_idx for quiz in balanced) == {0: 1, 1: 1, 2: 1, 3: 1}
+    assert all("정답은 0번" not in quiz.explanation for quiz in balanced)
+    assert {quiz.slide_idx: quiz.choices[quiz.answer_idx] for quiz in balanced} == before_answers
+
+
+def test_balance_quiz_answers_keeps_original_when_position_reference_remains() -> None:
+    unsafe = _quiz(0, 2).model_copy(
+        update={"explanation": "핵심 근거를 설명한 뒤에도 정답은 0번이야 라는 위치 표현이 남았습니다."}
+    )
+    safe = _quiz(1, 0)
+
+    balanced = balance_quiz_answers([unsafe, safe], seed_key="remaining-position-token")
+
+    assert balanced[0].answer_idx == unsafe.answer_idx
+    assert balanced[0].choices == unsafe.choices
+    assert balanced[0].explanation == unsafe.explanation
+    assert balanced[1].choices[balanced[1].answer_idx] == safe.choices[safe.answer_idx]
+
+
 def _quiz(slide_idx: int, answer_idx: int) -> GeneratedQuiz:
     choices = [f"{slide_idx}-보기-{idx}" for idx in range(4)]
     return GeneratedQuiz(
@@ -94,4 +125,16 @@ def _quiz_with_position_intro(slide_idx: int, answer_idx: int) -> GeneratedQuiz:
         answer_idx=answer_idx,
         difficulty="이해",
         explanation=f"정답은 {answer_idx + 1}번이야. 핵심 선택지는 슬라이드 개념을 정확히 적용합니다.",
+    )
+
+
+def _quiz_with_zero_index_intro(slide_idx: int) -> GeneratedQuiz:
+    choices = [f"{slide_idx}-보기-{idx}" for idx in range(4)]
+    return GeneratedQuiz(
+        slide_idx=slide_idx,
+        question=f"{slide_idx}번 문항의 질문입니다.",
+        choices=choices,
+        answer_idx=0,
+        difficulty="이해",
+        explanation="정답은 0번이야. 핵심 선택지는 슬라이드 개념을 정확히 적용합니다.",
     )

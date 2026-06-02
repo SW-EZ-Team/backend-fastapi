@@ -24,3 +24,28 @@ def test_meaningful_slide_title_uses_final_fallback_when_sources_are_empty() -> 
     title = meaningful_slide_title("", "정수의 세계", 2, "", "   ")
 
     assert title == "정수의 세계 3"
+
+
+def test_meaningful_slide_title_skips_empty_intro_sentence() -> None:
+    title = meaningful_slide_title(
+        "정수의 세계 12",
+        "정수의 세계",
+        11,
+        "안녕하세요. 음수는 기준점보다 작은 위치를 나타내고, 절댓값은 0과의 거리입니다.",
+    )
+
+    assert title.startswith("음수 기준점보다 위치")
+    assert title != "정수의 세계 12"
+
+
+def test_meaningful_slide_title_strips_repeated_conversational_intro() -> None:
+    title = meaningful_slide_title(
+        "",
+        "정수의 세계",
+        0,
+        "튜터야! 오늘은 먼저 정수의 덧셈을 수직선으로 살펴봅시다.",
+    )
+
+    assert title.startswith("정수 덧셈")
+    assert "튜터야" not in title
+    assert "오늘" not in title

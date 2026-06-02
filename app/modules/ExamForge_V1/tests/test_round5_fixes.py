@@ -296,6 +296,15 @@ class TestP1_3_DifficultyDistributionSum:
         assert 0.99 <= total <= 1.01
 
 
+class TestP1_4_QuestionTypes:
+    """P1-4: 빈 문항 유형 차단 테스트."""
+
+    def test_empty_question_types_rejected(self) -> None:
+        """문항 유형이 비면 계획 단계 0 나눗셈 전에 거부된다."""
+        with pytest.raises(ValidationError):
+            ExamConfig(question_types=[])
+
+
 class TestP1_6_ShrinkingExam:
     """P1-6: 'passed'이지만 문항 수 부족 시 경고 테스트."""
 

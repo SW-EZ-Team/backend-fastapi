@@ -282,6 +282,19 @@ def test_fallback_plan_preserves_requested_total() -> None:
     assert total == 11
 
 
+def test_fallback_plan_uses_default_when_question_types_empty() -> None:
+    """직접 state에 빈 유형 목록이 들어와도 기본 객관식으로 수렴한다."""
+    plan = _build_fallback_plan(
+        subject="Rust",
+        total=5,
+        config={"question_types": []},
+        topics=[{"name": "소유권", "importance": 1.0}],
+    )
+
+    assert sum(a["count"] for a in plan["type_allocations"]) == 5
+    assert plan["type_allocations"][0]["template_id"] == "ko_multiple_choice_5"
+
+
 def test_generation_chunks_rotate_topics() -> None:
     """작은 시험에서도 한 주제에만 몰리지 않도록 청크 주제를 순환한다."""
     chunks = _build_chunks(
@@ -485,6 +498,34 @@ async def test_stale_failed_ids_do_not_force_exhausted() -> None:
     }
     result = await format_output_node(state)
     assert result["pipeline_outcome"] == "passed"
+
+
+async def test_format_output_strips_cjk_from_final_questions_and_html() -> None:
+    """최종 API/HTML 노출 전에 발문과 해설의 CJK 잔존을 제거한다."""
+    state = {
+        "calibrated_questions": [
+            {"question_id": "q1", "draft_id": "d1",
+             "template_id": "ko_short_answer", "topic": "정렬",
+             "difficulty": 3, "bloom_level": "이해", "stem": "순서가 颠倒되면?",
+             "correct_answer": "정렬", "explanation": "颠倒了 상태는 순서를 바로잡아야 한다."}
+        ],
+        "exam_plan": {"topic_weights": {"정렬": 1.0}},
+        "exam_config": {"total_questions": 1},
+        "retry_count": 0,
+        "max_retries": 0,
+        "failed_question_ids": [],
+        "validation_report": {
+            "results": [{"question_id": "q1", "passed": True, "issues": []}]
+        },
+        "timings": {"start": 0},
+    }
+
+    result = await format_output_node(state)
+
+    assert "颠倒" not in result["calibrated_questions"][0]["stem"]
+    assert "颠倒了" not in result["calibrated_questions"][0]["explanation"]
+    assert "颠倒" not in result["output_html"]
+    assert "颠倒了" not in result["answers_html"]
 
 
 async def test_programming_output_without_code_fails_gate() -> None:

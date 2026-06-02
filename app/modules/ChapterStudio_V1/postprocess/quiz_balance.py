@@ -9,14 +9,14 @@ from app.modules.ChapterStudio_V1.common.logging import logger
 from app.modules.ChapterStudio_V1.pipeline.payload import GeneratedQuiz
 
 _POSITION_TOKEN_RE = re.compile(
-    r"(?:보기|선택지|정답|오답)\s*(?:[A-Da-d]|[1-4]\s*번|[①②③④])"
+    r"(?:보기|선택지|정답|오답)\s*(?:[A-Da-d]|[0-9]\s*번|[①②③④])"
     r"|(?:[A-Da-d])\s*(?:번|보기|선택지)"
-    r"|(?:[1-4]\s*번|[①②③④])"
+    r"|(?:[0-9]\s*번|[①②③④])"
     r"|(?:첫|두|세|네)\s*번째\s*(?:보기|선택지)?"
 )
 _ANSWER_POSITION_PREFIX_RE = re.compile(
     r"^\s*(?:정답|답)\s*(?:은|는)?\s*[:：]?\s*"
-    r"(?:[1-4]\s*번|[①②③④]|[A-Da-d]\s*(?:번|보기|선택지)?)"
+    r"(?:[0-9]\s*번|[①②③④]|[A-Da-d]\s*(?:번|보기|선택지)?)"
     r"\s*(?:이야|입니다|이에요|이다|예요|야|임)?\s*"
     r"(?:[.。!！?？,:：;-]\s*|\s+)"
 )
@@ -59,15 +59,20 @@ def balance_quiz_answers(quizzes: list[GeneratedQuiz], seed_key: str = "") -> li
     targets = balanced_target_positions(len(_eligible_quizzes(quizzes)), seed=_seed_from_key(seed_key))
     target_iter = iter(targets)
     balanced: list[GeneratedQuiz] = []
-    for quiz in quizzes:
-        quiz = _without_intro_position(quiz)
+    for original in quizzes:
+        quiz = _without_intro_position(original)
         if _has_position_token(quiz.explanation):
-            _log_skip(quiz)
-            balanced.append(quiz)
+            _log_skip(original)
+            balanced.append(original)
             continue
         target_idx = next(target_iter)
         choices, answer_idx = shuffle_quiz_choices(quiz.choices, quiz.answer_idx, target_idx)
-        balanced.append(quiz.model_copy(update={"choices": choices, "answer_idx": answer_idx}))
+        candidate = quiz.model_copy(update={"choices": choices, "answer_idx": answer_idx})
+        if _has_position_token(candidate.explanation):
+            _log_skip(original)
+            balanced.append(original)
+            continue
+        balanced.append(candidate)
     _log_distribution(quizzes, balanced)
     return balanced
 

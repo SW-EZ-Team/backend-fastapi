@@ -177,5 +177,18 @@ def failure_status_sql(schema: str) -> str:
     )
 
 
+def audio_pending_status_sql(schema: str) -> str:
+    """강의는 완료됐지만 음성 백필 재시도가 필요한 상태를 result_summary에 합친다."""
+    return (
+        f"UPDATE {_table(schema, 'lesson_generation_status')} SET "
+        "current_node = 'audio_backfill', "
+        "result_summary = COALESCE(result_summary, '{}'::jsonb) "
+        "|| jsonb_build_object('audio_backfill', $2::jsonb), "
+        "error_message = $3, "
+        "updated_at = NOW() "
+        "WHERE lesson_id = $1"
+    )
+
+
 def _table(schema: str, name: str) -> str:
     return f"{schema}.{name}"

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from typing import Protocol
 
 from app.modules.ChapterStudio_V1.app.generation_context import GenerationContext
@@ -19,7 +20,7 @@ from app.modules.ChapterStudio_V1.common.config import tts_autogen_enabled
 from app.modules.ChapterStudio_V1.common.errors import StorageError
 from app.modules.ChapterStudio_V1.db.generation_context_loader import load_generation_context
 from app.modules.ChapterStudio_V1.db.persistence import persist_chapter_state
-from app.modules.ChapterStudio_V1.db.persistence_status import mark_chapter_failed
+from app.modules.ChapterStudio_V1.db.persistence_status import mark_audio_backfill_pending, mark_chapter_failed
 from app.modules.ChapterStudio_V1.db.weakness_aggregator import aggregate_weak_points
 from app.modules.ChapterStudio_V1.pipeline.converters import state_to_response
 from app.modules.ChapterStudio_V1.pipeline.graph import generate_chapter_state
@@ -195,8 +196,28 @@ async def _backfill_audio_when_needed(context: GenerationContext) -> None:
     try:
         result = await backfill_lesson_audio(context.lesson_id)
         _LOG.info("[lessons] 음성 백필 완료 — lesson_id=%s, result=%s", context.lesson_id, result)
+        if _audio_backfill_failed(result):
+            await _record_audio_pending(context, result)
     except Exception as exc:
         _LOG.warning("[lessons] 음성 백필 실패 — lesson_id=%s, error=%s", context.lesson_id, exc)
+        await _record_audio_pending(context, {}, exc)
+
+
+def _audio_backfill_failed(result: Mapping[str, object]) -> bool:
+    failed = result.get("failed", 0)
+    return isinstance(failed, int) and failed > 0
+
+
+async def _record_audio_pending(
+    context: GenerationContext,
+    result: Mapping[str, object],
+    error: Exception | None = None,
+) -> None:
+    try:
+        async with get_connection() as conn:
+            await mark_audio_backfill_pending(conn, context, result, error)
+    except Exception as exc:
+        _LOG.error("[lessons] 음성 백필 마커 기록 실패 — lesson_id=%s, error=%s", context.lesson_id, exc)
 
 
 async def _mark_public_chapter_available(conn: ExecuteConnection, lesson_id: str, slide_count: int) -> None:

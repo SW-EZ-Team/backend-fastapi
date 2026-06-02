@@ -6,7 +6,7 @@ import re
 import pytest
 
 from app.modules.ChapterStudio_V1.app.generation_context import GenerationContext
-from app.modules.ChapterStudio_V1.db.persistence_status import mark_chapter_failed
+from app.modules.ChapterStudio_V1.db.persistence_status import mark_audio_backfill_pending, mark_chapter_failed
 
 _PLACEHOLDER = re.compile(r"\$(\d+)")
 
@@ -34,6 +34,28 @@ async def test_mark_chapter_failed_upserts_failed_status() -> None:
     assert args[:4] == ("lesson-1", "tutoring-1", "generate_chapter_state", "chapter_lesson-1")
     assert json.loads(str(args[4])) == {"error_type": "ValueError", "error_message": "bad payload"}
     assert args[5] == "bad payload"
+
+
+@pytest.mark.anyio
+async def test_mark_audio_backfill_pending_merges_retry_marker() -> None:
+    conn = FakeConnection()
+
+    await mark_audio_backfill_pending(
+        conn,
+        _context(),
+        {"updated": 9, "failed": 2, "failed_slide_idxs": [1, 3]},
+    )
+
+    query, args = conn.calls[0]
+    summary = json.loads(str(args[1]))
+    assert "UPDATE chapter_studio.lesson_generation_status" in query
+    assert "jsonb_build_object('audio_backfill'" in query
+    assert args[0] == "lesson-1"
+    assert summary["status"] == "audio_pending"
+    assert summary["retry_needed"] is True
+    assert summary["failed"] == 2
+    assert summary["failed_slide_idxs"] == [1, 3]
+    assert "음성 백필 실패" in str(args[2])
 
 
 def _context() -> GenerationContext:

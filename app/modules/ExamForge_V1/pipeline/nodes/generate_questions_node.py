@@ -24,6 +24,7 @@ from app.modules.ExamForge_V1.pipeline.nodes.programming_context import attach_s
 from app.modules.ExamForge_V1.pipeline.nodes.question_repair import repair_missing_questions
 from app.modules.ExamForge_V1.pipeline.nodes.concept_blueprint import blueprint_prompt
 from app.modules.ExamForge_V1.quality.deduplicator import deduplicate_questions
+from app.modules.ExamForge_V1.quality.cjk_sanitizer import sanitize_exam_questions
 
 logger = get_logger(__name__)
 
@@ -220,7 +221,7 @@ async def generate_questions_node(state: ExamForgeState) -> dict:
     candidates = await _dedup_and_refill(
         candidates, allocations, topic_weights, connector, source_text, locale, semaphore
     )
-    all_drafts = attach_source_code_if_needed(candidates, source_text)
+    all_drafts = sanitize_exam_questions(attach_source_code_if_needed(candidates, source_text))
 
     # 생성 결과가 0건이면 에러로 종료
     if not all_drafts:

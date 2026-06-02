@@ -16,6 +16,7 @@ from app.modules.ExamForge_V1.common.ai_bridge import (
 )
 from app.modules.ExamForge_V1.common.errors import ParseError
 from app.modules.ExamForge_V1.common.logger import get_logger
+from app.modules.ExamForge_V1.quality.cjk_sanitizer import sanitize_exam_question
 
 logger = get_logger(__name__)
 
@@ -71,7 +72,7 @@ async def generate_answers_node(state: ExamForgeState) -> dict:
                     answered = template.parse_answer_response(resp.text, draft)
                     data = answered.model_dump()
                     if _has_answer_payload(data):
-                        return _preserve_generation_fields(data, q)
+                        return sanitize_exam_question(_preserve_generation_fields(data, q))
                 except (ParseError, ValueError, KeyError, TypeError) as e:
                     logger.warning("정답 생성 실패(%d차): %s", attempt + 1, e)
             return _empty_answer(q)
@@ -144,7 +145,7 @@ def _empty_answer(q: dict) -> dict:
     fallback["correct_answer"] = ""
     fallback["explanation"] = ""
     fallback["question_id"] = fallback.get("draft_id", "")
-    return fallback
+    return sanitize_exam_question(fallback)
 
 
 def _preserve_generation_fields(answered: dict, draft: dict) -> dict:
