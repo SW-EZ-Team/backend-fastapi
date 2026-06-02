@@ -1,6 +1,7 @@
 """Modal GPU용 Qwen3-TTS 보이스 클로닝 서버."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import os
 import tempfile
@@ -22,9 +23,23 @@ from app.modules.TTS_V2.deploy.modal_tts_utils import (
 
 APP_NAME = os.environ.get("QWEN3_TTS_MODAL_APP_NAME", "qwen3-tts-modal")
 MODEL_ID = os.environ.get("QWEN3_TTS_MODAL_MODEL_ID", "Qwen/Qwen3-TTS-12Hz-1.7B-Base")
-GPU = os.environ.get("QWEN3_TTS_MODAL_GPU", "L40S:1")
+GPU = os.environ.get("QWEN3_TTS_MODAL_GPU", "H100:1")
 AUTH_TOKEN = os.environ.get("QWEN3_TTS_MODAL_TOKEN", "").strip()
+DEFAULT_POOL_SIZE = 6
 MINUTES = 60
+
+
+def _env_int_clamped(key: str, default: int, min_value: int, max_value: int) -> int:
+    """잘못된 정수 환경값은 import 실패 대신 기본값으로 복구한다."""
+    raw_value = os.environ.get(key, str(default))
+    try:
+        value = int(raw_value)
+    except ValueError:
+        value = default
+    return max(min_value, min(max_value, value))
+
+
+POOL_SIZE = _env_int_clamped("QWEN3_TTS_MODAL_POOL_SIZE", DEFAULT_POOL_SIZE, 1, 16)
 
 
 class VoiceCloneModel(Protocol):
@@ -80,32 +95,44 @@ secrets = (
     scaledown_window=int(os.environ.get("QWEN3_TTS_MODAL_SCALEDOWN_SEC", "30")),
     secrets=secrets,
 )
-@modal.concurrent(max_inputs=2)
+@modal.concurrent(max_inputs=POOL_SIZE)
 class Qwen3TTSServer:
     """Qwen3-TTS 1.7B Base를 로드해 clone TTS를 제공한다."""
 
-    model: VoiceCloneModel
+    model_pool: asyncio.Queue[VoiceCloneModel]
+    pool_size: int
 
     @modal.enter()
     def load(self) -> None:
-        """컨테이너 시작 시 모델을 한 번만 로드한다."""
+        """컨테이너 시작 시 독립 모델 인스턴스 풀을 로드한다."""
         import torch
         from qwen_tts import Qwen3TTSModel
 
-        self.model = Qwen3TTSModel.from_pretrained(
-            MODEL_ID,
-            device_map="cuda:0",
-            dtype=torch.bfloat16,
-            attn_implementation=os.environ.get("QWEN3_TTS_ATTN", "sdpa"),
-        )
+        print(f"[qwen3-tts] 콜드스타트: gpu={GPU}, pool_size={POOL_SIZE}, model={MODEL_ID}")
+        self.pool_size = POOL_SIZE
+        self.model_pool = asyncio.Queue(maxsize=POOL_SIZE)
+        for index in range(POOL_SIZE):
+            model = Qwen3TTSModel.from_pretrained(
+                MODEL_ID,
+                device_map="cuda:0",
+                dtype=torch.bfloat16,
+                attn_implementation=os.environ.get("QWEN3_TTS_ATTN", "sdpa"),
+            )
+            self.model_pool.put_nowait(model)
+            print(f"[qwen3-tts] 모델 인스턴스 로드 완료: {index + 1}/{POOL_SIZE}")
 
     @modal.method()
-    def healthz(self) -> dict[str, str]:
+    def healthz(self) -> dict[str, str | int]:
         """원격 호출용 헬스체크다."""
-        return {"status": "ok", "model": MODEL_ID, "gpu": GPU}
+        return {
+            "status": "ok",
+            "model": MODEL_ID,
+            "gpu": GPU,
+            "pool_size": getattr(self, "pool_size", POOL_SIZE),
+        }
 
     @modal.method()
-    def synthesize_remote(
+    async def synthesize_remote(
         self,
         text: str,
         ref_audio_b64: str,
@@ -115,7 +142,7 @@ class Qwen3TTSServer:
     ) -> dict[str, str | int | float | bool]:
         """base64 레퍼런스를 받아 base64 WAV로 반환하는 원격 메서드다."""
         ref_audio = base64.b64decode(ref_audio_b64)
-        wav_bytes, meta = self._synthesize(text, ref_audio, ref_text, language, speed)
+        wav_bytes, meta = await self._synthesize(text, ref_audio, ref_text, language, speed)
         return {
             "audio_b64": base64.b64encode(wav_bytes).decode("ascii"),
             "sample_rate": meta.sample_rate,
@@ -128,7 +155,7 @@ class Qwen3TTSServer:
         }
 
     @modal.fastapi_endpoint(method="POST", docs=True)
-    def synthesize(
+    async def synthesize(
         self,
         text: Annotated[str, Form()],
         ref_audio: Annotated[UploadFile, File()],
@@ -139,8 +166,8 @@ class Qwen3TTSServer:
     ) -> Response:
         """기존 FastAPI 커넥터가 호출하는 multipart HTTP 엔드포인트다."""
         self._verify_token(authorization)
-        ref_audio_bytes = ref_audio.file.read()
-        wav_bytes, meta = self._synthesize(
+        ref_audio_bytes = await ref_audio.read()
+        wav_bytes, meta = await self._synthesize(
             text=text,
             ref_audio_bytes=ref_audio_bytes,
             ref_text=ref_text,
@@ -159,7 +186,7 @@ class Qwen3TTSServer:
         if expected and authorization != f"Bearer {expected}":
             raise HTTPException(status_code=401, detail="invalid token")
 
-    def _synthesize(
+    async def _synthesize(
         self,
         text: str,
         ref_audio_bytes: bytes,
@@ -171,17 +198,22 @@ class Qwen3TTSServer:
         started_at = time.perf_counter()
         clean_ref_text = ref_text.strip() if ref_text else ""
         use_x_vector_only = not clean_ref_text
+        model = await self._acquire_model()
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp:
             tmp.write(ref_audio_bytes)
             tmp.flush()
-            wavs, sample_rate = self.model.generate_voice_clone(
-                text=text,
-                language=normalize_language(language),
-                ref_audio=tmp.name,
-                ref_text=clean_ref_text or None,
-                x_vector_only_mode=use_x_vector_only,
-                speed=max(0.5, min(2.0, speed)),
-            )
+            try:
+                wavs, sample_rate = await asyncio.to_thread(
+                    model.generate_voice_clone,
+                    text=text,
+                    language=normalize_language(language),
+                    ref_audio=tmp.name,
+                    ref_text=clean_ref_text or None,
+                    x_vector_only_mode=use_x_vector_only,
+                    speed=max(0.5, min(2.0, speed)),
+                )
+            finally:
+                self._release_model(model)
         wav_bytes = encode_wav(wavs[0], sample_rate)
         return wav_bytes, SynthesisMeta(
             sample_rate=sample_rate,
@@ -190,3 +222,14 @@ class Qwen3TTSServer:
             ref_text_used=clean_ref_text,
             x_vector_only=use_x_vector_only,
         )
+
+    async def _acquire_model(self) -> VoiceCloneModel:
+        """풀이 준비되지 않은 상태는 503으로 알려 호출자가 재시도하게 한다."""
+        pool = getattr(self, "model_pool", None)
+        if pool is None:
+            raise HTTPException(status_code=503, detail="모델 풀이 아직 준비되지 않았다.")
+        return await pool.get()
+
+    def _release_model(self, model: VoiceCloneModel) -> None:
+        """예외가 나도 모델 인스턴스를 풀로 되돌린다."""
+        self.model_pool.put_nowait(model)

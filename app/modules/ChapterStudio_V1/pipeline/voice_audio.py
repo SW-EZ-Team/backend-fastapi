@@ -16,6 +16,7 @@ from app.modules.ChapterStudio_V1.common.config import (
     tts_media_url,
     tts_output_dir,
     tts_selective_tilde_enabled,
+    tts_synth_concurrency,
 )
 from app.modules.ChapterStudio_V1.common.errors import ConversionError
 from app.modules.ChapterStudio_V1.pipeline.state import StateRecord, StateRecords
@@ -31,16 +32,17 @@ async def synthesize_voice_audio(
     connector: TTSConnector | None = None,
     *,
     voice: str = "f1",
-    max_concurrency: int = 4,
+    max_concurrency: int | None = None,
     tutor_profile: TutorVoiceProfile | None = None,
 ) -> StateRecords:
     """슬라이드별 음성대본을 TTS 오디오 파일 레코드로 변환한다."""
-    if max_concurrency < 1:
+    resolved_concurrency = tts_synth_concurrency() if max_concurrency is None else max_concurrency
+    if resolved_concurrency < 1:
         raise ConversionError("max_concurrency는 1 이상이어야 한다.")
     if tutor_profile is not None:
-        return await _synthesize_with_tutor_profile(voice_scripts, tutor_profile, max_concurrency)
+        return await _synthesize_with_tutor_profile(voice_scripts, tutor_profile, resolved_concurrency)
     tts = connector or get_tts_connector()
-    semaphore = asyncio.Semaphore(max_concurrency)
+    semaphore = asyncio.Semaphore(resolved_concurrency)
     tasks = [_synthesize_one(record, tts, voice, semaphore) for record in voice_scripts]
     results = await asyncio.gather(*tasks)
     return sorted(results, key=lambda record: _record_int(record, "slide_idx"))

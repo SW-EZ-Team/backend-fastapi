@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,19 @@ class FakeLegacyTTSConnector:
     async def synthesize(self, text: str, voice: str = "f1") -> dict[str, object]:
         self.texts.append(text)
         return {"audio_url": f"mock://audio/{voice}", "duration_sec": 1.0}
+
+
+class SlowLegacyTTSConnector:
+    def __init__(self) -> None:
+        self.active = 0
+        self.max_active = 0
+
+    async def synthesize(self, text: str, voice: str = "f1") -> dict[str, object]:
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        await asyncio.sleep(0.02)
+        self.active -= 1
+        return {"audio_url": f"mock://audio/{text}", "duration_sec": 1.0}
 
 
 def test_resolve_tts_plan_routes_preset_and_custom_refs() -> None:
@@ -161,6 +175,27 @@ async def test_synthesize_voice_audio_uses_selective_tilde_for_routed_tts_only(
     expected = "안녕하세요~ 오른쪽이 더 커요. 천천히 따라와 보세요~"
     assert connector.requests[0].text == expected
     assert result[0]["script_text"] == source
+
+
+@pytest.mark.asyncio
+async def test_synthesize_voice_audio_reads_tts_synth_concurrency_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connector = SlowLegacyTTSConnector()
+    monkeypatch.setenv("TTS_SYNTH_CONCURRENCY", "2")
+    monkeypatch.setattr(voice_audio, "tts_selective_tilde_enabled", lambda: False)
+
+    result = await voice_audio.synthesize_voice_audio(
+        [
+            {"slide_idx": 0, "script_text": "0번 대본"},
+            {"slide_idx": 1, "script_text": "1번 대본"},
+            {"slide_idx": 2, "script_text": "2번 대본"},
+        ],
+        connector=connector,
+    )
+
+    assert [record["slide_idx"] for record in result] == [0, 1, 2]
+    assert connector.max_active == 2
 
 
 def _profile(tutor_id: str, *, formal: bool = True, voice_sample_url: str = "") -> TutorVoiceProfile:

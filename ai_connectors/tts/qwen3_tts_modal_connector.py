@@ -1,26 +1,27 @@
-"""Modal GPU 배포용 Qwen3-TTS HTTP 커넥터.
+"""Modal GPU 배포용 Qwen3-TTS 네이티브 커넥터.
 
 단건 합성(synthesize), 배치 합성(synthesize_batch),
 긴 텍스트 자동 분할+병합, 지수 백오프 재시도를 지원한다.
-응답 파싱 헬퍼와 재시도 로직은 _modal_retry.py 에 분리되어 있다.
+Modal HTTP multipart 대신 배포 클래스의 remote.aio()를 직접 호출한다.
 """
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 import time
+from typing import Protocol
 
-import httpx
+import modal
 
 from common.logging import get_logger
-from ..errors import AuthError, InferenceError, ModelLoadError, ModelNotFoundError
+from ..errors import AuthError, InferenceError, ModelNotFoundError
 from ..errors import TimeoutError as ConnectorTimeoutError
 from ..tts_schemas import TTSRequest, TTSResponse
 from ._text_segmentation import default_segment_pause_ms, split_tts_segments
 from ._modal_retry import (
-    build_tts_response,
+    build_tts_response_from_modal_result,
     call_with_retry,
-    extract_error_detail,
     merge_segment_responses,
 )
 
@@ -28,31 +29,53 @@ _LOG = get_logger(__name__)
 
 # 긴 텍스트를 자동 분할할 때 세그먼트당 최대 문자 수
 _SEGMENT_MAX_CHARS = 120
+_SERVER_CLASS = "Qwen3TTSServer"
+_DEFAULT_APP_NAME = "qwen3-tts-modal"
+
+
+class _RemoteAio(Protocol):
+    """Modal remote.aio 호출면만 정의한다."""
+
+    async def aio(self, **payload: object) -> object:
+        """Modal 원격 메서드를 비동기로 호출한다."""
+
+
+class _RemoteMethod(Protocol):
+    """Modal 메서드 프록시의 remote 속성을 표현한다."""
+
+    remote: _RemoteAio
+
+
+class _TtsServer(Protocol):
+    """Qwen3TTSServer 에서 커넥터가 쓰는 메서드만 정의한다."""
+
+    synthesize_remote: _RemoteMethod
 
 
 class Qwen3TTSModalConnector:
-    """Modal 엔드포인트를 통해 원격 Qwen3-TTS 를 호출한다."""
+    """Modal 배포 클래스 메서드로 원격 Qwen3-TTS 를 호출한다."""
 
     name: str = "qwen3-tts-modal"
 
-    def __init__(self, endpoint: str | None = None, timeout_sec: float = 300.0) -> None:
-        self._endpoint = endpoint or os.getenv("QWEN3_TTS_MODAL_URL", "").strip()
-        self._token = os.getenv("QWEN3_TTS_MODAL_TOKEN", "").strip()
+    def __init__(
+        self,
+        endpoint: str | None = None,
+        timeout_sec: float = 300.0,
+        app_name: str | None = None,
+    ) -> None:
+        if endpoint:
+            _LOG.warning("기존 HTTP URL 경로는 네이티브 호출에서 사용하지 않습니다.")
+        self._app_name = _resolve_app_name(app_name)
         self._timeout_sec = timeout_sec
-        # AsyncClient 를 지연 생성해 재사용한다 — 매 요청마다 TCP 핸드셰이크 방지
-        self._client: httpx.AsyncClient | None = None
-
-    # ------------------------------------------------------------------ #
-    # 공개 API                                                             #
-    # ------------------------------------------------------------------ #
+        # Modal 클래스 조회는 비용이 있으므로 커넥터 인스턴스 안에서 재사용한다.
+        self._server: _TtsServer | None = None
 
     async def synthesize(self, request: TTSRequest) -> TTSResponse:
-        """Modal TTS 엔드포인트에 요청을 보내 WAV 응답을 받는다.
+        """Modal TTS 원격 메서드에 요청을 보내 WAV 응답을 받는다.
 
         텍스트가 _SEGMENT_MAX_CHARS 를 초과하면 자동으로 분할 후 병합한다.
         일시적 오류 발생 시 최대 3 회 지수 백오프 재시도한다.
         """
-        self._assert_endpoint()
         segments = split_tts_segments(request.text, max_chars=_SEGMENT_MAX_CHARS)
         if not segments:
             raise InferenceError("합성할 텍스트가 비어 있습니다.")
@@ -118,63 +141,57 @@ class Qwen3TTSModalConnector:
         return list(await asyncio.gather(*[_bounded(req) for req in requests]))
 
     async def aclose(self) -> None:
-        """재사용 중인 AsyncClient 를 명시적으로 닫는다."""
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
+        """기존 호출부 호환용 무동작 종료 훅이다."""
+        self._server = None
 
     def supports(self, feature: str) -> bool:
         """원격 실행 경로에서도 동일한 기능 플래그를 노출한다."""
         return feature in {"voice_cloning", "language_hint", "auto_transcribe", "quality_gate"}
 
-    # ------------------------------------------------------------------ #
-    # 내부 메서드                                                          #
-    # ------------------------------------------------------------------ #
-
-    def _assert_endpoint(self) -> None:
-        """엔드포인트 미설정 시 즉시 예외를 올린다."""
-        if not self._endpoint:
-            raise ModelLoadError(
-                "QWEN3_TTS_MODAL_URL 이 설정되지 않았습니다. "
-                "배포 환경에서는 Modal 엔드포인트를 지정하고, "
-                "로컬 개발에서는 AI_MODEL_TTS=mlx-audio-qwen3-tts 를 사용하세요."
-            )
-
-    def _get_client(self) -> httpx.AsyncClient:
-        """AsyncClient 를 지연 생성 후 반환한다."""
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=self._timeout_sec)
-        return self._client
+    def _get_server(self) -> _TtsServer:
+        """배포된 Modal 클래스 인스턴스를 지연 생성해 반환한다."""
+        if self._server is None:
+            server_cls = modal.Cls.from_name(self._app_name, _SERVER_CLASS)
+            self._server = server_cls()
+        return self._server
 
     async def _call_endpoint(self, request: TTSRequest) -> TTSResponse:
-        """단건 HTTP 요청을 실행하고 TTSResponse 로 변환한다."""
-        headers = {"Authorization": f"Bearer {self._token}"} if self._token else {}
-        files = {"ref_audio": ("ref.wav", request.ref_audio_bytes, "audio/wav")}
-        data: dict[str, str] = {
-            "text": request.text,
-            "language": request.language,
-            "speed": str(request.speed),
-        }
-        if request.ref_text:
-            data["ref_text"] = request.ref_text
+        """단건 Modal 네이티브 호출을 실행하고 TTSResponse 로 변환한다."""
+        started_at = time.perf_counter()
+        ref_audio_b64 = base64.b64encode(request.ref_audio_bytes).decode("ascii")
         try:
-            response = await self._get_client().post(
-                self._endpoint, headers=headers, data=data, files=files
+            result = await asyncio.wait_for(
+                self._get_server().synthesize_remote.remote.aio(
+                    text=request.text,
+                    ref_audio_b64=ref_audio_b64,
+                    ref_text=request.ref_text or None,
+                    language=request.language,
+                    speed=request.speed,
+                ),
+                timeout=self._timeout_sec,
             )
-        except httpx.TimeoutException as exc:
-            raise ConnectorTimeoutError("Modal TTS 응답 시간이 초과되었습니다.") from exc
-        except httpx.HTTPError as exc:
-            raise InferenceError(f"Modal TTS 호출 실패: {exc}") from exc
+        except asyncio.TimeoutError as exc:
+            raise ConnectorTimeoutError("Modal TTS 네이티브 호출 시간이 초과되었습니다.") from exc
+        except modal.exception.NotFoundError as exc:
+            raise ModelNotFoundError("Modal TTS 클래스 또는 앱을 찾을 수 없습니다.") from exc
+        except modal.exception.AuthError as exc:
+            raise AuthError("Modal TTS 인증에 실패했습니다. Modal 토큰을 확인하세요.") from exc
+        except (
+            modal.exception.ConnectionError,
+            modal.exception.FunctionTimeoutError,
+            modal.exception.TimeoutError,
+        ) as exc:
+            raise ConnectorTimeoutError(f"Modal TTS 연결/실행 시간이 초과되었습니다: {exc}") from exc
+        except modal.exception.Error as exc:
+            raise InferenceError(f"Modal TTS 네이티브 호출 실패: {exc}") from exc
+        latency_ms = (time.perf_counter() - started_at) * 1000.0
+        try:
+            return build_tts_response_from_modal_result(result, request, self.name, latency_ms)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise InferenceError(f"Modal TTS 응답 처리 실패: {exc}") from exc
 
-        if response.status_code in {401, 403}:
-            raise AuthError("Modal TTS 인증에 실패했습니다. 토큰을 확인하세요.")
-        if response.status_code == 404:
-            raise ModelNotFoundError("Modal TTS 엔드포인트를 찾을 수 없습니다.")
-        if response.status_code >= 400:
-            raise InferenceError(extract_error_detail(response))
 
-        content_type = response.headers.get("content-type", "audio/wav").split(";")[0]
-        if not content_type.startswith("audio/"):
-            raise InferenceError("Modal TTS 응답이 오디오 형식이 아닙니다.")
-
-        return build_tts_response(response, request, self.name)
+def _resolve_app_name(app_name: str | None) -> str:
+    """환경변수의 빈 문자열까지 방어해 Modal 앱 이름을 결정한다."""
+    resolved = app_name or os.getenv("QWEN3_TTS_MODAL_APP_NAME", _DEFAULT_APP_NAME)
+    return resolved.strip() or _DEFAULT_APP_NAME

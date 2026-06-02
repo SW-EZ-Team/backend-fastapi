@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping, Sequence
 
 import pytest
@@ -94,6 +95,40 @@ async def test_backfill_lesson_audio_keeps_other_slides_when_one_tts_fails(monke
     assert result == {"lesson_id": "lesson-1", "updated": 1, "failed": 1}
     assert any(args[1] == 0 for _query, args in conn.executed)
     assert not any(args[1] == 1 for _query, args in conn.executed)
+
+
+@pytest.mark.asyncio
+async def test_backfill_lesson_audio_uses_tts_synth_concurrency(monkeypatch: pytest.MonkeyPatch) -> None:
+    conn = FakeConnection()
+    conn.voice_rows = [_voice_row(0), _voice_row(1), _voice_row(2)]
+    active = 0
+    max_active = 0
+
+    async def fake_load(db_conn: object, lesson_id: str) -> GenerationContext:
+        return _context(lesson_id)
+
+    async def fake_synthesize(
+        scripts: list[dict[str, object]],
+        *,
+        tutor_profile: TutorVoiceProfile,
+    ) -> list[dict[str, object]]:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.02)
+        active -= 1
+        idx = int(scripts[0]["slide_idx"])
+        return [{"slide_idx": idx, "audio_url": f"mock://audio/{idx}", "duration_hint_sec": 2.5}]
+
+    monkeypatch.setenv("TTS_SYNTH_CONCURRENCY", "2")
+    monkeypatch.setattr(backfill, "get_connection", lambda: FakeConnectionManager(conn))
+    monkeypatch.setattr(backfill, "load_generation_context", fake_load)
+    monkeypatch.setattr(backfill, "synthesize_voice_audio", fake_synthesize)
+
+    result = await backfill.backfill_lesson_audio("lesson-1")
+
+    assert result == {"lesson_id": "lesson-1", "updated": 3, "failed": 0}
+    assert max_active == 2
 
 
 def _voice_row(slide_idx: int) -> dict[str, object]:

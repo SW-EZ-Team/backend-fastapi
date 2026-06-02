@@ -1,17 +1,17 @@
-"""Modal HTTP 호출 재시도 헬퍼 및 응답 파싱 유틸.
+"""Modal 호출 재시도 헬퍼 및 응답 파싱 유틸.
 
 재시도 로직 : 지수 백오프(1s → 2s → 4s), 최대 3회.
-응답 파싱  : httpx.Response → TTSResponse 변환 헬퍼.
+응답 파싱  : Modal 네이티브 dict → TTSResponse 변환 헬퍼.
 세그먼트 병합: 분할 합성 결과 → 단일 WAV bytes.
 """
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 from collections.abc import Awaitable, Callable
+from collections.abc import Mapping
 from typing import TypeVar
-from urllib.parse import unquote
-
-import httpx
 
 from common.logging import get_logger
 from ..errors import AuthError, ModelNotFoundError
@@ -69,66 +69,68 @@ def merge_segment_responses(
     return _merge_segment_response_bytes(responses, sample_rate, pause_ms=pause_ms)
 
 
-def build_tts_response(
-    response: httpx.Response,
+def build_tts_response_from_modal_result(
+    result: object,
     request: TTSRequest,
     model_name: str,
+    fallback_latency_ms: float,
 ) -> TTSResponse:
-    """httpx.Response 를 TTSResponse 로 변환한다."""
-    content_type = response.headers.get("content-type", "audio/wav").split(";")[0]
+    """Modal 네이티브 dict 응답을 TTSResponse 로 변환한다."""
+    if not isinstance(result, Mapping):
+        raise TypeError("Modal TTS 응답이 mapping 형식이 아니다.")
+    audio_b64 = _mapping_str(result, "audio_b64")
+    try:
+        audio_bytes = base64.b64decode(audio_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("Modal TTS audio_b64 가 올바른 base64 형식이 아니다.") from exc
+    ref_text_used = _mapping_str_default(result, "ref_text_used", request.ref_text or "")
     return TTSResponse(
-        audio_bytes=response.content,
-        sample_rate=_parse_int(response, "x-sample-rate", 24000),
-        content_type=content_type,
-        duration_sec=_parse_float(response, "x-duration-sec", 0.0),
-        latency_ms=_parse_float(response, "x-latency-ms", 0.0),
-        char_count=_parse_int(response, "x-char-count", len(request.text)),
-        model=model_name,
-        auto_transcribed=response.headers.get("x-auto-transcribed", "false") == "true",
-        resolved_ref_text=unquote(
-            response.headers.get("x-ref-text-used", request.ref_text or "")
-        ),
-        ref_text_source=response.headers.get("x-ref-text-source", "client"),
-        retry_count=_parse_int(response, "x-retry-count", 0),
-        quality_cer=_parse_optional_float(response, "x-quality-cer"),
-        quality_reason=response.headers.get("x-quality-reason", "not_reported"),
-        segment_count=_parse_int(response, "x-segment-count", 1),
+        audio_bytes=audio_bytes,
+        sample_rate=_mapping_int(result, "sample_rate", 24000),
+        content_type="audio/wav",
+        duration_sec=_mapping_float(result, "duration_sec", 0.0),
+        latency_ms=_mapping_float(result, "latency_ms", fallback_latency_ms),
+        char_count=_mapping_int(result, "char_count", len(request.text)),
+        model=_mapping_str_default(result, "model", model_name),
+        auto_transcribed=False,
+        resolved_ref_text=ref_text_used,
+        ref_text_source="client" if ref_text_used else "empty_fallback",
+        retry_count=0,
+        quality_cer=None,
+        quality_reason="not_reported",
+        segment_count=1,
     )
 
 
-def extract_error_detail(response: httpx.Response) -> str:
-    """에러 응답 본문에서 사람이 읽을 메시지를 뽑는다."""
-    try:
-        payload = response.json()
-    except ValueError:
-        payload = {}
-    if isinstance(payload, dict) and payload.get("detail"):
-        return str(payload["detail"])
-    return f"Modal TTS 호출 실패 (HTTP {response.status_code})"
+def _mapping_str(data: Mapping[object, object], name: str) -> str:
+    """필수 문자열 필드를 엄격하게 읽는다."""
+    value = data[name]
+    if not isinstance(value, str):
+        raise TypeError(f"{name} 필드가 문자열이 아니다.")
+    return value
 
 
-def _parse_int(response: httpx.Response, name: str, default: int) -> int:
-    """정수 헤더를 읽되 실패하면 기본값으로 되돌린다."""
-    try:
-        return int(response.headers.get(name, default))
-    except (TypeError, ValueError):
-        return default
+def _mapping_str_default(data: Mapping[object, object], name: str, default: str) -> str:
+    """선택 문자열 필드를 읽되 없으면 기본값을 쓴다."""
+    value = data.get(name, default)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise TypeError(f"{name} 필드가 문자열이 아니다.")
+    return value
 
 
-def _parse_float(response: httpx.Response, name: str, default: float) -> float:
-    """실수 헤더를 읽되 실패하면 기본값으로 되돌린다."""
-    try:
-        return float(response.headers.get(name, default))
-    except (TypeError, ValueError):
-        return default
+def _mapping_int(data: Mapping[object, object], name: str, default: int) -> int:
+    """Modal 숫자 필드를 정수로 정규화한다."""
+    value = data.get(name, default)
+    if isinstance(value, bool):
+        raise TypeError(f"{name} 필드가 정수가 아니다.")
+    return int(value)
 
 
-def _parse_optional_float(response: httpx.Response, name: str) -> float | None:
-    """없을 수도 있는 float 헤더를 안전하게 읽는다."""
-    raw = response.headers.get(name)
-    if raw is None or raw == "":
-        return None
-    try:
-        return float(raw)
-    except ValueError:
-        return None
+def _mapping_float(data: Mapping[object, object], name: str, default: float) -> float:
+    """Modal 숫자 필드를 실수로 정규화한다."""
+    value = data.get(name, default)
+    if isinstance(value, bool):
+        raise TypeError(f"{name} 필드가 실수가 아니다.")
+    return float(value)

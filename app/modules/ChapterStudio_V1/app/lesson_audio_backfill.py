@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Protocol
 
 from app.modules.ChapterStudio_V1.app.generation_context import GenerationContext
-from app.modules.ChapterStudio_V1.common.config import database_schema
+from app.modules.ChapterStudio_V1.common.config import database_schema, tts_synth_concurrency
 from app.modules.ChapterStudio_V1.common.errors import ConversionError
 from app.modules.ChapterStudio_V1.db.audio_backfill_sql import (
     AudioBackfillTableColumns,
@@ -22,6 +23,8 @@ from app.modules.ChapterStudio_V1.pipeline.voice_audio import synthesize_voice_a
 from common.db import get_connection
 
 _LOG = logging.getLogger(__name__)
+
+SynthesisOutcome = tuple[StateRecord, StateRecord | Exception]
 
 
 class AudioBackfillConnection(Protocol):
@@ -45,10 +48,14 @@ async def backfill_lesson_audio(lesson_id: str, tutor_id: str | None = None) -> 
         columns = await _load_columns(conn, schema)
         failed += invalid_count
         profile = _profile(context, tutor_id)
-        for script in voice_scripts:
+        for script, outcome in await _synthesize_many(voice_scripts, profile):
+            if isinstance(outcome, Exception):
+                slide_idx = script.get("slide_idx")
+                _LOG.warning("[lessons] 음성 백필 실패 — lesson_id=%s, slide_idx=%s, error=%s", lesson_id, slide_idx, outcome)
+                failed += 1
+                continue
             try:
-                audio = await _synthesize_one(script, profile)
-                touched = await _update_audio_record(conn, schema, columns, lesson_id, audio)
+                touched = await _update_audio_record(conn, schema, columns, lesson_id, outcome)
             except Exception as exc:
                 _LOG.warning("[lessons] 음성 백필 실패 — lesson_id=%s, error=%s", lesson_id, exc)
                 failed += 1
@@ -90,6 +97,19 @@ async def _synthesize_one(script: StateRecord, profile: TutorVoiceProfile) -> St
     if not results:
         raise ConversionError("TTS 결과가 비어 있다.")
     return results[0]
+
+async def _synthesize_many(voice_scripts: StateRecords, profile: TutorVoiceProfile) -> list[SynthesisOutcome]:
+    """백필은 슬라이드별 실패를 보존하면서 env 동시성으로 합성한다."""
+    semaphore = asyncio.Semaphore(tts_synth_concurrency())
+
+    async def _run(script: StateRecord) -> SynthesisOutcome:
+        async with semaphore:
+            try:
+                return script, await _synthesize_one(script, profile)
+            except Exception as exc:
+                return script, exc
+
+    return list(await asyncio.gather(*[_run(script) for script in voice_scripts]))
 
 async def _update_audio_record(
     conn: AudioBackfillConnection,
