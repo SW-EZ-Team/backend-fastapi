@@ -17,7 +17,6 @@ from app.modules.ChapterStudio_V1.db.persistence_values import (
     optional_number as _optional_number,
     optional_records as _optional_records,
     optional_text as _optional_text,
-    record_default_text as _record_default_text,
     record_int as _record_int,
     record_str_list as _record_str_list,
     record_text as _record_text,
@@ -25,6 +24,7 @@ from app.modules.ChapterStudio_V1.db.persistence_values import (
     state_text as _state_text,
     voice_rows as _voice_rows,
 )
+from app.modules.ChapterStudio_V1.db.title_fallback import slide_title_from_context
 from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState, StateRecord
 
 _AI_NOTE_TYPE = "ai_auto"
@@ -66,6 +66,7 @@ async def _insert_public_slides(
 ) -> dict[int, str]:
     drafts = {_record_int(row, "slide_idx"): row for row in _optional_records(state, "slide_drafts")}
     voices = {_record_int(row, "slide_idx"): row for row in _voice_rows(state)}
+    outlines = {_record_int(row, "slide_idx"): row for row in _optional_records(state, "slide_outline")}
     slide_ids: dict[int, str] = {}
     for row in _records(state, "slides"):
         idx = _record_int(row, "slide_idx")
@@ -77,7 +78,7 @@ async def _insert_public_slides(
             slide_id,
             context.lesson_id,
             idx,
-            _slide_title(drafts.get(idx), context, idx),
+            _slide_title(drafts.get(idx), row, voice, outlines.get(idx), context, idx),
             _record_text(row, "html_content"),
             _optional_text(voice, "audio_url"),
             duration if duration is not None else 0.0,
@@ -125,6 +126,12 @@ async def _insert_public_note(
     )
 
 
-def _slide_title(row: StateRecord | None, context: GenerationContext, idx: int) -> str:
-    fallback = f"{context.chapter_title} {idx + 1}"
-    return (_record_default_text(row, "title", fallback) if row is not None else fallback)[:200]
+def _slide_title(
+    draft: StateRecord | None,
+    slide: StateRecord,
+    voice: StateRecord,
+    outline: StateRecord | None,
+    context: GenerationContext,
+    idx: int,
+) -> str:
+    return slide_title_from_context(draft, slide, voice, outline, context.chapter_title, idx)

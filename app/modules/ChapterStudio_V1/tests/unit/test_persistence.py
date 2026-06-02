@@ -116,7 +116,7 @@ async def test_persist_chapter_state_writes_public_spring_tables() -> None:
     assert slide_args[1:5] == (
         "lesson-1",
         0,
-        "리스트 컴프리헨션 1",
+        "핵심 흐름",
         "<iframe srcdoc='<section>1</section>'></iframe>",
     )
     assert slide_args[5:] == (None, 3.5)

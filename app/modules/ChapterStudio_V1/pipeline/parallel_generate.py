@@ -5,7 +5,8 @@ connector.supports("batch")가 True일 때(=Qwen Modal) 강의 1개의 산출물
 오류를, 작은 단일목적 guided JSON 스키마 + 병렬 호출로 회피한다.
 
 동시 호출(asyncio.gather):
-    slides ‖ quizzes ‖ note ‖ assignment ‖ voice_scripts(슬라이드별 N개)
+    1단계 slides ‖ quizzes ‖ note ‖ assignment
+    2단계 생성된 slide 화면 요약을 넣어 voice_scripts(슬라이드별 N개) 병렬 생성
 B200 max_inputs=8가 동시 입력을 처리한다.
 
 설계 원칙(정직하게):
@@ -23,7 +24,7 @@ import asyncio
 import json
 from collections.abc import Callable
 from functools import partial
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from pydantic import ValidationError
 
@@ -45,7 +46,7 @@ from app.modules.ChapterStudio_V1.pipeline.parallel_inputs import (
     build_personalization_args,
     build_voice_targets,
 )
-from app.modules.ChapterStudio_V1.pipeline.payload import GeneratedLessonPayload
+from app.modules.ChapterStudio_V1.pipeline.payload import GeneratedLessonPayload, GeneratedSlide
 from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState
 
 _Result = TypeVar("_Result")
@@ -61,23 +62,22 @@ async def generate_lesson_parallel(
     brief = build_brief(state)
     outline = build_outline_text(state, slide_count)
     template_key = _template_key(state)
-    voice_targets = build_voice_targets(state, slide_count)
     personalization = build_personalization_args(state)
 
-    bundle = await _gather_components(connector, brief, outline, template_key, slide_count, voice_targets, personalization)
+    bundle = await _gather_components(connector, state, brief, outline, template_key, slide_count, personalization)
     return assemble_payload(bundle, slide_count)
 
 
 async def _gather_components(
     connector: AIConnector,
+    state: ChapterStudioState,
     brief: str,
     outline: str,
     template_key: str,
     slide_count: int,
-    voice_targets: list[VoiceTarget],
     personalization: PersonalizationArgs,
 ) -> ComponentBundle:
-    """4개 코어 컴포넌트 + 슬라이드별 voice를 동시 생성한다(항목별 graceful 재시도)."""
+    """코어 컴포넌트 생성 후 화면 내용 기반 voice를 생성한다."""
     slides_task = _component(
         connector, pp.build_slides_request(brief, outline, slide_count, template_key, personalization), pp.parse_slides
     )
@@ -90,11 +90,9 @@ async def _gather_components(
     assignment_task = _component(
         connector, pp.build_assignment_request(brief, outline, slide_count, template_key, personalization), pp.parse_assignment
     )
-    voice_task = _gather_voices(connector, brief, slide_count, voice_targets, personalization)
-
-    slides, quizzes, note_blocks, assignment, voice_scripts = await asyncio.gather(
-        slides_task, quizzes_task, note_task, assignment_task, voice_task
-    )
+    slides, quizzes, note_blocks, assignment = await asyncio.gather(slides_task, quizzes_task, note_task, assignment_task)
+    voice_targets = build_voice_targets(_state_with_slides(state, slides), slide_count)
+    voice_scripts = await _gather_voices(connector, brief, slide_count, voice_targets, personalization)
     return ComponentBundle(
         slides=slides,
         quizzes=quizzes,
@@ -120,7 +118,16 @@ async def _gather_voices(
     tasks = [
         _component(
             connector,
-            pp.build_voice_request(brief, t.title, t.focus, t.summary, t.slide_idx, slide_count, prompt_personalization),
+            pp.build_voice_request(
+                brief,
+                t.title,
+                t.focus,
+                t.summary,
+                t.previous_title,
+                t.slide_idx,
+                slide_count,
+                prompt_personalization,
+            ),
             partial(pp.parse_voice, slide_idx=t.slide_idx),
         )
         for t in voice_targets
@@ -160,6 +167,13 @@ def _template_key(state: ChapterStudioState) -> str:
     if not isinstance(value, str) or value == "":
         raise ConversionError("template_key 문자열이 필요하다.")
     return value
+
+
+def _state_with_slides(state: ChapterStudioState, slides: list[GeneratedSlide]) -> ChapterStudioState:
+    """voice target 생성 단계에서만 생성된 슬라이드 초안을 주입한다."""
+    data = dict(state)
+    data["slide_drafts"] = [slide.model_dump() for slide in slides]
+    return cast(ChapterStudioState, data)
 
 
 def _default_personalization_args() -> PersonalizationArgs:

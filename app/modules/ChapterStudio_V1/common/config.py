@@ -320,6 +320,11 @@ def voice_length_gate_enabled() -> bool:
     return _bool_value("CHAPTERSTUDIO_VOICE_LENGTH_GATE", True)
 
 
+def voice_cohesion_enabled() -> bool:
+    """슬라이드 간 음성대본 도입부 응집성 재작성 활성 여부를 반환한다(기본 ON)."""
+    return _bool_value("VOICE_COHESION_ENABLED", True)
+
+
 def voice_min_chars() -> int:
     """voice_script 최소 문자 수를 반환한다(기본 900).
 

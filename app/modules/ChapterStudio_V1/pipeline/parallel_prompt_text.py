@@ -121,7 +121,7 @@ def assignment_prompts(brief: str, outline: str, *, weak_points: str, audience_l
 
 
 def voice_prompt(
-    brief: str, slide_title: str, slide_focus: str, slide_summary: str, slide_idx: int, *, weak_points: str, audience_level: str, tone: int, pace: int, tutor_depth: int, socratic: int, learning_goal: str, use_formal_speech: bool = True, use_emoji: bool = False, tutor_name: str = "", tutor_tagline: str = "", is_default_tutor: bool = True, voice_sample_url: str = ""
+    brief: str, slide_title: str, slide_focus: str, slide_summary: str, slide_idx: int, *, weak_points: str, audience_level: str, tone: int, pace: int, tutor_depth: int, socratic: int, learning_goal: str, use_formal_speech: bool = True, use_emoji: bool = False, tutor_name: str = "", tutor_tagline: str = "", is_default_tutor: bool = True, voice_sample_url: str = "", previous_title: str = ""
 ) -> tuple[str, str]:
     """슬라이드 1개의 음성대본만 생성하는 (system, user) 프롬프트를 만든다.
 
@@ -129,7 +129,8 @@ def voice_prompt(
     분량(900~1600자)과 4단 구조를 명시해 모델이 충분한 길이를 스스로 지키게 한다.
     """
     personalization = _personalization(weak_points, audience_level, tone, pace, tutor_depth, socratic, learning_goal, weak_rule="음성대본은 약점 개념을 더 천천히·예시 많이 설명하고 오개념을 짚는다.", use_formal_speech=use_formal_speech, use_emoji=use_emoji, tutor_name=tutor_name, tutor_tagline=tutor_tagline)
-    intro_rule = _voice_intro_rule(slide_idx)
+    intro_rule = _voice_intro_rule(slide_idx, previous_title)
+    previous_line = _previous_slide_line(previous_title)
     system = (
         "너는 ChapterStudio_V1의 음성대본 생성기다. "
         + _JSON_RULE
@@ -149,6 +150,7 @@ def voice_prompt(
         f"강의 요청: {brief}\n"
         f"대상 슬라이드: slide_idx={slide_idx} / 제목={slide_title} / 초점={slide_focus}\n"
         f"화면 요약: {slide_summary}\n"
+        f"{previous_line}"
         f"{personalization}\n"
         f"{intro_rule}\n"
         "위 슬라이드의 음성대본을 900~1600자 범위로 만든다. "
@@ -158,10 +160,18 @@ def voice_prompt(
     return system, user
 
 
-def _voice_intro_rule(slide_idx: int) -> str:
+def _voice_intro_rule(slide_idx: int, previous_title: str) -> str:
     if slide_idx == 0:
         return "첫 슬라이드이므로 짧은 인사말은 가능하지만, 바로 핵심 상황으로 들어간다."
+    if previous_title:
+        return f"첫 슬라이드가 아니므로 인사말을 쓰지 말고, 직전 화면 '{previous_title}'에서 이어지는 한 문장으로 시작한다."
     return "첫 슬라이드가 아니므로 인사말과 '안녕하세요. 오늘 우리가...왜 하필...'식 정형 도입을 쓰지 말고 직전 흐름을 이어 시작한다."
+
+
+def _previous_slide_line(previous_title: str) -> str:
+    if not previous_title:
+        return ""
+    return f"직전 슬라이드 주제: {previous_title}\n"
 
 
 def _personalization(

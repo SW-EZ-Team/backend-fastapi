@@ -60,6 +60,8 @@ async def test_components_generated_in_parallel_and_satisfy_contract() -> None:
     assert isinstance(payload.assignment.steps, list)
     # gather로 동시 실행됐다면 최대 동시 호출이 1보다 커야 한다(직렬이면 1).
     assert connector.max_active > 1
+    assert any("화면 요약: category=text, 화면내용=핵심 개념을 차근차근 설명하는 본문입니다." in user for user in connector.voice_users)
+    assert any("직전 슬라이드 주제: 슬라이드 0" in user for user in connector.voice_users)
 
 
 @pytest.mark.anyio
@@ -103,10 +105,13 @@ class _ComponentConnector:
         self.active = 0
         self.max_active = 0
         self.calls_by_schema: dict[str, int] = {}
+        self.voice_users: list[str] = []
 
     async def generate(self, req: ChapterAIRequest) -> ChapterAIResponse:
         schema = str(req.extra.get("schema", ""))
         self.calls_by_schema[schema] = self.calls_by_schema.get(schema, 0) + 1
+        if schema == "voice_script":
+            self.voice_users.append(req.user)
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:

@@ -42,6 +42,7 @@ def fake_connector(monkeypatch: pytest.MonkeyPatch) -> None:
     # (test_generate_repair / test_content_verify)에서 다루므로 여기서는 끈다.
     monkeypatch.setenv("CHAPTERSTUDIO_LESSON_SELF_REPAIR", "false")
     monkeypatch.setenv("CHAPTERSTUDIO_CONTENT_VERIFY", "false")
+    monkeypatch.setenv("VOICE_COHESION_ENABLED", "false")
     # Kanana 교정·음성 자동생성은 실제 Modal 호출이라 그래프 배선 테스트에서는 끈다.
     # (각 전용 테스트 test_kanana_polish_pipeline / test_synthesize_audio_node에서 mock으로 검증)
     monkeypatch.setenv("KANANA_POLISH_ENABLED", "0")

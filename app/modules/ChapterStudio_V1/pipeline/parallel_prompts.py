@@ -128,12 +128,21 @@ def build_voice_request(
     slide_title: str,
     slide_focus: str,
     slide_summary: str,
+    previous_title: str,
     slide_idx: int,
     slide_count: int,
     personalization: PersonalizationArgs,
 ) -> ChapterAIRequest:
     """슬라이드 1개의 음성대본만 생성하는 요청을 만든다(schema_kind=voice_script)."""
-    system, user = voice_prompt(brief, slide_title, slide_focus, slide_summary, slide_idx, **_prompt_kwargs(personalization))
+    system, user = voice_prompt(
+        brief,
+        slide_title,
+        slide_focus,
+        slide_summary,
+        slide_idx,
+        previous_title=previous_title,
+        **_prompt_kwargs(personalization),
+    )
     return ChapterAIRequest(
         system=system,
         user=user,

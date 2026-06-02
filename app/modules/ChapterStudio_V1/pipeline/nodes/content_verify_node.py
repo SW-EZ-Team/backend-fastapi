@@ -15,6 +15,7 @@ from app.modules.ChapterStudio_V1.pipeline.payload import (
 )
 from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState
 from app.modules.ChapterStudio_V1.pipeline.state_mapping import payload_to_state
+from app.modules.ChapterStudio_V1.pipeline.voice_cohesion_pass import apply_voice_cohesion_payload
 
 
 async def content_verify_node(state: ChapterStudioState) -> ChapterStudioState:
@@ -34,6 +35,7 @@ async def content_verify_node(state: ChapterStudioState) -> ChapterStudioState:
         else:
             payload = await verify_and_correct(connector, payload, slide_count)
     payload = await inspect_and_polish_payload(payload, tone_hint=_tone_hint(state))
+    payload = await apply_voice_cohesion_payload(payload, topic=_topic_hint(state))
     return payload_to_state(payload)
 
 
@@ -58,6 +60,14 @@ def _tone_hint(state: ChapterStudioState) -> str:
     if formal is False:
         return "반말"
     return ""
+
+
+def _topic_hint(state: ChapterStudioState) -> str:
+    for key in ("topic", "enriched_brief", "chapter_brief"):
+        value = state.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return "강의 주제"
 
 
 __all__ = ["content_verify_node"]

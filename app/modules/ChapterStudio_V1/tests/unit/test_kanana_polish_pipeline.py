@@ -16,6 +16,7 @@ async def test_kanana_polish_disabled_applies_deterministic_fix_without_connecto
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CHAPTERSTUDIO_CONTENT_VERIFY", "false")
+    monkeypatch.setenv("VOICE_COHESION_ENABLED", "false")
     monkeypatch.setenv("KANANA_POLISH_ENABLED", "0")
     monkeypatch.setattr(kanana_polish.registry, "get_polish_connector", _raise_if_called)
 
@@ -29,6 +30,7 @@ async def test_kanana_polish_disabled_applies_deterministic_fix_without_connecto
 async def test_kanana_polish_enabled_updates_voice_and_slide_narration(monkeypatch: pytest.MonkeyPatch) -> None:
     connector = _FakePolishConnector()
     monkeypatch.setenv("CHAPTERSTUDIO_CONTENT_VERIFY", "false")
+    monkeypatch.setenv("VOICE_COHESION_ENABLED", "false")
     monkeypatch.setenv("KANANA_POLISH_ENABLED", "1")
     monkeypatch.setenv("KANANA_POLISH_MAX_CONCURRENCY", "3")
     monkeypatch.setattr(kanana_polish.registry, "get_polish_connector", lambda: connector)
@@ -48,6 +50,7 @@ async def test_kanana_polish_enabled_reapplies_deterministic_fix_after_connector
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CHAPTERSTUDIO_CONTENT_VERIFY", "false")
+    monkeypatch.setenv("VOICE_COHESION_ENABLED", "false")
     monkeypatch.setenv("KANANA_POLISH_ENABLED", "1")
     monkeypatch.setattr(kanana_polish.registry, "get_polish_connector", lambda: _RegressingPolishConnector())
 
@@ -64,6 +67,7 @@ async def test_kanana_polish_failure_keeps_original_text_except_deterministic_fi
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CHAPTERSTUDIO_CONTENT_VERIFY", "false")
+    monkeypatch.setenv("VOICE_COHESION_ENABLED", "false")
     monkeypatch.setenv("KANANA_POLISH_ENABLED", "1")
     monkeypatch.setattr(kanana_polish.registry, "get_polish_connector", lambda: _FailingPolishConnector())
 

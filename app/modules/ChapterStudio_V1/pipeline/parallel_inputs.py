@@ -15,6 +15,12 @@ from dataclasses import dataclass
 
 from app.modules.ChapterStudio_V1.common.errors import ConversionError
 from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState
+from app.modules.ChapterStudio_V1.pipeline.voice_target_context import (
+    draft_by_idx,
+    first_text,
+    previous_title,
+    voice_summary,
+)
 
 
 @dataclass(frozen=True)
@@ -25,6 +31,7 @@ class VoiceTarget:
     title: str
     focus: str
     summary: str
+    previous_title: str = ""
 
 
 @dataclass(frozen=True)
@@ -68,19 +75,24 @@ def build_outline_text(state: ChapterStudioState, slide_count: int) -> str:
 
 
 def build_voice_targets(state: ChapterStudioState, slide_count: int) -> list[VoiceTarget]:
-    """슬라이드별 voice 타깃을 0..slide_count-1 완전집합으로 만든다(아웃라인 컨텍스트 활용)."""
+    """슬라이드별 voice 타깃을 0..slide_count-1 완전집합으로 만든다(화면 내용 우선)."""
     by_idx = _outline_by_idx(state)
+    drafts = draft_by_idx(state)
     targets: list[VoiceTarget] = []
     for idx in range(slide_count):
         row = by_idx.get(idx, {})
+        draft = drafts.get(idx, {})
         role = _as_text(row.get("role")) or "핵심 개념 설명"
         category = _as_text(row.get("category")) or "text"
+        title = first_text(draft.get("title"), row.get("title"), role)
+        focus = first_text(draft.get("focus"), draft.get("narration"), row.get("focus"), role)
         targets.append(
             VoiceTarget(
                 slide_idx=idx,
-                title=role,
-                focus=role,
-                summary=f"category={category}, 역할={role}",
+                title=title,
+                focus=focus,
+                summary=voice_summary(draft, row, category, role),
+                previous_title=previous_title(idx, drafts, by_idx),
             )
         )
     return targets
