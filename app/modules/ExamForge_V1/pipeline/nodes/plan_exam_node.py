@@ -10,7 +10,10 @@ from app.modules.ExamForge_V1.common.ai_bridge import get_planner_connector, Cha
 from app.modules.ExamForge_V1.common.logger import get_logger
 from app.modules.ExamForge_V1.templates.catalog import allocation_contract
 from app.modules.ExamForge_V1.pipeline.nodes._plan_prompts import PLAN_PROMPT as _PLAN_PROMPT
-from app.modules.ExamForge_V1.pipeline.nodes.concept_blueprint import build_question_blueprint
+from app.modules.ExamForge_V1.pipeline.nodes.concept_blueprint import (
+    build_question_blueprint,
+    compute_answer_position_plan,
+)
 
 logger = get_logger(__name__)
 _DEFAULT_QUESTION_TYPES = ["ko_multiple_choice_5"]
@@ -101,10 +104,16 @@ def _normalize_plan(
         normalized.get("type_allocations", [])
     )
     if topics is not None:
-        normalized["question_blueprint"] = build_question_blueprint(
+        # exam_id를 넘겨 정답 위치 배정이 시험 단위로 재현 가능하게 한다
+        exam_id = str(config.get("exam_id", "") or "")
+        blueprint = build_question_blueprint(
             topics,
             normalized.get("type_allocations", []),
+            exam_id=exam_id,
         )
+        normalized["question_blueprint"] = blueprint
+        # plan-first 검증 게이트용: 배정된 정답 위치 분포를 계획에 기록한다
+        normalized["answer_position_plan"] = compute_answer_position_plan(blueprint)
     return normalized
 
 

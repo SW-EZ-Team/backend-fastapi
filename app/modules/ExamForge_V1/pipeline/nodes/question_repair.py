@@ -1,4 +1,10 @@
-"""문항 생성 누락분 보충 유틸리티."""
+"""문항 생성 누락분 보충 유틸리티.
+
+plan-first E 요구사항:
+  - build_repair_tasks가 블루프린트 슬롯을 인지해 누락된 슬롯만 재요청한다.
+  - 슬롯 계약(num_choices, target_answer_position, concept_key)을
+    보충 생성 청크에 포함해 재생성 문항도 사전 배정을 따르게 한다.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -24,9 +30,16 @@ async def repair_missing_questions(
     locale: str,
     semaphore: asyncio.Semaphore,
     generate_chunk: GenerateChunk,
+    blueprint: list[dict] | None = None,
 ) -> list[dict]:
-    """계획 대비 부족한 문항을 템플릿별로 한 번 보충 생성한다."""
-    tasks = build_repair_tasks(allocations, topic_weights, existing_drafts)
+    """계획 대비 부족한 문항을 템플릿별로 한 번 보충 생성한다.
+
+    blueprint가 주어지면 누락된 슬롯(concept_key 기준)을 특정해
+    슬롯 계약(num_choices, target_answer_position, concept_key)을 보충 청크에 전달한다.
+    """
+    tasks = build_repair_tasks(
+        allocations, topic_weights, existing_drafts, blueprint=blueprint
+    )
     if not tasks:
         return []
     logger.info("누락 문항 보충 생성 시작: %d개 청크", len(tasks))
@@ -50,14 +63,52 @@ def build_repair_tasks(
     allocations: list[dict],
     topic_weights: dict[str, float],
     existing_drafts: list[dict],
+    blueprint: list[dict] | None = None,
 ) -> list[dict]:
-    """템플릿별 부족 수량을 계산해 보충 생성 청크를 만든다."""
+    """템플릿별 부족 수량을 계산해 보충 생성 청크를 만든다.
+
+    blueprint가 있으면 채워진 concept_key 집합과 비교해
+    누락 슬롯을 특정하고 슬롯 계약을 청크에 포함한다.
+    """
     existing_counts = count_by_template(existing_drafts)
     topic_names = list(topic_weights.keys()) or ["일반"]
     topic_cursor = len(existing_drafts)
     tasks: list[dict] = []
+
+    # plan-first: blueprint가 있으면 슬롯 단위로 누락 청크를 만든다
+    if blueprint:
+        filled_keys: set[str] = {
+            str(d.get("_concept_key") or d.get("concept_key") or "")
+            for d in existing_drafts
+        }
+        for slot in blueprint:
+            ck = str(slot.get("concept_key", ""))
+            if ck and ck in filled_keys:
+                continue
+            topic = slot.get("topic", topic_names[topic_cursor % len(topic_names)])
+            topic_cursor += 1
+            task: dict = {
+                "template_id": slot.get("template_id", ""),
+                "topic": topic,
+                "difficulty": slot.get("difficulty", 3),
+                "count": 1,
+                # 슬롯 계약 전달 — _attach_blueprint가 이 값들을 프롬프트에 반영한다
+                "chapter": slot.get("chapter", ""),
+                "concept": slot.get("concept", ""),
+                "bloom_level": slot.get("bloom_level", ""),
+                "reasoning_type": slot.get("reasoning_type", ""),
+                "_blueprint_slot": slot.get("slot"),
+                "_chapter": slot.get("chapter", ""),
+                "_concept_key": ck,
+                "_reasoning_type": slot.get("reasoning_type", ""),
+                "num_choices": slot.get("num_choices"),
+                "target_answer_position": slot.get("target_answer_position"),
+            }
+            tasks.append(task)
+        return tasks
+
+    # blueprint 없는 폴백 경로: 기존 방식으로 템플릿별 수량 보충
     for alloc in allocations:
-        # template_id 키 누락 시 빈 문자열로 폴백해 KeyError 방지
         template_id = alloc.get("template_id", "")
         target = int(alloc.get("count", 0))
         missing = max(0, target - existing_counts.get(template_id, 0))

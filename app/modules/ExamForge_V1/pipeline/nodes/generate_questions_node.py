@@ -59,7 +59,13 @@ def _build_chunks(
 
 
 def _attach_blueprint(task: dict, slot: dict | None) -> dict:
-    """생성 작업에 강의·개념 슬롯을 내부 메타데이터로 붙인다."""
+    """생성 작업에 강의·개념 슬롯을 내부 메타데이터로 붙인다.
+
+    plan-first 필드 전파:
+    - num_choices: 카탈로그에서 결정된 보기 수를 프롬프트에 전달
+    - target_answer_position: 사전 배정된 정답 위치를 프롬프트에 전달
+    - concept_key: 슬롯 고유 키 (중복 검증에 사용)
+    """
     if not slot:
         return task
     chapter = str(slot.get("chapter", task.get("topic", "일반")))
@@ -74,8 +80,12 @@ def _attach_blueprint(task: dict, slot: dict | None) -> dict:
         "reasoning_type": slot.get("reasoning_type", ""),
         "_blueprint_slot": slot.get("slot"),
         "_chapter": chapter,
-        "_concept_key": f"{chapter}::{concept}",
+        # concept_key를 슬롯의 유일 키로 우선 사용 (중복 검증에 쓰임)
+        "_concept_key": slot.get("concept_key") or f"{chapter}::{concept}",
         "_reasoning_type": slot.get("reasoning_type", ""),
+        # plan-first 계약 필드 — blueprint_prompt 가 이 값을 읽어 프롬프트에 주입한다
+        "num_choices": slot.get("num_choices"),
+        "target_answer_position": slot.get("target_answer_position"),
     }
 
 
@@ -204,6 +214,7 @@ async def generate_questions_node(state: ExamForgeState) -> dict:
         else:
             logger.warning("문항 생성 중 예외 발생: %s", result)
     candidates = passed + new_drafts
+    # plan-first: blueprint를 넘겨 누락 슬롯을 특정하고 슬롯 계약을 보충 청크에 전달한다
     repair_drafts = await repair_missing_questions(
         allocations=allocations,
         topic_weights=topic_weights,
@@ -215,6 +226,7 @@ async def generate_questions_node(state: ExamForgeState) -> dict:
             semaphore if connector_supports_batch(connector) else asyncio.Semaphore(1)
         ),
         generate_chunk=_generate_chunk,
+        blueprint=blueprint if blueprint else None,
     )
     if repair_drafts:
         candidates.extend(repair_drafts)

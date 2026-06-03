@@ -1,4 +1,12 @@
-"""객관식 문제의 오답 선택지를 별도 생성하는 노드."""
+"""객관식 문제의 오답 선택지를 별도 생성하는 노드.
+
+plan-first 변경 (D 요구사항):
+- 사후 물리 이동(balance_correct_answer_positions/_move_correct_option) 제거.
+  슬롯에 target_answer_position이 사전 배정됐으므로 이동이 필요 없다.
+- 대신 생성된 정답 위치가 slot.target_answer_position과 일치하는지 검증한다.
+- 불일치 시(AI가 위치를 틀리게 채운 경우)에만 1회 재배치(fallback)를 수행하고 로그에 기록한다.
+- distractor 생성 자체(오답 보기 개선)는 그대로 유지한다.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +24,6 @@ from app.modules.ExamForge_V1.common.ai_bridge import (
     run_connector_tasks,
 )
 from app.modules.ExamForge_V1.common.logger import get_logger
-from app.modules.ExamForge_V1.quality.answer_positions import balance_correct_answer_positions
 from app.modules.ExamForge_V1.quality.cjk_sanitizer import sanitize_exam_questions
 
 logger = get_logger(__name__)
@@ -57,15 +64,17 @@ async def generate_distractors_node(state: ExamForgeState) -> dict:
             non_mcq_questions.append(q)
 
     if not mcq_questions:
-        # MCQ 가 없으면 오답 생성 없이 다음 단계(정답/해설 생성)로 진행
-        return {"questions_with_distractors": sanitize_exam_questions(questions), "pipeline_status": "answering"}
+        # MCQ가 없으면 오답 생성 없이 다음 단계(정답/해설 생성)로 진행
+        return {
+            "questions_with_distractors": sanitize_exam_questions(questions),
+            "pipeline_status": "answering",
+        }
 
     try:
         semaphore = asyncio.Semaphore(generation_concurrency())
         connector = get_text_connector()
         system_prompt = get_distractor_system(locale)
-        # 모델별 supports("cli") 휴리스틱(감사 A-2: gemini만 스킵되던 문제) 대신
-        # 명시 환경 플래그로 오답 재작성 켜짐/꺼짐을 결정한다.
+        # 모델별 supports("cli") 휴리스틱 대신 명시 환경 플래그로 결정한다
         rewrite_disabled = not distractor_rewrite_enabled()
     except Exception as exc:
         logger.error("오답 생성 커넥터 초기화 실패: %s — 원본 유지", exc)
@@ -131,9 +140,85 @@ async def generate_distractors_node(state: ExamForgeState) -> dict:
             # 예외 발생한 건은 원본 사용
             improved.append(mcq_questions[i])
 
-    all_questions = sanitize_exam_questions(balance_correct_answer_positions(improved) + non_mcq_questions)
+    # plan-first D 요구사항:
+    # 사후 물리 이동(balance_correct_answer_positions) 제거.
+    # 대신 슬롯 계약과 실제 정답 위치를 검증하고 불일치 시에만 1회 fallback 재배치.
+    verified_improved = _verify_and_align_positions(improved)
+
+    all_questions = sanitize_exam_questions(verified_improved + non_mcq_questions)
     logger.info("노드 완료: generate_distractors_node (%.2fs)", time.time() - node_start)
     return {"questions_with_distractors": all_questions, "pipeline_status": "answering"}
+
+
+def _verify_and_align_positions(questions: list[dict]) -> list[dict]:
+    """슬롯 계약(target_answer_position)과 실제 정답 위치를 검증하고 불일치 시만 재배치한다.
+
+    정상 경로: AI가 슬롯 계약대로 정답을 올바른 위치에 채움 → 이동 0.
+    예외 경로: AI가 위치를 틀리게 채운 경우 → 1회 재배치(fallback) + 로그 경고.
+    """
+    result: list[dict] = []
+    for q in questions:
+        target_pos: int | None = q.get("target_answer_position")
+        if target_pos is None:
+            # 슬롯 계약이 없는 문항(블루프린트 미적용)은 그대로 통과
+            result.append(q)
+            continue
+
+        options = q.get("options") or []
+        if not _is_single_answer_mcq(options):
+            result.append(q)
+            continue
+
+        actual_pos = _find_correct_position(options)
+        if actual_pos == target_pos:
+            # 정상 경로: AI가 계약대로 정답 위치를 채웠다
+            result.append(q)
+        else:
+            # 예외 경로: AI가 위치를 틀리게 채운 경우 1회 재배치
+            logger.warning(
+                "plan-first 정답 위치 불일치 — draft_id=%s, "
+                "expected=%d, actual=%d → fallback 재배치",
+                q.get("draft_id", "?"), target_pos, actual_pos,
+            )
+            result.append(_move_correct_option(q, target_pos))
+    return result
+
+
+def _find_correct_position(options: list[dict]) -> int:
+    """정답(is_correct=True)의 0-index 위치를 반환한다."""
+    for idx, opt in enumerate(options):
+        if opt.get("is_correct"):
+            return idx
+    return 0
+
+
+def _is_single_answer_mcq(options: object) -> bool:
+    """선택지가 있고 정답 표시가 정확히 하나인지 확인한다."""
+    if not isinstance(options, list) or len(options) < 2:
+        return False
+    return sum(1 for option in options if option.get("is_correct")) == 1
+
+
+def _move_correct_option(question: dict, target_index: int) -> dict:
+    """정답 선택지를 목표 위치로 옮기고 label을 기존 순서 규칙에 맞춘다."""
+    options = [option.copy() for option in question.get("options", [])]
+    original_labels = [
+        str(option.get("label", index + 1))
+        for index, option in enumerate(options)
+    ]
+    current_index = next(
+        (index for index, option in enumerate(options) if option.get("is_correct")),
+        0,
+    )
+    correct_option = options.pop(current_index)
+    options.insert(target_index, correct_option)
+    for index, option in enumerate(options):
+        option["label"] = original_labels[index]
+    moved = question.copy()
+    moved["options"] = options
+    if moved.get("correct_answer"):
+        moved["correct_answer"] = str(options[target_index].get("label", ""))
+    return moved
 
 
 def _has_code_heavy_options(question: dict) -> bool:

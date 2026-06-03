@@ -87,6 +87,26 @@ def route_after_validation(state: ExamForgeState) -> str:
         logger.info("route_after_validation: 문제 0건 — %s", _dest)
         return _dest
 
+    # --- plan-first P1-B: 개수 충족 하드 게이트 ---
+    # validate_node가 보고한 missing_count(개수 부족·슬롯 누락)가 1 이상이면
+    # 구조 실패율과 무관하게 retry/exhausted로 라우팅한다.
+    # "개수만 부족한데 passed로 출고되는" 결함을 차단한다.
+    validation_report_early = state.get("validation_report", {})
+    missing_count = validation_report_early.get("missing_count")
+    if isinstance(missing_count, int) and missing_count > 0:
+        _dest = "exhausted" if retry_count >= max_retries else "retry"
+        logger.info(
+            "route_after_validation: 개수 부족 missing_count=%d — %s",
+            missing_count, _dest,
+        )
+        return _dest
+
+    # plan-first P1-B: 정답 위치 분포 불일치도 게이트로 승격
+    if validation_report_early.get("answer_position_mismatch") is True:
+        _dest = "exhausted" if retry_count >= max_retries else "retry"
+        logger.info("route_after_validation: 정답 위치 분포 불일치 — %s", _dest)
+        return _dest
+
     # --- 구조적 실패율 기반 판단 ---
     fail_rate = len(failed_ids) / total
     if fail_rate >= 0.1:
@@ -111,10 +131,26 @@ def route_after_validation(state: ExamForgeState) -> str:
         return _dest
 
     dedup_score = validation_report.get("dedup_score")
-    if isinstance(dedup_score, (int, float)) and dedup_score < 0.8:
-        _dest = "exhausted" if retry_count >= max_retries else "retry"
-        logger.info("route_after_validation: 중복점수 %.2f (< 0.8) — %s", dedup_score, _dest)
-        return _dest
+    if isinstance(dedup_score, (int, float)):
+        # plan-first: 블루프린트가 적용된 경우 concept_key 사전 유일화로
+        # 구조적으로 중복 0이 보장돼야 한다 → 게이트를 1.0으로 상향한다.
+        # 블루프린트 미적용(answer_position_plan 없음) 경우 기존 0.8 유지.
+        questions = (
+            state.get("calibrated_questions", [])
+            or state.get("answered_questions", [])
+            or state.get("verified_questions", [])
+            or state.get("questions", [])
+        )
+        plan = state.get("exam_plan", {})
+        has_blueprint = bool(plan.get("answer_position_plan"))
+        dedup_threshold = 1.0 if has_blueprint else 0.8
+        if dedup_score < dedup_threshold:
+            _dest = "exhausted" if retry_count >= max_retries else "retry"
+            logger.info(
+                "route_after_validation: 중복점수 %.2f (< %.1f, blueprint=%s) — %s",
+                dedup_score, dedup_threshold, has_blueprint, _dest,
+            )
+            return _dest
 
     logger.info(
         "route_after_validation: 모든 게이트 통과 — passed (정확률=%s, 중복=%s, 실패율=%.1f%%)",

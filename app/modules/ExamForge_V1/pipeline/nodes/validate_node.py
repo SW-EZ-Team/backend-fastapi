@@ -63,12 +63,31 @@ async def validate_node(state: ExamForgeState) -> dict:
         if did not in failed_ids:
             failed_ids.append(did)
 
+    # plan-first E 요구사항: concept_key 유일성 재확인
+    ck_issues, ck_failed = _validate_concept_key_uniqueness(questions)
+    global_issues.extend(ck_issues)
+    for did in ck_failed:
+        if did not in failed_ids:
+            failed_ids.append(did)
+
     # 3계층: 전체 수준 검증
     coverage_score, uncovered = _validate_global(questions, topic_weights)
     if uncovered:
         global_issues.append(f"미커버 주제: {', '.join(uncovered[:5])}")
     global_issues.extend(_verification_advisory_issues(questions, verification_advisory))
     _apply_programming_code_gate(state, questions, failed_ids, global_issues)
+
+    # plan-first E 요구사항: 정답 위치 분포가 계획(answer_position_plan)과 일치하는지 검증.
+    # 불일치는 global_issues에만 두지 않고 별도 플래그로 보고서에 올려 라우팅에 반영한다.
+    pos_issues = _validate_answer_position_plan(questions, plan)
+    global_issues.extend(pos_issues)
+    answer_position_mismatch = bool(pos_issues)
+
+    # plan-first E 요구사항(P1-B 수정): 개수 충족 하드 게이트.
+    # len(questions) != total_questions 또는 누락 슬롯이 있으면 부족 슬롯을 failed_ids에 넣고
+    # missing_count를 보고서에 기록해 route_after_validation이 retry/exhausted로 보내게 한다.
+    count_issues, missing_count = _validate_question_count(questions, plan, failed_ids)
+    global_issues.extend(count_issues)
 
     # 정답 정확률 계산
     accuracy_rate = _compute_accuracy_rate(questions)
@@ -89,6 +108,9 @@ async def validate_node(state: ExamForgeState) -> dict:
         "coverage_score": coverage_score,
         "dedup_score": dedup_score,
         "answer_accuracy_rate": accuracy_rate,
+        # P1-B: 개수 부족·위치 불일치를 라우팅이 직접 참조할 수 있게 보고서에 노출
+        "missing_count": missing_count,
+        "answer_position_mismatch": answer_position_mismatch,
         "answer_verification_parse_failed_count": verification_summary["parse_failed"],
         "answer_verification_parse_failed_ratio": parse_failed_ratio(questions),
         "answer_verification_evaluable_count": verification_summary["evaluable"],
@@ -272,3 +294,127 @@ def _apply_programming_code_gate(
         draft_id = q.get("draft_id", q.get("question_id", ""))
         if draft_id and draft_id not in failed_ids:
             failed_ids.append(draft_id)
+
+
+def _validate_question_count(
+    questions: list[dict],
+    plan: dict,
+    failed_ids: list[str],
+) -> tuple[list[str], int]:
+    """plan-first P1-B: 개수 충족·슬롯 1:1 채움을 하드 검사한다.
+
+    1) 블루프린트가 있으면 채워진 slot_id 집합 == 블루프린트 slot_id 집합을 검사하고
+       누락 슬롯을 식별해 부족분을 failed_ids에 placeholder로 넣는다.
+    2) 블루프린트가 없으면 len(questions) != total_questions 를 검사한다.
+
+    Returns:
+        (issues, missing_count) — missing_count > 0 이면 라우팅이 retry/exhausted로 보낸다.
+    """
+    issues: list[str] = []
+
+    try:
+        total_questions = int(plan.get("total_questions", 0) or 0)
+    except (ValueError, TypeError):
+        total_questions = 0
+
+    blueprint = plan.get("question_blueprint", [])
+    if blueprint:
+        # 슬롯 1:1 채움 검사: 블루프린트 slot_id 집합과 실제 채워진 slot_id 집합 비교
+        plan_slots = {
+            int(s["slot"]) for s in blueprint if s.get("slot") is not None
+        }
+        filled_slots = {
+            int(q["_blueprint_slot"])
+            for q in questions
+            if q.get("_blueprint_slot") is not None
+        }
+        missing_slots = plan_slots - filled_slots
+        missing_count = len(missing_slots)
+        if missing_count > 0:
+            issues.append(
+                f"슬롯 누락 {missing_count}개 — 블루프린트 {len(plan_slots)}슬롯 중 "
+                f"{len(filled_slots)}개만 채워짐 (누락 slot_id={sorted(missing_slots)[:10]})"
+            )
+            # 누락 슬롯을 식별 가능한 placeholder로 failed_ids에 추가 (개수 부족을 재시도로)
+            for slot_id in sorted(missing_slots):
+                marker = f"__missing_slot_{slot_id}"
+                if marker not in failed_ids:
+                    failed_ids.append(marker)
+        return issues, missing_count
+
+    # 폴백: 블루프린트 없는 경로 — 단순 개수 비교
+    if total_questions > 0 and len(questions) != total_questions:
+        missing_count = max(0, total_questions - len(questions))
+        issues.append(
+            f"문항 수 불일치 — 계획={total_questions}, 실제={len(questions)} "
+            f"(누락 {missing_count}개)"
+        )
+        for i in range(missing_count):
+            marker = f"__missing_count_{i}"
+            if marker not in failed_ids:
+                failed_ids.append(marker)
+        return issues, missing_count
+
+    return issues, 0
+
+
+def _validate_concept_key_uniqueness(
+    questions: list[dict],
+) -> tuple[list[str], list[str]]:
+    """plan-first: 슬롯 concept_key 유일성을 재확인한다.
+
+    블루프린트 단계에서 이미 보장됐어야 하므로 중복 발견은 구조 경고로만 처리한다.
+    중복된 뒤쪽 문항을 재생성 대상으로 표시한다.
+    """
+    issues: list[str] = []
+    failed: list[str] = []
+    seen_keys: dict[str, str] = {}  # concept_key → 첫 번째 draft_id
+
+    for q in questions:
+        ck = str(q.get("_concept_key", "") or q.get("concept_key", ""))
+        if not ck:
+            continue
+        draft_id = str(q.get("draft_id") or q.get("question_id") or "")
+        if ck in seen_keys:
+            issues.append(f"concept_key 중복: '{ck}' (draft_id={draft_id})")
+            if draft_id and draft_id not in failed:
+                failed.append(draft_id)
+        else:
+            seen_keys[ck] = draft_id
+
+    return issues, failed
+
+
+def _validate_answer_position_plan(
+    questions: list[dict],
+    plan: dict,
+) -> list[str]:
+    """plan-first: 실제 정답 위치 분포가 사전 배정 계획과 정확히 일치하는지 검증한다.
+
+    answer_position_plan이 없으면 검사를 생략한다 (블루프린트 미적용 경로 호환).
+    """
+    from app.modules.ExamForge_V1.quality.answer_positions import answer_position_counts
+
+    position_plan: dict[int, int] = plan.get("answer_position_plan", {})
+    if not position_plan:
+        return []
+
+    actual = answer_position_counts(questions)
+    # int/str 키 혼재 방지를 위해 int로 정규화
+    plan_normalized = {int(k): int(v) for k, v in position_plan.items()}
+    actual_normalized = {int(k): int(v) for k, v in actual.items()}
+
+    if plan_normalized == actual_normalized:
+        return []
+
+    # 편차 상세 보고 (어느 위치에서 몇 개 차이인지)
+    all_positions = set(plan_normalized) | set(actual_normalized)
+    diff_parts = [
+        f"위치{pos}: 계획={plan_normalized.get(pos, 0)} 실제={actual_normalized.get(pos, 0)}"
+        for pos in sorted(all_positions)
+        if plan_normalized.get(pos, 0) != actual_normalized.get(pos, 0)
+    ]
+    return [
+        f"정답 위치 분포 계획 불일치 — {'; '.join(diff_parts)} "
+        "(plan-first 블루프린트 사전 배정이 지켜지지 않았음)"
+    ]

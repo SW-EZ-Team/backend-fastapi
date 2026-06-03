@@ -27,3 +27,7 @@ class ExamPlan(BaseModel):
     topic_weights: dict[str, float]
     passing_score: float = 60.0
     bloom_distribution: dict[str, float] = {}
+    # plan-first 보장: 블루프린트 단계에서 미리 배정한 정답 위치 분포
+    # key = 정답 0-index 위치, value = 해당 위치에 배정된 목표 문항 수
+    # 검증 게이트에서 실제 분포와 비교해 편차 0을 강제한다
+    answer_position_plan: dict[int, int] = {}
