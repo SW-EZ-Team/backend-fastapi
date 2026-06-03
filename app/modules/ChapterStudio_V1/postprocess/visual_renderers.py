@@ -10,6 +10,7 @@ from app.modules.ChapterStudio_V1.postprocess.visual_renderer_utils import (
     coords as _coords,
     items as _items,
     mapping as _mapping,
+    narration_text as _narration_text,
     nice as _nice,
     num as _num,
     records as _records,
@@ -197,10 +198,14 @@ def render_visual(visual_type: str, data: Spec) -> str:
 
 
 def render_visual_slide(title: str, narration: str, visual_type: str, data: Spec) -> str:
-    """제목·짧은 자막·시각 렌더 결과를 하나의 body 조각으로 조립한다."""
+    """제목·메인 내레이션·시각 렌더 결과를 하나의 body 조각으로 조립한다.
+
+    제목은 짧은 명사구라 라벨용 _text(120자 cap)로 충분하지만, 메인 내레이션은 학습자가
+    읽는 완결 문장이므로 _narration_text를 써서 120자 cap에 의한 문장 중간 절단을 막는다.
+    """
     return (
         '<section class="visual-slide">'
-        f"<header><h2>{_text(title, '시각 설명')}</h2><p>{_text(narration, '핵심을 시각적으로 확인한다.')}</p></header>"
+        f"<header><h2>{_text(title, '시각 설명')}</h2><p>{_narration_text(narration, '핵심을 시각적으로 확인한다.')}</p></header>"
         f"{render_visual(visual_type, data)}</section>"
     )
 

@@ -65,7 +65,9 @@ class _VisualSlideResult(BaseModel):
     slide_idx: int = Field(ge=0, le=14)
     title: str = Field(min_length=1)
     category: VisualSlideCategory
-    narration: str = Field(min_length=1, max_length=420)
+    # 프롬프트 지시(200~360자)보다 여유 있게 잡아 AI가 약간 길게 생성해도 ValidationError로
+    # fallback 경로가 열리지 않게 한다. 진짜 이상값(600자 초과)은 fallback이 처리한다.
+    narration: str = Field(min_length=1, max_length=600)
     visual: _VisualSpecResult
     checkpoint: str = Field(min_length=1)
 
@@ -282,7 +284,8 @@ def _parse_slide_item(
             # 검증 실패(예: category=interactive/code 등 Literal 미포함)해도 plan visual_type은
             # 보존한다. plan_slot을 넘겨 example_box 하드코딩 드리프트를 막는다(P2).
             return _fallback_slide(data, plan_slot)
-        return _visual_slide_to_generated(result, plan_slot)
+        # raw_data를 함께 전달해 불완결 narration 보완에 voice_script를 활용할 수 있게 한다.
+        return _visual_slide_to_generated(result, plan_slot, raw_data=data)
     if "html" not in data:
         return _fallback_slide(data, plan_slot)
     return GeneratedSlide.model_validate(data)
@@ -291,20 +294,57 @@ def _parse_slide_item(
 def _visual_slide_to_generated(
     item: _VisualSlideResult,
     plan_slot: dict[str, object] | None = None,
+    raw_data: dict[str, object] | None = None,
 ) -> GeneratedSlide:
     visual_data = item.visual.model_dump()
     # 챕터명+번호 형태 제목은 결정적 재라벨로 교체한다.
     title = _relabel_chapter_title(item.title, plan_slot)
-    html = render_visual_slide(title, item.narration, item.visual.type, item.visual.data)
+    narration = item.narration
+    # AI narration 완결성 검증: 불완결이면 voice_script 보완을 시도한다.
+    # AI max_tokens 초과로 JSON narration 문자열이 중간에 절단된 경우를 처리한다.
+    if not _is_complete_narration(narration):
+        from app.modules.ChapterStudio_V1.common.logging import logger  # 지역 import — 순환 방지
+        logger.warning(
+            "_visual_slide_to_generated: slide_idx={} narration이 불완결로 끝남 "
+            "(마지막 15자: {}). 보완 시도.",
+            item.slide_idx,
+            repr(narration[-15:]),
+        )
+        if raw_data is not None:
+            # 보완 우선순위: voice_script → script_text → focus/summary/description
+            voice_text = _voice_text(raw_data.get("voice_script")) or _text_value(
+                raw_data.get("script_text"), ""  # type: ignore[arg-type]
+            )
+            if _is_specific_narration(voice_text):
+                narration = _compact_sentences(voice_text)
+                logger.info(
+                    "_visual_slide_to_generated: slide_idx={} voice_script 보완 성공 ({}자).",
+                    item.slide_idx,
+                    len(narration),
+                )
+            else:
+                # voice도 없으면 focus/summary에서 title-focus 문장 생성
+                focus_text = _first_specific_text(
+                    raw_data,  # type: ignore[arg-type]
+                    ("focus", "summary", "description"),
+                )
+                if focus_text:
+                    narration = _title_focus_sentence(title, focus_text)
+                    logger.info(
+                        "_visual_slide_to_generated: slide_idx={} focus 기반 보완 ({}자).",
+                        item.slide_idx,
+                        len(narration),
+                    )
+    html = render_visual_slide(title, narration, item.visual.type, item.visual.data)
     return GeneratedSlide(
         slide_idx=item.slide_idx,
         title=title,
-        focus=item.narration,
+        focus=narration,
         checkpoint=item.checkpoint,
         category=_slide_category(item.category),
         html=html,
         css="",
-        narration=item.narration,
+        narration=narration,
         visual=visual_data,
     )
 
@@ -446,11 +486,53 @@ def _text_value(value: object, default: str) -> str:
     return value if isinstance(value, str) and value else default
 
 
+def _is_complete_narration(text: str) -> bool:
+    """narration이 완결 문장으로 끝나는지 판단한다.
+
+    JSON max_tokens 초과로 AI 응답이 문장 중간에 절단된 경우를 감지한다.
+    한국어 종결 어미(다/요/죠/지/고 등)·마침표·느낌표·물음표·완전한 단어 종료를 확인한다.
+    """
+    if not text:
+        return False
+    stripped = text.strip()
+    # 명백한 종결 부호: 마침표·느낌표·물음표·한국어 문장 종결 부호
+    if stripped[-1] in ".!?。！？":
+        return True
+    # 한국어 일반적 종결 어미들 — 실제 마지막 어절 기준
+    last_word = stripped.rsplit(" ", 1)[-1] if " " in stripped else stripped
+    korean_endings = (
+        "습니다", "합니다", "입니다", "됩니다", "있습니다", "없습니다",
+        "했습니다", "됐습니다", "했어요", "돼요", "해요", "있어요", "없어요",
+        "봐요", "줘요", "세요", "아요", "어요", "이에요", "예요",
+        "구나", "군요", "네요", "죠", "지요",
+        "는다", "ㄴ다", "ㄹ까", "ㄹ게",
+    )
+    return any(last_word.endswith(ending) for ending in korean_endings)
+
+
 def _fallback_narration(data: dict[object, object], title: str) -> str:
-    """빈 narration을 실제 슬라이드 맥락에서 만든 문장으로 대체한다."""
+    """빈 또는 불완결 narration을 실제 슬라이드 맥락에서 완결 문장으로 보완한다.
+
+    1) raw narration이 있고 완결 문장이면 그대로 사용한다.
+    2) raw narration이 있지만 불완결(AI max_tokens 절단)이면 voice_script로 보완을 시도한다.
+       보완에 성공하면 voice_text 기반 compact를 사용한다.
+    3) raw가 없으면 voice_script → focus → title 순서로 fallback한다.
+    """
     raw = _text_value(data.get("narration"), "")
     if _is_specific_narration(raw):
-        return raw.strip()
+        stripped = raw.strip()
+        if _is_complete_narration(stripped):
+            # 완결 narration은 그대로 반환한다.
+            return stripped
+        # 불완결 narration: voice_script로 보완을 시도한다.
+        voice_text = _voice_text(data.get("voice_script")) or _text_value(data.get("script_text"), "")
+        if _is_specific_narration(voice_text):
+            return _compact_sentences(voice_text)
+        # voice도 없으면 불완결 raw 대신 focus 기반으로 대체한다.
+        focus_text = _first_specific_text(data, ("focus", "summary", "description", "role"))
+        if focus_text:
+            return _title_focus_sentence(title, focus_text)
+        return _title_focus_sentence(title, "")
     voice_text = _voice_text(data.get("voice_script")) or _text_value(data.get("script_text"), "")
     if _is_specific_narration(voice_text):
         return _compact_sentences(voice_text)
@@ -488,13 +570,30 @@ def _title_focus_sentence(title: str, focus: str) -> str:
 
 
 def _compact_sentences(text: str, max_chars: int = 360) -> str:
-    """긴 음성대본에서 앞쪽 1~2문장만 뽑아 화면 본문 길이로 줄인다."""
+    """긴 음성대본에서 앞쪽 완결 문장만 뽑아 화면 본문 길이로 줄인다.
+
+    문장 경계(종결 어미·부호)를 단위로 자르므로 단어·어미 중간 절단이 발생하지 않는다.
+    - max_chars 이하인 완결 문장 누적을 반환한다.
+    - 첫 문장 자체가 max_chars를 초과하면 해당 문장 전체를 반환한다(절단 금지).
+    """
     cleaned = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).strip()
-    sentences = re.findall(r"[^.!?。！？]+[.!?。！？]?", cleaned)
-    compact = " ".join(part.strip() for part in sentences[:2] if part.strip()) or cleaned
-    if len(compact) <= max_chars:
-        return compact
-    return compact[:max_chars].rsplit(" ", 1)[0].strip() or compact[:max_chars].strip()
+    sentences = [s.strip() for s in re.findall(r"[^.!?。！？]+[.!?。！？]?", cleaned) if s.strip()]
+    if not sentences:
+        return cleaned[:max_chars] if len(cleaned) > max_chars else cleaned
+    # 완결 문장을 하나씩 추가하면서 max_chars를 넘지 않는 최대 지점을 찾는다.
+    result_parts: list[str] = []
+    accumulated = 0
+    for sent in sentences:
+        new_len = accumulated + len(sent) + (1 if result_parts else 0)
+        if new_len <= max_chars:
+            result_parts.append(sent)
+            accumulated = new_len
+        else:
+            break
+    # 하나도 못 담은 경우(첫 문장 자체가 max_chars 초과): 문장 전체를 반환해 절단하지 않는다.
+    if not result_parts:
+        return sentences[0]
+    return " ".join(result_parts)
 
 
 def _is_specific_narration(value: str) -> bool:
@@ -564,4 +663,6 @@ __all__ = [
     "_enforce_plan_visual_type",
     "_relabel_chapter_title",
     "_normalize_visual_type",
+    "_is_complete_narration",
+    "_compact_sentences",
 ]
