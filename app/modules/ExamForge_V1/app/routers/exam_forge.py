@@ -8,7 +8,12 @@ import uuid
 from fastapi import APIRouter, HTTPException
 
 from app.modules.ExamForge_V1.common.ai_bridge import LLMBudgetCounter, set_current_budget
-from app.modules.ExamForge_V1.common.config import max_retries, pipeline_timeout_sec
+from app.modules.ExamForge_V1.common.config import (
+    max_retries,
+    pipeline_llm_budget_for,
+    pipeline_llm_reserve_for,
+    pipeline_timeout_sec,
+)
 from app.modules.ExamForge_V1.common.errors import BudgetExceededError
 from app.modules.ExamForge_V1.grading.engine import grade_submission
 from app.modules.ExamForge_V1.grading.exceptions import (
@@ -32,8 +37,13 @@ async def generate_exam_forge(request: ExamForgeRequest) -> ExamForgeResponse:
     start_time = time.time()
     exam_id = f"exam_{uuid.uuid4().hex[:12]}"
 
-    # LLM 호출 예산 서킷 브레이커 초기화
-    budget = LLMBudgetCounter()
+    # LLM 호출 예산 서킷 브레이커 초기화 — 문항 수에 비례한 예산 + 해설 생성 예약분.
+    # reserve 풀은 upstream 재시도가 소진해도 해설 생성이 굶지 않게 보호한다.
+    total_questions = request.exam_config.total_questions
+    budget = LLMBudgetCounter(
+        budget=pipeline_llm_budget_for(total_questions),
+        reserve=pipeline_llm_reserve_for(total_questions),
+    )
     budget_token = set_current_budget(budget)
 
     initial_state = {

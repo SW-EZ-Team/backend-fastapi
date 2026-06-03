@@ -91,9 +91,22 @@ def _fallback_sources(
     ]
 
 
+_CSS_LEAK_RE = re.compile(
+    r"^[\s:a-zA-Z_-]*root\b|color-scheme|"
+    r"^\s*[.#@:{]|"
+    r"\{.*\}",
+    re.IGNORECASE,
+)
+
+
 def _title_candidate(title: str, chapter_title: str, idx: int) -> str:
     normalized = " ".join(title.split())
     if not normalized or _is_placeholder(normalized, chapter_title, idx):
+        return ""
+    # CSS 누출 방어: 한국어/숫자가 없거나 CSS 키워드 패턴이면 제목으로 허용하지 않는다.
+    if not _TITLE_MEANING_RE.search(normalized):
+        return ""
+    if _CSS_LEAK_RE.search(normalized):
         return ""
     return normalized
 

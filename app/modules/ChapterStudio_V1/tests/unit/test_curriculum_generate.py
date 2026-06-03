@@ -20,6 +20,7 @@ from app.modules.ChapterStudio_V1.app.curriculum_blueprint import (
     build_curriculum_blueprint,
 )
 from app.modules.ChapterStudio_V1.app.curriculum_generate import (
+    _extract_slots_list,
     _parse_and_validate,
     _plan_with_blueprint,
     _repair_missing_slots,
@@ -412,3 +413,151 @@ async def test_plan_with_blueprint_recovers_via_repair(monkeypatch) -> None:
     assert [l["order"] for l in lessons] == [1, 2, 3, 4, 5]
     # 최초 1회 + repair 1회 = 2회
     assert len(connector.calls) == 2, f"호출 횟수={len(connector.calls)} != 2"
+
+
+# ===========================================================================
+# 5. codex {"slots":[...]} 래핑 형태 회귀 테스트 (hot-fix 보강)
+#    E2E에서 발견: codex --output-schema 는 최상위 object 필수 →
+#    스키마를 {"type":"object","properties":{"slots":{...array...}}} 로 래핑한 후
+#    파서가 명시적으로 slots 키를 읽도록 보강 (우연 동작 제거)
+# ===========================================================================
+
+
+def test_extract_slots_list_codex_wrapped() -> None:
+    """codex 경로: {"slots":[...]} 객체에서 slots 배열을 명시적으로 추출한다."""
+    n = 5
+    blueprint = build_curriculum_blueprint(subject="수학", lesson_count=n)
+    items = [_slot_item(s) for s in blueprint]
+    codex_output = json.dumps({"slots": items}, ensure_ascii=False)
+
+    raw_items = _extract_slots_list(codex_output)
+
+    assert raw_items is not None
+    assert isinstance(raw_items, list)
+    assert len(raw_items) == n, f"slots 배열 길이 불일치 — {len(raw_items)} != {n}"
+
+
+def test_extract_slots_list_opus_bare_array() -> None:
+    """opus 경로: bare array [...] 를 직접 추출한다."""
+    n = 5
+    blueprint = build_curriculum_blueprint(subject="과학", lesson_count=n)
+    items = [_slot_item(s) for s in blueprint]
+    opus_output = json.dumps(items, ensure_ascii=False)
+
+    raw_items = _extract_slots_list(opus_output)
+
+    assert raw_items is not None
+    assert isinstance(raw_items, list)
+    assert len(raw_items) == n
+
+
+def test_parse_codex_wrapped_produces_n_slots() -> None:
+    """codex 래핑 형태 {"slots":[...]}를 _parse_and_validate가 N슬롯으로 파싱한다."""
+    n = 7
+    blueprint = build_curriculum_blueprint(subject="영어", lesson_count=n)
+    items = [_slot_item(s) for s in blueprint]
+    codex_output = json.dumps({"slots": items}, ensure_ascii=False)
+
+    result = _parse_and_validate(codex_output, blueprint)
+
+    assert len(result) == n, f"codex 래핑 파싱 실패 — len={len(result)}, 예상={n}"
+    assert [r.order for r in result] == list(range(1, n + 1))
+
+
+def test_parse_codex_wrapped_multi_slots_full_validation() -> None:
+    """codex 래핑 형태 10슬롯 — order·stage·필드 전부 정합 검증된다."""
+    n = 10
+    blueprint = build_curriculum_blueprint(subject="물리", lesson_count=n)
+    items = [_slot_item(s) for s in blueprint]
+    codex_output = json.dumps({"slots": items}, ensure_ascii=False)
+
+    result = _parse_and_validate(codex_output, blueprint)
+
+    assert len(result) == n
+    for sr in result:
+        # stage는 블루프린트와 일치해야 한다
+        bp_slot = next(s for s in blueprint if s.order == sr.order)
+        assert sr.stage == bp_slot.stage, f"order={sr.order} stage 불일치"
+        assert 3 <= len(sr.key_topics) <= 5
+
+
+def test_parse_codex_wrapped_stage_tampered_drops_slot() -> None:
+    """codex 래핑 형태에서 stage 변조 슬롯은 동일하게 drop된다."""
+    n = 5
+    blueprint = build_curriculum_blueprint(subject="역사", lesson_count=n)
+    items = [_slot_item(s) for s in blueprint]
+    items[1]["stage"] = "변조된단계"  # order=2 슬롯 변조
+    codex_output = json.dumps({"slots": items}, ensure_ascii=False)
+
+    result = _parse_and_validate(codex_output, blueprint)
+
+    assert len(result) == n - 1, f"변조 슬롯 drop 실패 — len={len(result)}"
+    assert 2 not in [r.order for r in result]
+
+
+def test_parse_codex_wrapped_empty_slots_array() -> None:
+    """codex 래핑이지만 slots가 빈 배열이면 빈 리스트를 반환한다."""
+    n = 5
+    blueprint = build_curriculum_blueprint(subject="화학", lesson_count=n)
+    codex_output = json.dumps({"slots": []}, ensure_ascii=False)
+
+    result = _parse_and_validate(codex_output, blueprint)
+
+    assert result == [], f"빈 slots 배열 처리 실패 — {result}"
+
+
+def test_extract_slots_list_unknown_wrapper_key_falls_to_substring() -> None:
+    """알 수 없는 래퍼 키(예: 'data')는 substring fallback으로 내부 배열을 추출한다."""
+    items = [{"order": 1, "stage": "관점 잡기"}]
+    raw = json.dumps({"data": items}, ensure_ascii=False)
+
+    result = _extract_slots_list(raw)
+
+    # substring fallback이 내부 배열 '[{...}]' 를 잡아야 한다
+    assert result is not None
+    assert isinstance(result, list)
+    assert len(result) == 1
+
+
+def test_extract_slots_list_garbage_returns_none() -> None:
+    """JSON이 아닌 쓰레기 입력은 None을 반환한다."""
+    for garbage in ["", "   ", "쓰레기 텍스트", "not-json-at-all"]:
+        assert _extract_slots_list(garbage) is None, f"garbage {garbage!r} 가 None이 아님"
+
+
+@pytest.mark.asyncio
+async def test_plan_with_blueprint_codex_wrapped_happy_path(monkeypatch) -> None:
+    """codex 래핑 형태 응답으로 _plan_with_blueprint가 N개 레슨을 정상 반환한다."""
+    n = 5
+    blueprint = build_curriculum_blueprint(subject="생물", lesson_count=n)
+    items = [_slot_item(s) for s in blueprint]
+    codex_output = json.dumps({"slots": items}, ensure_ascii=False)
+    connector = _RecordingConnector([_resp(codex_output)])
+
+    monkeypatch.setattr(
+        "app.modules.ChapterStudio_V1.app.curriculum_generate.get_planner_connector",
+        lambda: connector,
+    )
+    monkeypatch.setattr(
+        "app.modules.ChapterStudio_V1.app.curriculum_generate.build_curriculum_blueprint",
+        lambda **kw: blueprint,
+    )
+
+    course = {
+        "id": "c3",
+        "user_id": "u1",
+        "course_name": "생물 과외",
+        "subject": "생물",
+        "source_type": "topic",
+        "source_pdf_url": None,
+        "topic_text": "세포 분열",
+    }
+
+    lessons = await _plan_with_blueprint(course, "생물", n)
+
+    assert len(lessons) == n, f"codex 래핑 happy-path 실패 — len={len(lessons)}, 예상={n}"
+    assert [l["order"] for l in lessons] == list(range(1, n + 1))
+    for lesson in lessons:
+        assert set(lesson.keys()) == _EXPECTED_LESSON_KEYS
+    # 재요청 없이 1회 호출만
+    assert len(connector.calls) == 1

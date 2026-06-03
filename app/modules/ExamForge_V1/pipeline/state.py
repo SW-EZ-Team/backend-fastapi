@@ -96,6 +96,10 @@ class ExamForgeState(TypedDict, total=False):
     max_retries: int
     pipeline_status: str
     error_message: str | None
+    # 개수 부족 재시도 비수렴 추적 — dedup이 같은 중복을 반복 드롭해 missing_count가
+    # 줄지 않는 무한 루프를 캡으로 차단한다. retry_router_node가 갱신한다.
+    count_stuck_rounds: int
+    prev_missing_count: int
     # repair_questions 노드가 표적 교정을 적용했는지 여부.
     # True면 재검증(verify) 경로로, False면 기존 blind 재생성 경로로 라우팅한다.
     repair_applied: bool

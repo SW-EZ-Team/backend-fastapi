@@ -41,6 +41,8 @@ class CodexCliConnector:
         transient 오류 시 공용 retry 헬퍼가 지수 백오프 재시도를 수행한다.
         예산 증가는 최종 성공 시 1회만 반영한다(재시도가 예산을 중복 소모하지 않음).
         """
+        # 예산 체크는 allow_reserve 인자를 생략해 카운터가 contextvar에서
+        # 해설 생성 구간 여부를 자동 반영하게 한다(핵심 산출물 보호).
         if budget is None:
             budget = current_budget.get()
         if budget is not None:
@@ -77,9 +79,14 @@ class CodexCliConnector:
 
 
 def _build_command(req: ChapterAIRequest) -> list[str]:
-    """Codex CLI 실행 명령을 구성한다."""
+    """Codex CLI 실행 명령을 구성한다.
+
+    extra.output_schema_path 가 지정되면 --output-schema 를 추가해
+    codex 가 해당 JSON Schema 규격으로 응답을 강제하도록 한다.
+    이를 통해 정답/해설 필드가 누락되거나 형식이 깨지는 파싱 실패를 차단한다.
+    """
     prompt = _compose_prompt(req)
-    return [
+    cmd = [
         "codex", "exec",
         "--json",
         "--sandbox", "read-only",
@@ -88,8 +95,12 @@ def _build_command(req: ChapterAIRequest) -> list[str]:
         "--ignore-rules",
         "--skip-git-repo-check",
         "-m", codex_cli_model(),
-        prompt,
     ]
+    schema_path = req.extra.get("output_schema_path")
+    if isinstance(schema_path, str) and schema_path:
+        cmd.extend(["--output-schema", schema_path])
+    cmd.append(prompt)
+    return cmd
 
 
 async def _run(command: list[str]) -> tuple[str, str, int]:

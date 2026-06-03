@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["correct_answer", "explanation", "source_reference"],
+  "properties": {
+    "correct_answer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20
+    },
+    "explanation": {
+      "type": "string",
+      "minLength": 50,
+      "maxLength": 3000
+    },
+    "source_reference": {
+      "type": "string",
+      "maxLength": 500
+    }
+  }
+}

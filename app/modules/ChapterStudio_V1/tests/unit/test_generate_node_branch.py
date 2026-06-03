@@ -1,8 +1,11 @@
 """generate_lesson_node의 모델 인지 분기 검증.
 
 connector.supports("batch")에 따라:
-    - True(=Qwen Modal): 컴포넌트 병렬 경로(generate_lesson_parallel)를 탄다.
-    - False(=codex/claude): 기존 단일 거대 콜 경로를 그대로 탄다(동작·비용 불변).
+    - True(=Qwen Modal, CodexCLI): 컴포넌트 병렬 경로(generate_lesson_parallel)를 탄다.
+    - False(=claude): 기존 단일 거대 콜 경로를 그대로 탄다(동작·비용 불변).
+
+P0 픽스: CodexCLIConnector는 "batch"를 지원하므로 단일 거대 콜(180초 타임아웃)이 아닌
+         컴포넌트별 병렬 경로를 탄다.
 """
 from __future__ import annotations
 
@@ -59,11 +62,26 @@ async def test_non_batch_connector_takes_single_call_path(monkeypatch: pytest.Mo
 
     result = await generate_node.generate_lesson_node(_state())
 
-    # codex류는 lesson 단일콜 1회만 호출(컴포넌트 호출 없음).
+    # batch 미지원 커넥터만 lesson 단일콜 경로를 탄다.
     assert connector.calls == 1
     assert result["generation_model"] == connector.name
     payload = result["lesson_payload"]
     assert {s["slide_idx"] for s in payload["slides"]} == set(range(_SLIDE_COUNT))
+
+
+def test_codex_cli_connector_supports_batch() -> None:
+    """P0 픽스 확인: CodexCLIConnector가 'batch'를 지원해 병렬 경로를 탄다.
+
+    codex_cli가 'batch' 미지원이면 단일 거대 콜(12슬라이드+퀴즈+voice_scripts)이 180초를
+    초과해 강의 생성 전면 실패한다. 이 테스트가 깨지면 P0 타임아웃이 재발한다.
+    """
+    from app.modules.ChapterStudio_V1.ai_connectors.codex_cli_connector import CodexCLIConnector
+
+    connector = CodexCLIConnector()
+    assert connector.supports("batch"), (
+        "CodexCLIConnector must support 'batch' to route to generate_lesson_parallel. "
+        "단일 거대 콜 경로는 180초 타임아웃을 초과한다(P0)."
+    )
 
 
 def _state() -> ChapterStudioState:

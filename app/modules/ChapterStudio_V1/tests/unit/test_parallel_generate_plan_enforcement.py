@@ -118,6 +118,36 @@ async def test_no_drift_passes_unchanged_in_real_path() -> None:
         assert by_idx[idx].visual.get("type") == expected
 
 
+@pytest.mark.anyio
+async def test_metric_card_slot_keeps_plan_type_when_validation_fails() -> None:
+    """P2 회귀 차단: 검증 실패(category=interactive 등) 슬롯도 plan visual_type을 보존한다.
+
+    라이브 드리프트 케이스 재현: 마지막 슬롯(plan=metric-card, category=interactive)을 AI가
+    plan과 같은 category로 반환하면 _VisualSlideResult Literal에 interactive가 없어 검증이 실패하고
+    기존엔 example_box로 하드코딩 폴백됐다(드리프트 1건). 픽스 후 plan type이 유지돼야 한다.
+    """
+    state = _state_with_real_plan()
+    plan = build_slide_plan("math_reasoning", _SLIDE_COUNT)
+    plan_categories = [p.category for p in plan]
+    expected_types = _plan_visual_types()
+    # AI가 plan과 동일한 category(interactive/math 등)를 반환 → 일부 슬롯 검증 실패 유발.
+    connector = _PlanCategoryConnector(plan_categories, expected_types)
+
+    payload = await generate_lesson_parallel(connector, state, _SLIDE_COUNT)
+
+    by_idx = {s.slide_idx: s for s in payload.slides}
+    # 모든 슬롯이 plan visual_type을 유지해야 한다(검증 실패 슬롯 포함).
+    for idx, expected in enumerate(expected_types):
+        assert by_idx[idx].visual.get("type") == expected, (
+            f"slide_idx={idx}: plan visual_type={expected} 유지 실패, "
+            f"실제={by_idx[idx].visual.get('type')} (P2 드리프트 재발)"
+        )
+    # 최소 3종 visual_type 분포 보장(metric-card 누락 시 2종으로 떨어짐).
+    unique_types = {s.visual.get("type") for s in payload.slides}
+    assert len(unique_types) >= 3, f"visual_type 다양성 부족: {unique_types}"
+    assert "metric-card" in unique_types, "마지막 슬롯 metric-card가 누락됐다(P2 드리프트)."
+
+
 def _is_chapter_number_title(title: str) -> bool:
     # 단일 진실 소스(title_rules)로 판정해 정규식 중복을 피한다.
     from app.modules.ChapterStudio_V1.postprocess.title_rules import is_chapter_number_title
@@ -203,16 +233,40 @@ class _PlanFaithfulConnector(_BaseComponentConnector):
         return json.dumps({"slides": slides}, ensure_ascii=False)
 
 
+class _PlanCategoryConnector(_BaseComponentConnector):
+    """slides에서 plan의 실제 category(interactive/math/code 등)를 반환하는 커넥터.
+
+    _VisualSlideResult.category Literal에 없는 category(interactive/code)를 그대로 반환해
+    검증 실패 → 폴백 경로를 강제로 태운다(P2 드리프트 재현).
+    """
+
+    def __init__(self, plan_categories: list[str], plan_types: list[str]) -> None:
+        super().__init__()
+        self._plan_categories = plan_categories
+        self._plan_types = plan_types
+
+    def _slides_body(self, req: ChapterAIRequest) -> str:
+        slides = [
+            _drift_slide(i, self._plan_types[i], "개념 설명 슬라이드", category=self._plan_categories[i])
+            for i in range(_SLIDE_COUNT)
+        ]
+        return json.dumps({"slides": slides}, ensure_ascii=False)
+
+
 def _resp(text: str) -> ChapterAIResponse:
     return ChapterAIResponse(text=text, model="fake", input_tokens=1, output_tokens=1, finish_reason="stop")
 
 
-def _drift_slide(idx: int, visual_type: str, title: str) -> dict[str, object]:
-    """visual.type을 지정 값으로 반환하는 구조화 visual 슬라이드 항목을 만든다."""
+def _drift_slide(idx: int, visual_type: str, title: str, category: str = "text") -> dict[str, object]:
+    """visual.type을 지정 값으로 반환하는 구조화 visual 슬라이드 항목을 만든다.
+
+    category 기본값은 text(검증 통과). interactive/code 등을 넘기면 _VisualSlideResult
+    Literal 미포함으로 검증 실패 → 폴백 경로를 탄다(P2 재현용).
+    """
     return {
         "slide_idx": idx,
         "title": title,
-        "category": "text",
+        "category": category,
         "narration": (
             "음수와 양수의 위치를 수직선에서 직접 확인합니다. 오른쪽에 있을수록 큰 수라는 "
             "기준으로 부호가 붙은 수의 크기를 안정적으로 판단할 수 있습니다."

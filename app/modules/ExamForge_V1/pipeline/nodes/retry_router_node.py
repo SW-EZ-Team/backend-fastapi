@@ -16,25 +16,75 @@ from app.modules.ExamForge_V1.common.verification_status import (
 logger = get_logger(__name__)
 
 
+# 개수 부족 재시도가 진전 없이 반복되는 것을 허용하는 최대 라운드 수.
+# 이 횟수만큼 missing_count가 줄지 않으면(dedup 비수렴) 유니크 문항만 출고한다.
+_COUNT_STUCK_ROUND_CAP = 2
+
+
 async def retry_router_node(state: ExamForgeState) -> dict:
     """실제 재시도가 필요한 경우에만 카운터를 증가시킨다.
 
     passed/exhausted 경로에서는 카운터를 변경하지 않아
     off-by-one 보고 오류를 방지한다.
+
+    개수 부족 비수렴 추적: missing_count가 직전 라운드 대비 줄지 않으면
+    count_stuck_rounds를 증가시키고, 줄면 0으로 리셋한다. 이 값을
+    route_after_validation의 비수렴 캡이 참조한다.
     """
     # 상위 노드에서 에러가 전파된 경우 즉시 반환
     if state.get("pipeline_status") == "error":
         return {}
     node_start = time.time()
     logger.info("노드 시작: retry_router_node")
-    route = route_after_validation(state)
+
+    # 개수 부족 진전 추적 — route 결정 전에 stuck 카운터를 갱신한다.
+    stuck_update = _track_count_progress(state)
+
+    # 내부 route 판단은 갱신된 stuck 값을 반영해야 한다(엣지 호출과 일관성).
+    # langgraph는 이 노드가 state를 갱신한 뒤 route_after_validation을 엣지로
+    # 다시 호출하므로, 내부 호출도 동일한 갱신본을 보게 해 retry 카운터 증분이
+    # 엣지 라우팅과 어긋나지 않게 한다.
+    route_state = {**state, **stuck_update}
+    route = route_after_validation(route_state)
     if route == "retry":
         # 실제 재시도 시에만 카운터 증가
         logger.info("노드 완료: retry_router_node (%.2fs) → retry", time.time() - node_start)
-        return {"retry_count": state.get("retry_count", 0) + 1}
+        return {"retry_count": state.get("retry_count", 0) + 1, **stuck_update}
     # 통과 또는 소진 시 카운터 유지
     logger.info("노드 완료: retry_router_node (%.2fs) → %s", time.time() - node_start, route)
-    return {}
+    return stuck_update
+
+
+def _track_count_progress(state: ExamForgeState) -> dict:
+    """개수 부족 재시도의 진전 여부를 추적해 count_stuck_rounds를 갱신한다.
+
+    missing_count가 직전보다 줄면 stuck=0(진전), 같거나 늘면 stuck+1(비수렴).
+    missing_count가 0이거나 없으면 추적을 리셋한다.
+    """
+    report = state.get("validation_report", {})
+    missing_count = report.get("missing_count")
+    if not isinstance(missing_count, int) or missing_count <= 0:
+        return {"count_stuck_rounds": 0, "prev_missing_count": 0}
+
+    prev = state.get("prev_missing_count", -1)
+    stuck = state.get("count_stuck_rounds", 0)
+    if prev >= 0 and missing_count >= prev:
+        # 진전 없음(같거나 악화) — 비수렴 카운터 증가
+        stuck += 1
+    else:
+        # 진전 있음(미달 감소) 또는 첫 관측 — 카운터 리셋
+        stuck = 0
+    return {"count_stuck_rounds": stuck, "prev_missing_count": missing_count}
+
+
+def _count_retry_non_converging(state: ExamForgeState, missing_count: int) -> bool:
+    """개수 부족 재시도가 비수렴 상한에 도달했는지 판단한다.
+
+    count_stuck_rounds가 캡 이상이면 True — 더 재시도해도 dedup이 같은 중복을
+    드롭해 수렴 못 하므로 유니크 문항만 출고한다.
+    """
+    stuck = state.get("count_stuck_rounds", 0)
+    return isinstance(stuck, int) and stuck >= _COUNT_STUCK_ROUND_CAP
 
 
 def route_after_validation(state: ExamForgeState) -> str:
@@ -94,6 +144,17 @@ def route_after_validation(state: ExamForgeState) -> str:
     validation_report_early = state.get("validation_report", {})
     missing_count = validation_report_early.get("missing_count")
     if isinstance(missing_count, int) and missing_count > 0:
+        # 비수렴 캡: dedup이 매번 같은 중복을 드롭해 missing_count가 줄지 않으면
+        # 무한 재시도로 예산을 태운다. 개수 부족 재시도가 진전 없이 상한에 도달하면
+        # 확보된 유니크 문항만 출고하도록 passed로 빠진다(total_questions 동기화는
+        # format_output/response에서 처리). 진전(미달 감소)이 있으면 정상 재시도.
+        if _count_retry_non_converging(state, missing_count):
+            logger.warning(
+                "route_after_validation: 개수 부족 재시도 비수렴(missing_count=%d) — "
+                "유니크 문항만 출고(passed)로 종료",
+                missing_count,
+            )
+            return "passed"
         _dest = "exhausted" if retry_count >= max_retries else "retry"
         logger.info(
             "route_after_validation: 개수 부족 missing_count=%d — %s",

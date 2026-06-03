@@ -57,10 +57,21 @@ class ExamForgeResponse(BaseModel):
 
 
 def _coerce_exam_plan(state: dict, question_count: int) -> dict:
-    """테스트 더블/부분 상태에서도 응답 스키마를 안정적으로 채운다."""
-    # exam_plan 키 누락 시 빈 딕셔너리로 폴백해 KeyError 방지
+    """테스트 더블/부분 상태에서도 응답 스키마를 안정적으로 채운다.
+
+    passed_partial 결과일 때 선언 total_questions를 실제 문항 수로 맞춘다.
+    Spring이 exam_plan.total_questions를 기준으로 채점하므로 선언≠실제 불일치를
+    이 시점에 제거해 채점 오류를 방지한다.
+    """
     if state.get("exam_plan"):
-        return state.get("exam_plan", {})
+        plan = dict(state["exam_plan"])
+        outcome = state.get("pipeline_outcome", "")
+        declared = int(plan.get("total_questions") or 0)
+        # 부분 완료 시 선언수를 실제수에 맞춤 (plan-first 위반이지만 출고 불일치보다 낫다)
+        if outcome == "passed_partial" and declared != question_count and question_count > 0:
+            plan["total_questions"] = question_count
+            plan["total_points"] = float(question_count)
+        return plan
 
     config = state.get("exam_config", {})
     subject = state.get("subject") or config.get("subject") or "모의고사"

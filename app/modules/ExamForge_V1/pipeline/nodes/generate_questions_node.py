@@ -12,7 +12,6 @@ from app.modules.ExamForge_V1.prompts.question_gen import get_system_prompt
 from app.modules.ExamForge_V1.common.config import generation_concurrency
 from app.modules.ExamForge_V1.common.ai_bridge import (
     AIConnector,
-    connector_supports_batch,
     get_text_connector,
     run_connector_tasks,
 )
@@ -215,6 +214,9 @@ async def generate_questions_node(state: ExamForgeState) -> dict:
             logger.warning("문항 생성 중 예외 발생: %s", result)
     candidates = passed + new_drafts
     # plan-first: blueprint를 넘겨 누락 슬롯을 특정하고 슬롯 계약을 보충 청크에 전달한다
+    # run_connector_tasks가 항상 gather를 쓰므로 보충 생성도 공유 세마포어를 쓴다.
+    # 이전에 connector_supports_batch가 False이면 asyncio.Semaphore(1)로 강제했지만,
+    # 이제 모든 경로에서 generation_concurrency() 세마포어로 병렬성을 통일한다.
     repair_drafts = await repair_missing_questions(
         allocations=allocations,
         topic_weights=topic_weights,
@@ -222,9 +224,7 @@ async def generate_questions_node(state: ExamForgeState) -> dict:
         connector=connector,
         source_text=source_text,
         locale=locale,
-        semaphore=(
-            semaphore if connector_supports_batch(connector) else asyncio.Semaphore(1)
-        ),
+        semaphore=semaphore,
         generate_chunk=_generate_chunk,
         blueprint=blueprint if blueprint else None,
     )

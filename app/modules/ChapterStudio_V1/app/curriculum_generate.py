@@ -226,29 +226,63 @@ def _codex_schema_extra() -> dict[str, str]:
     return {}
 
 
+def _extract_slots_list(text: str) -> list | None:
+    """AI 응답 텍스트에서 슬롯 배열을 추출한다.
+
+    우선순위:
+    1. codex CLI 경로: output-schema 래핑 형태 {"slots":[...]} — slots 키를 명시적으로 읽는다.
+    2. opus/기타 경로: bare array [...] — 최상위 배열을 직접 파싱한다.
+    3. 두 경우 모두 실패 시: None 반환 (호출자가 빈 리스트로 처리).
+
+    왜 명시적 파싱이 필요한가:
+      hot-fix 전 스키마가 최상위 array였다가 object로 교체된 후,
+      find('[') / rfind(']') substring 방식은 {"slots":[...]} 에서
+      slots 배열 내부의 '[' 을 우연히 올바르게 잡아 동작하고 있었다.
+      그러나 이는 스키마 키 이름·구조 변경 시 조용히 깨질 수 있으므로
+      slots 키를 먼저 명시적으로 시도하고 그 외에는 substring fallback으로 처리한다.
+    """
+    # 1단계: 전체를 JSON 객체로 파싱 후 'slots' 키 추출 (codex 경로)
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict) and "slots" in obj and isinstance(obj["slots"], list):
+            return obj["slots"]
+        if isinstance(obj, list):
+            return obj
+    except json.JSONDecodeError:
+        pass
+
+    # 2단계: bare array substring 추출 fallback (opus 경로 + 코드펜스 없는 부분 배열)
+    start = text.find("[")
+    end = text.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        raw_items = json.loads(text[start : end + 1])
+        if isinstance(raw_items, list):
+            return raw_items
+    except json.JSONDecodeError:
+        pass
+    return None
+
+
 def _parse_and_validate(
     raw: str,
     blueprint: list[ChapterSlot],
 ) -> list[_SlotResponse]:
     """AI 출력을 Pydantic strict로 검증하고 블루프린트 슬롯과 1:1 정합을 확인한다.
 
-    기존 substring best-effort 방식 대신 엄격한 파싱을 적용한다.
+    codex CLI 경로({"slots":[...]})와 opus 경로(bare array) 모두 명시적으로 처리한다.
     슬롯 정합 실패(order/stage 불일치)는 해당 슬롯을 결과에서 제외한다.
     """
     text = _THINK_RE.sub("", raw).strip()
-    start = text.find("[")
-    end = text.rfind("]")
-    if start == -1 or end == -1 or end <= start:
+    raw_items = _extract_slots_list(text)
+
+    if raw_items is None:
         _LOG.error("[curriculum] JSON 배열을 찾지 못함: %r", text[:300])
         return []
 
-    try:
-        raw_items = json.loads(text[start : end + 1])
-    except json.JSONDecodeError as exc:
-        _LOG.error("[curriculum] JSON 파싱 실패: %s | %r", exc, text[start : start + 300])
-        return []
-
     if not isinstance(raw_items, list):
+        _LOG.error("[curriculum] 파싱 결과가 배열이 아님 — type=%s", type(raw_items).__name__)
         return []
 
     # 블루프린트 인덱스 맵 (order → ChapterSlot) — 1:1 정합 검사에 사용

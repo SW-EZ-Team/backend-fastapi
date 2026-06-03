@@ -279,10 +279,12 @@ def _parse_slide_item(
         try:
             result = _VisualSlideResult.model_validate(data)
         except ValidationError:
-            return _fallback_slide(data)
+            # 검증 실패(예: category=interactive/code 등 Literal 미포함)해도 plan visual_type은
+            # 보존한다. plan_slot을 넘겨 example_box 하드코딩 드리프트를 막는다(P2).
+            return _fallback_slide(data, plan_slot)
         return _visual_slide_to_generated(result, plan_slot)
     if "html" not in data:
-        return _fallback_slide(data)
+        return _fallback_slide(data, plan_slot)
     return GeneratedSlide.model_validate(data)
 
 
@@ -387,15 +389,24 @@ def _slide_category(category: VisualSlideCategory) -> SlideCategory:
     return category
 
 
-def _fallback_slide(data: dict[object, object]) -> GeneratedSlide:
+def _fallback_slide(
+    data: dict[object, object],
+    plan_slot: dict[str, object] | None = None,
+) -> GeneratedSlide:
     slide_idx = data.get("slide_idx")
     if not isinstance(slide_idx, int):
         raise ValueError("slide_idx 정수가 필요하다.")
-    title = _text_value(data.get("title"), f"슬라이드 {slide_idx + 1}")
+    title = _relabel_chapter_title(_text_value(data.get("title"), f"슬라이드 {slide_idx + 1}"), plan_slot)
     narration = _fallback_narration(data, title)
     checkpoint = _text_value(data.get("checkpoint"), "핵심 조건을 말로 확인할 수 있는가?")
     category = _category_value(data.get("category"))
-    html = render_fallback_visual(title, narration)
+    visual_type, visual_data = _fallback_visual(data, plan_slot, title, narration, checkpoint)
+    # plan visual_type이 있으면 그 타입 렌더러로, 없으면 안전한 example_box 폴백으로 그린다.
+    html = (
+        render_visual_slide(title, narration, visual_type, visual_data)
+        if visual_type != "example_box"
+        else render_fallback_visual(title, narration)
+    )
     return GeneratedSlide(
         slide_idx=slide_idx,
         title=title,
@@ -405,8 +416,30 @@ def _fallback_slide(data: dict[object, object]) -> GeneratedSlide:
         html=html,
         css="",
         narration=narration,
-        visual={"type": "example_box", "data": {"problem": title, "steps": [narration], "answer": checkpoint}},
+        visual={"type": visual_type, "data": visual_data},
     )
+
+
+def _fallback_visual(
+    data: dict[object, object],
+    plan_slot: dict[str, object] | None,
+    title: str,
+    narration: str,
+    checkpoint: str,
+) -> tuple[str, dict[str, object]]:
+    """폴백 슬라이드의 visual.type을 결정한다.
+
+    plan visual_type이 있으면(이미 _enforce_plan_visual_type이 data.visual.type에 반영) 그 타입을
+    유지해 드리프트를 막는다(P2). AI가 준 visual.data가 있으면 재사용하고, 없으면 example_box 폴백
+    형태의 안전한 data를 만든다.
+    """
+    plan_vt = plan_slot.get("visual_type") if isinstance(plan_slot, dict) else None
+    example_data: dict[str, object] = {"problem": title, "steps": [narration], "answer": checkpoint}
+    if not isinstance(plan_vt, str) or not plan_vt:
+        return "example_box", example_data
+    ai_visual = data.get("visual")
+    ai_data = ai_visual.get("data") if isinstance(ai_visual, Mapping) else None
+    return _normalize_visual_type(plan_vt), dict(ai_data) if isinstance(ai_data, Mapping) else example_data
 
 
 def _text_value(value: object, default: str) -> str:

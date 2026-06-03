@@ -97,3 +97,46 @@ def test_meaningful_slide_title_strips_repeated_conversational_intro() -> None:
     assert title.startswith("정수 덧셈")
     assert "튜터야" not in title
     assert "오늘" not in title
+
+
+# ── P1: CSS 누출 방어 (title 필드에 CSS 텍스트가 유입되는 경우) ────────────────
+
+
+def test_meaningful_slide_title_rejects_css_root_color_scheme() -> None:
+    """P1 픽스: AI 모델이 title='root color-scheme light'를 반환하면 제목으로 쓰지 않는다."""
+    title = meaningful_slide_title(
+        "root color-scheme light",
+        "Python 기초",
+        1,
+        "파이썬 기초 개념을 설명합니다.",
+    )
+
+    assert "root" not in title
+    assert "color-scheme" not in title
+
+
+def test_meaningful_slide_title_rejects_css_brace_pattern() -> None:
+    """:root{...} 형태의 CSS가 title 필드에 들어오면 폴백 소스에서 제목을 추출한다."""
+    title = meaningful_slide_title(
+        ":root{color-scheme:light dark}",
+        "정렬 알고리즘",
+        0,
+        "이진 탐색은 정렬된 배열에서 빠르게 원소를 찾습니다.",
+    )
+
+    assert ":root" not in title
+    assert "color-scheme" not in title
+
+
+def test_meaningful_slide_title_rejects_pure_ascii_no_meaning() -> None:
+    """한국어/숫자 없는 순수 영문 CSS 토큰은 제목으로 허용되지 않는다."""
+    title = meaningful_slide_title(
+        "color scheme light",
+        "수학 기초",
+        2,
+        "음수끼리 크기 비교는 절댓값이 작을수록 큽니다.",
+    )
+
+    # 의미 있는 한국어 fallback으로 대체돼야 한다
+    assert "color" not in title
+    assert "scheme" not in title
