@@ -21,6 +21,7 @@ from app.modules.ExamForge_V1.pipeline.nodes.programming_context import has_code
 from app.modules.ExamForge_V1.pipeline.nodes.programming_context import looks_like_programming_source
 from app.modules.ExamForge_V1.common.verification_status import (
     answer_accuracy_rate,
+    is_distractor_validity_hard_fail,
     is_genuine_fail,
     is_parse_failed,
     is_verified_pass,
@@ -145,7 +146,10 @@ def _validate_structure(
 
         # 교차 모델 검증 결과 포함
         verification = q.get("_verification", {})
-        if is_genuine_fail(verification) and not verification_advisory:
+        # 오답 타당성(기준7) hard fail은 advisory 모드여도 콘텐츠 정확성 결함이므로
+        # 구조 실패로 반영해 repair 대상으로 만든다.
+        hard_fail = is_distractor_validity_hard_fail(verification)
+        if is_genuine_fail(verification) and (not verification_advisory or hard_fail):
             issues.extend(verification.get("issues", []))
         elif verification == {} and not verification_advisory:
             issues.append("정답 검증 결과 없음")
@@ -159,6 +163,7 @@ def _validate_structure(
             "passed": passed,
             "issues": issues,
             "parse_failed": is_parse_failed(verification),
+            "distractor_validity_hard_fail": hard_fail,
         })
 
     return results, failed_ids

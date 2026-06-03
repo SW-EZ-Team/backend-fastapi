@@ -9,6 +9,7 @@ from app.modules.ExamForge_V1.common.config import verification_advisory_enabled
 from app.modules.ExamForge_V1.common.logger import get_logger
 from app.modules.ExamForge_V1.common.verification_status import (
     advisory_filtered_failed_ids,
+    has_distractor_validity_hard_fail,
     has_parse_failed_majority,
     verification_counts,
 )
@@ -166,6 +167,17 @@ def route_after_validation(state: ExamForgeState) -> str:
     if validation_report_early.get("answer_position_mismatch") is True:
         _dest = "exhausted" if retry_count >= max_retries else "retry"
         logger.info("route_after_validation: 정답 위치 분포 불일치 — %s", _dest)
+        return _dest
+
+    # --- 오답 타당성(기준7) hard-fail 게이트 ---
+    # 동치/참 오답은 콘텐츠 정확성 결함이라 advisory 모드여도, 실패율이 낮아도
+    # 무조건 repair로 보내야 한다. 단 1건이라도 있으면 retry로 라우팅한다(예산
+    # 소진/최대 재시도 시에는 위쪽 가드가 이미 exhausted로 빼낸다).
+    if has_distractor_validity_hard_fail(questions):
+        _dest = "exhausted" if retry_count >= max_retries else "retry"
+        logger.warning(
+            "route_after_validation: 오답 타당성 hard-fail 감지(advisory 무시) — %s", _dest,
+        )
         return _dest
 
     # --- 구조적 실패율 기반 판단 ---

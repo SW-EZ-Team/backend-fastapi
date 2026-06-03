@@ -31,6 +31,9 @@ from app.modules.ExamForge_V1.common.ai_bridge import (
     get_connector,
     get_current_budget,
 )
+from app.modules.ExamForge_V1.common.verification_status import (
+    is_distractor_validity_hard_fail,
+)
 from app.modules.ExamForge_V1.common.logger import get_logger
 
 logger = get_logger(__name__)
@@ -53,13 +56,24 @@ def _normalize_fix_instructions(value: object) -> str:
     return str(value).strip()
 
 
-def _select_repair_targets(state: ExamForgeState) -> list[dict]:
-    """fix_instructions가 있는 검증 실패 문항만 교정 대상으로 추린다."""
+def _select_repair_targets(
+    state: ExamForgeState,
+    *,
+    hard_fail_only: bool = False,
+) -> list[dict]:
+    """fix_instructions가 있는 검증 실패 문항만 교정 대상으로 추린다.
+
+    hard_fail_only=True(advisory 모드)이면 오답 타당성(기준7) hard fail 문항만
+    교정한다. 일반 advisory(스타일·표현) 실패는 검증기 신뢰 부족 정책에 따라 그대로
+    둔다 — 콘텐츠 정확성 결함만 advisory를 무시하고 교정한다.
+    """
     failed_ids = set(state.get("failed_question_ids", []))
     targets: list[dict] = []
     for q in state.get("verified_questions", []):
         verification = q.get("_verification", {})
         if verification.get("passed", False):
+            continue
+        if hard_fail_only and not is_distractor_validity_hard_fail(verification):
             continue
         draft_id = q.get("draft_id", q.get("question_id", ""))
         if draft_id not in failed_ids:
@@ -102,20 +116,34 @@ async def repair_questions_node(state: ExamForgeState) -> dict:
     node_start = time.time()
     logger.info("노드 시작: repair_questions_node")
 
-    if state.get("verification_advisory") is True or verification_advisory_enabled():
-        logger.warning("repair_questions_node: 검증 advisory 모드 — 표적 교정 생략")
-        return {"repair_applied": False}
+    advisory_mode = (
+        state.get("verification_advisory") is True or verification_advisory_enabled()
+    )
 
     # 안전 스위치: 끄면 즉시 blind 재생성 폴백 (변경 이전 동작과 동일).
     if not targeted_repair_enabled():
         logger.info("repair_questions_node: 표적 교정 비활성화 — 재생성 폴백")
         return {"repair_applied": False}
 
-    targets = _select_repair_targets(state)
-    if not targets:
-        # 교정 대상 없음 → blind 재생성 폴백으로 라우팅.
-        logger.info("repair_questions_node: 표적 교정 대상 없음 — 재생성 폴백")
-        return {"repair_applied": False}
+    if advisory_mode:
+        # advisory 모드여도 오답 타당성(기준7) hard fail은 콘텐츠 정확성 결함이므로
+        # 그 문항만 골라 교정한다. 일반 advisory(스타일·표현) 실패는 그대로 둔다.
+        targets = _select_repair_targets(state, hard_fail_only=True)
+        if not targets:
+            logger.warning(
+                "repair_questions_node: 검증 advisory 모드 — hard fail 없음, 표적 교정 생략"
+            )
+            return {"repair_applied": False}
+        logger.warning(
+            "repair_questions_node: advisory 모드지만 오답 타당성 hard fail %d건 — 해당 문항만 교정",
+            len(targets),
+        )
+    else:
+        targets = _select_repair_targets(state)
+        if not targets:
+            # 교정 대상 없음 → blind 재생성 폴백으로 라우팅.
+            logger.info("repair_questions_node: 표적 교정 대상 없음 — 재생성 폴백")
+            return {"repair_applied": False}
 
     budget = get_current_budget()
     if budget is not None and budget.exceeded:

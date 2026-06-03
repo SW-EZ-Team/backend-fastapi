@@ -164,6 +164,12 @@ def _normalize_verification(result: dict) -> dict:
         issues = [str(issues)]
     normalized["issues"] = [str(issue) for issue in issues]
     normalized["parse_failed"] = False
+    # 오답 타당성(기준7) hard-fail 플래그를 명시 불리언으로 정규화한다.
+    # 검증기가 누락하면 False로 두되, is_distractor_validity_hard_fail의
+    # issues 마커 폴백이 별도로 hard fail을 식별하므로 차단력은 유지된다.
+    normalized["distractor_validity_failed"] = (
+        normalized.get("distractor_validity_failed") is True
+    )
     return normalized
 
 

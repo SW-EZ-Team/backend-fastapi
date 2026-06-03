@@ -22,6 +22,69 @@ def is_genuine_fail(value: object) -> bool:
     return verification.get("passed") is False and not is_parse_failed(verification)
 
 
+# 오답 타당성(기준7) 위반을 issues 텍스트에서 식별하기 위한 폴백 키워드.
+# 검증기가 distractor_validity_failed 플래그를 명시하지 않아도, issues에 아래
+# 마커가 있으면 콘텐츠 정확성 결함(hard fail)으로 본다. 일반 스타일 권고와 구분된다.
+_DISTRACTOR_VALIDITY_MARKERS: tuple[str, ...] = (
+    "오답 타당성",
+    "distractor_validity",
+    "distractor validity",
+    "독립적으로 참",
+    "논리적으로 동치",
+    "정답과 동치",
+    "동시에 옳",
+    "조건 a 위반",
+    "조건 b 위반",
+    "조건 c 위반",
+)
+
+
+def _issues_signal_distractor_validity(verification: Verification) -> bool:
+    """issues 텍스트에 오답 타당성 위반 마커가 있으면 True (플래그 폴백)."""
+    issues = verification.get("issues", [])
+    if not isinstance(issues, (list, tuple)):
+        issues = [issues]
+    joined = " ".join(str(item) for item in issues).lower()
+    return any(marker.lower() in joined for marker in _DISTRACTOR_VALIDITY_MARKERS)
+
+
+def is_distractor_validity_hard_fail(value: object) -> bool:
+    """오답 타당성(기준7) 위반인 genuine fail인지 판별한다.
+
+    이 결함은 표현·스타일 권고가 아니라 콘텐츠 정확성 결함이므로 advisory 모드여도
+    반드시 repair돼야 한다. 판별 우선순위:
+      1) 검증기가 distractor_validity_failed=true를 명시 → hard fail
+      2) (폴백) issues 텍스트에 오답 타당성 위반 마커가 있음 → hard fail
+    단, genuine fail(passed=false, parse_failed 아님)이 아니면 hard fail이 아니다.
+    """
+    verification = verification_map(value)
+    if not is_genuine_fail(verification):
+        return False
+    if verification.get("distractor_validity_failed") is True:
+        return True
+    return _issues_signal_distractor_validity(verification)
+
+
+def has_distractor_validity_hard_fail(questions: list[dict]) -> bool:
+    """문항 목록에 오답 타당성 hard fail이 하나라도 있으면 True."""
+    return any(
+        is_distractor_validity_hard_fail(q.get("_verification"))
+        for q in questions
+    )
+
+
+def distractor_validity_hard_fail_keys(questions: list[dict]) -> set[str]:
+    """오답 타당성 hard fail 문항의 식별자 집합을 반환한다.
+
+    advisory 게이트가 이 키들은 재시도 대상에서 제외하지 않도록(=교정 강제) 쓰인다.
+    """
+    keys: set[str] = set()
+    for question in questions:
+        if is_distractor_validity_hard_fail(question.get("_verification")):
+            keys.update(question_keys(question))
+    return keys
+
+
 def is_verified_pass(value: object) -> bool:
     """검증자가 명시적으로 통과시킨 결과인지 확인한다."""
     return verification_map(value).get("passed") is True
@@ -68,10 +131,17 @@ def advisory_filtered_failed_ids(
     *,
     verification_advisory: bool,
 ) -> list[str]:
-    """검증 advisory 모드면 검증기 판단에서 온 실패 ID를 재시도 대상에서 제외한다."""
+    """검증 advisory 모드면 검증기 판단에서 온 실패 ID를 재시도 대상에서 제외한다.
+
+    예외: 오답 타당성(기준7) hard fail은 콘텐츠 정확성 결함이므로 advisory 모드여도
+    재시도 대상에서 제외하지 않는다 → 결함 오답이 repair로 교정되도록 강제한다.
+    """
     if not verification_advisory:
         return genuine_failed_ids(failed_ids, questions)
     advisory_keys = verification_advisory_keys(questions)
+    # hard fail 키는 advisory suppression에서 되살린다(=재시도 대상 유지).
+    hard_fail_keys = distractor_validity_hard_fail_keys(questions)
+    advisory_keys -= hard_fail_keys
     return [item for item in failed_ids if str(item) not in advisory_keys]
 
 

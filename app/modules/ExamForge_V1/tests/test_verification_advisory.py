@@ -314,3 +314,271 @@ def _question(question_id: str, draft_id: str) -> dict:
         "explanation": "정답은 후입선출입니다. 마지막에 들어간 원소가 먼저 제거됩니다.",
         "source_reference": "스택은 LIFO 구조이다.",
     }
+
+
+# ── 오답 타당성(기준7) hard-fail이 advisory 모드를 무시하고 repair되는지 검증 ──
+
+
+def _hard_fail_verification() -> dict:
+    """오답 타당성 위반(기준7) genuine fail 검증 결과 — distractor_validity_failed=true."""
+    return {
+        "passed": False,
+        "parse_failed": False,
+        "distractor_validity_failed": True,
+        "issues": ["보기 2: 조건 B 위반 — 정답과 논리적으로 동치인 오답"],
+        "fix_instructions": "보기 2를 'FIFO 구조(큐)'로 교체하라",
+    }
+
+
+def _style_advisory_verification() -> dict:
+    """오답 타당성과 무관한 일반 advisory(스타일·표현) genuine fail 검증 결과."""
+    return {
+        "passed": False,
+        "parse_failed": False,
+        "distractor_validity_failed": False,
+        "issues": ["보기 길이 불균형 — 정답만 유독 김"],
+        "fix_instructions": "보기 길이를 맞추라",
+    }
+
+
+class TestDistractorValidityStatusHelpers:
+    """verification_status의 hard-fail 판별 헬퍼 단위 테스트."""
+
+    def test_explicit_flag_is_hard_fail(self) -> None:
+        """distractor_validity_failed=true는 hard fail로 판별된다."""
+        from app.modules.ExamForge_V1.common.verification_status import (
+            is_distractor_validity_hard_fail,
+        )
+        assert is_distractor_validity_hard_fail(_hard_fail_verification()) is True
+
+    def test_issues_marker_fallback_is_hard_fail(self) -> None:
+        """플래그가 없어도 issues 텍스트 마커로 hard fail을 식별한다(폴백)."""
+        from app.modules.ExamForge_V1.common.verification_status import (
+            is_distractor_validity_hard_fail,
+        )
+        v = {
+            "passed": False,
+            "parse_failed": False,
+            "issues": ["보기 3: 조건 A 위반 — 독립적으로 참인 진술"],
+        }
+        assert is_distractor_validity_hard_fail(v) is True
+
+    def test_style_advisory_is_not_hard_fail(self) -> None:
+        """일반 스타일 advisory 실패는 hard fail이 아니다."""
+        from app.modules.ExamForge_V1.common.verification_status import (
+            is_distractor_validity_hard_fail,
+        )
+        assert is_distractor_validity_hard_fail(_style_advisory_verification()) is False
+
+    def test_pass_is_not_hard_fail(self) -> None:
+        """통과 문항은 hard fail이 아니다."""
+        from app.modules.ExamForge_V1.common.verification_status import (
+            is_distractor_validity_hard_fail,
+        )
+        assert is_distractor_validity_hard_fail({"passed": True}) is False
+
+    def test_advisory_filtered_keeps_hard_fail_id(self) -> None:
+        """advisory 모드여도 hard fail 문항 ID는 재시도 목록에 남는다."""
+        from app.modules.ExamForge_V1.common.verification_status import (
+            advisory_filtered_failed_ids,
+        )
+        questions = [
+            {**_question("q1", "d1"), "_verification": _hard_fail_verification()},
+            {**_question("q2", "d2"), "_verification": _style_advisory_verification()},
+        ]
+        result = advisory_filtered_failed_ids(
+            ["d1", "d2"], questions, verification_advisory=True
+        )
+        # hard fail(d1)은 남고, 스타일 advisory(d2)는 제외된다
+        assert "d1" in result
+        assert "d2" not in result
+
+
+class TestAdvisoryHardFailRouting:
+    """advisory 모드에서 hard-fail이 retry로 라우팅되는지 검증한다."""
+
+    def test_route_advisory_hard_fail_goes_retry(self) -> None:
+        """advisory 모드여도 오답 타당성 hard fail이 있으면 retry로 보낸다."""
+        state: ExamForgeState = {
+            "verified_questions": [
+                {**_question("q1", "d1"), "_verification": _hard_fail_verification()},
+                {**_question("q2", "d2"), "_verification": {"passed": True}},
+            ],
+            "failed_question_ids": ["d1"],
+            "validation_report": {"answer_accuracy_rate": 1.0},
+            "retry_count": 0,
+            "max_retries": 3,
+            "verification_advisory": True,
+        }
+        with patch(
+            "app.modules.ExamForge_V1.pipeline.nodes.retry_router_node.verification_advisory_enabled",
+            return_value=True,
+        ):
+            assert route_after_validation(state) == "retry"
+
+    def test_route_advisory_hard_fail_exhausts_at_max_retries(self) -> None:
+        """hard fail이어도 max_retries 소진 시 exhausted로 빠진다(무한루프 방지)."""
+        state: ExamForgeState = {
+            "verified_questions": [
+                {**_question("q1", "d1"), "_verification": _hard_fail_verification()},
+            ],
+            "failed_question_ids": ["d1"],
+            "validation_report": {"answer_accuracy_rate": 1.0},
+            "retry_count": 3,
+            "max_retries": 3,
+            "verification_advisory": True,
+        }
+        with patch(
+            "app.modules.ExamForge_V1.pipeline.nodes.retry_router_node.verification_advisory_enabled",
+            return_value=True,
+        ):
+            assert route_after_validation(state) == "exhausted"
+
+    def test_route_advisory_style_only_stays_passed(self) -> None:
+        """hard fail 없이 스타일 advisory만 있으면 기존대로 passed 유지(과잉 repair 방지)."""
+        state: ExamForgeState = {
+            "verified_questions": [
+                {**_question("q1", "d1"), "_verification": _style_advisory_verification()},
+                {**_question("q2", "d2"), "_verification": {"passed": True}},
+            ],
+            "failed_question_ids": ["d1"],
+            "validation_report": {"answer_accuracy_rate": 1.0, "dedup_score": 1.0},
+            "retry_count": 0,
+            "max_retries": 3,
+            "verification_advisory": True,
+        }
+        with patch(
+            "app.modules.ExamForge_V1.pipeline.nodes.retry_router_node.verification_advisory_enabled",
+            return_value=True,
+        ):
+            assert route_after_validation(state) == "passed"
+
+
+class TestAdvisoryHardFailRepair:
+    """advisory 모드에서 repair_questions_node가 hard-fail만 교정하는지 검증한다."""
+
+    @pytest.mark.asyncio
+    async def test_repair_runs_for_hard_fail_in_advisory(self) -> None:
+        """advisory 모드여도 hard fail 문항은 fix_instructions대로 교정된다."""
+        from app.modules.ExamForge_V1.pipeline.nodes.repair_questions_node import (
+            repair_questions_node,
+            route_after_repair,
+        )
+
+        repaired_json = (
+            '{"stem":"스택 동작?","options":['
+            '{"label":"1","text":"LIFO","is_correct":true},'
+            '{"label":"2","text":"FIFO 구조(큐)","is_correct":false}],'
+            '"correct_answer":"1"}'
+        )
+        connector = _SequenceConnector([repaired_json])
+        hard_q = {
+            "question_id": "q1", "draft_id": "d1",
+            "template_id": "ko_multiple_choice_4",
+            "correct_answer": "1", "stem": "스택 동작?",
+            "options": [
+                {"label": "1", "text": "LIFO", "is_correct": True},
+                {"label": "2", "text": "먼저 삽입이 가장 나중에 삭제되는 구조", "is_correct": False},
+            ],
+        }
+        state: ExamForgeState = {
+            "source_text": "스택은 LIFO 자료구조이다. " * 10,
+            "answered_questions": [hard_q],
+            "verified_questions": [{**hard_q, "_verification": _hard_fail_verification()}],
+            "failed_question_ids": ["d1"],
+            "verification_advisory": True,
+        }
+
+        with patch(
+            "app.modules.ExamForge_V1.pipeline.nodes.repair_questions_node.verification_advisory_enabled",
+            return_value=True,
+        ), patch(
+            "app.modules.ExamForge_V1.pipeline.nodes.repair_questions_node.get_connector",
+            return_value=connector,
+        ), patch(
+            "app.modules.ExamForge_V1.pipeline.nodes.repair_questions_node.active_verifier_model",
+            return_value="codex_cli",
+        ):
+            result = await repair_questions_node(state)
+
+        # advisory여도 hard fail이라 교정이 적용되고 reverify로 라우팅된다
+        assert result["repair_applied"] is True
+        assert connector.calls == 1
+        assert route_after_repair(result) == "reverify"
+        merged = result["answered_questions"][0]
+        assert merged["question_id"] == "q1" and merged["draft_id"] == "d1"
+        assert "_verification" not in merged
+
+    @pytest.mark.asyncio
+    async def test_repair_skips_style_advisory_failure(self) -> None:
+        """오답 타당성과 무관한 스타일 advisory 실패는 advisory 모드에서 교정하지 않는다."""
+        from app.modules.ExamForge_V1.pipeline.nodes.repair_questions_node import (
+            repair_questions_node,
+        )
+
+        style_q = {
+            "question_id": "q1", "draft_id": "d1",
+            "template_id": "ko_multiple_choice_4",
+            "correct_answer": "1", "stem": "문제?",
+        }
+        state: ExamForgeState = {
+            "source_text": "원본 자료 " * 30,
+            "answered_questions": [style_q],
+            "verified_questions": [{**style_q, "_verification": _style_advisory_verification()}],
+            "failed_question_ids": ["d1"],
+            "verification_advisory": True,
+        }
+
+        with patch(
+            "app.modules.ExamForge_V1.pipeline.nodes.repair_questions_node.verification_advisory_enabled",
+            return_value=True,
+        ), patch(
+            "app.modules.ExamForge_V1.pipeline.nodes.repair_questions_node.get_connector"
+        ) as mock_connector:
+            result = await repair_questions_node(state)
+
+        # 스타일 advisory는 검증기 신뢰 부족 정책대로 교정 생략
+        assert result["repair_applied"] is False
+        mock_connector.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_repair_respects_budget_exhaustion_with_hard_fail(self) -> None:
+        """hard fail이 있어도 예산 소진 시 교정하지 않고 폴백한다(폭증 방지)."""
+        from app.modules.ExamForge_V1.pipeline.nodes.repair_questions_node import (
+            repair_questions_node,
+        )
+        from app.modules.ExamForge_V1.common.ai_bridge import (
+            LLMBudgetCounter,
+            set_current_budget,
+            _current_budget,
+        )
+
+        budget = LLMBudgetCounter(budget=2)
+        budget.increment()
+        budget.increment()  # exceeded 상태
+        token = set_current_budget(budget)
+        try:
+            hard_q = {
+                "question_id": "q1", "draft_id": "d1",
+                "template_id": "ko_multiple_choice_4",
+                "correct_answer": "1", "stem": "스택?",
+            }
+            state: ExamForgeState = {
+                "source_text": "스택은 LIFO " * 10,
+                "answered_questions": [hard_q],
+                "verified_questions": [{**hard_q, "_verification": _hard_fail_verification()}],
+                "failed_question_ids": ["d1"],
+                "verification_advisory": True,
+            }
+            with patch(
+                "app.modules.ExamForge_V1.pipeline.nodes.repair_questions_node.verification_advisory_enabled",
+                return_value=True,
+            ), patch(
+                "app.modules.ExamForge_V1.pipeline.nodes.repair_questions_node.get_connector"
+            ) as mock_connector:
+                result = await repair_questions_node(state)
+
+            assert result["repair_applied"] is False
+            mock_connector.assert_not_called()
+        finally:
+            _current_budget.reset(token)
