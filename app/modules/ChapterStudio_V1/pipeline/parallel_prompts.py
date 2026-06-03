@@ -27,6 +27,8 @@ from app.modules.ChapterStudio_V1.pipeline.payload import (
     GeneratedVoiceScript,
     SlideCategory,
 )
+from app.modules.ChapterStudio_V1.app.template_types import VISUAL_TYPE_ALIASES
+from app.modules.ChapterStudio_V1.postprocess.title_rules import relabel_chapter_title as _relabel_title
 from common.llm_output import extract_json_block, loads_lenient, strip_thinking
 
 # 컴포넌트별 토큰 상한 — 작은 단일목적 응답에 맞춰 여유 있게 잡는다.
@@ -93,11 +95,42 @@ class _AssignmentResult(BaseModel):
 
 
 def build_slides_request(
-    brief: str, outline: str, slide_count: int, template_key: str, personalization: PersonalizationArgs
+    brief: str,
+    outline: str,
+    slide_count: int,
+    template_key: str,
+    personalization: PersonalizationArgs,
+    slide_plan: list[dict[str, object]] | None = None,
 ) -> ChapterAIRequest:
-    """슬라이드 배열만 생성하는 요청을 만든다(schema_kind=slides)."""
+    """슬라이드 배열만 생성하는 요청을 만든다(schema_kind=slides).
+
+    slide_plan이 주어지면 plan이 쓰는 visual.type 집합을 extra.plan_visual_types로 전달해
+    Modal guided 스키마가 enum을 그 집합으로 좁히게 한다(P1 — schema narrowing).
+    per-slot 단일값 강제는 parse_slides backstop이 담당하며, 여기서는 집합만 좁힌다.
+    """
     system, user = slides_prompts(brief, outline, slide_count, template_key, **_prompt_kwargs(personalization))
-    return _request(system, user, _SLIDES_MAX_TOKENS, 0.35, slide_count, "slides", template_key)
+    req = _request(system, user, _SLIDES_MAX_TOKENS, 0.35, slide_count, "slides", template_key)
+    plan_types = _plan_visual_types_csv(slide_plan)
+    if plan_types:
+        # extra 값은 스칼라만 허용되므로 콤마 결합 문자열로 전달한다(modal_app가 역파싱).
+        req.extra["plan_visual_types"] = plan_types
+    return req
+
+
+def _plan_visual_types_csv(slide_plan: list[dict[str, object]] | None) -> str:
+    """slide_plan에서 쓰이는 visual.type 집합을 콤마 결합 문자열로 만든다(중복 제거·순서 보존)."""
+    if not slide_plan:
+        return ""
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for slot in slide_plan:
+        if not isinstance(slot, dict):
+            continue
+        vt = slot.get("visual_type")
+        if isinstance(vt, str) and vt and vt not in seen:
+            seen.add(vt)
+            ordered.append(vt)
+    return ",".join(ordered)
 
 
 def build_quizzes_request(
@@ -153,11 +186,20 @@ def build_voice_request(
     )
 
 
-def parse_slides(text: str) -> list[GeneratedSlide]:
-    """slides 응답에서 legacy HTML 또는 구조화 visual 스펙을 strict 검증해 꺼낸다."""
+def parse_slides(
+    text: str,
+    slide_plan: list[dict[str, object]] | None = None,
+) -> list[GeneratedSlide]:
+    """slides 응답에서 visual 스펙을 검증해 꺼낸다.
+
+    slide_plan이 주어지면 각 슬롯의 visual.type을 플랜과 대조한다:
+    - AI 반환 type이 플랜과 다르면 플랜 type으로 강제 정규화(silent 드리프트 차단).
+    - 챕터명+번호 형태 제목은 must_have 기반 결정적 재라벨로 교체한다.
+    """
     data = _loaded(text)
     raw_slides = _raw_slides(data)
-    return [_parse_slide_item(item) for item in raw_slides]
+    plan_map = _build_plan_map(slide_plan)
+    return [_parse_slide_item(item, plan_map.get(_slide_idx(item))) for item in raw_slides]
 
 
 def parse_quizzes(text: str) -> list[GeneratedQuiz]:
@@ -224,26 +266,37 @@ def _raw_slides(data: object) -> list[object]:
     return raw
 
 
-def _parse_slide_item(item: object) -> GeneratedSlide:
+def _parse_slide_item(
+    item: object,
+    plan_slot: dict[str, object] | None = None,
+) -> GeneratedSlide:
     if not isinstance(item, Mapping):
         raise ValueError("slides 항목은 객체여야 한다.")
     data = dict(item)
     if isinstance(data.get("visual"), Mapping):
+        # plan 대조: visual.type을 플랜으로 정규화한다(silent 드리프트 차단).
+        data = _enforce_plan_visual_type(data, plan_slot)
         try:
-            return _visual_slide_to_generated(_VisualSlideResult.model_validate(data))
+            result = _VisualSlideResult.model_validate(data)
         except ValidationError:
             return _fallback_slide(data)
+        return _visual_slide_to_generated(result, plan_slot)
     if "html" not in data:
         return _fallback_slide(data)
     return GeneratedSlide.model_validate(data)
 
 
-def _visual_slide_to_generated(item: _VisualSlideResult) -> GeneratedSlide:
+def _visual_slide_to_generated(
+    item: _VisualSlideResult,
+    plan_slot: dict[str, object] | None = None,
+) -> GeneratedSlide:
     visual_data = item.visual.model_dump()
-    html = render_visual_slide(item.title, item.narration, item.visual.type, item.visual.data)
+    # 챕터명+번호 형태 제목은 결정적 재라벨로 교체한다.
+    title = _relabel_chapter_title(item.title, plan_slot)
+    html = render_visual_slide(title, item.narration, item.visual.type, item.visual.data)
     return GeneratedSlide(
         slide_idx=item.slide_idx,
-        title=item.title,
+        title=title,
         focus=item.narration,
         checkpoint=item.checkpoint,
         category=_slide_category(item.category),
@@ -252,6 +305,82 @@ def _visual_slide_to_generated(item: _VisualSlideResult) -> GeneratedSlide:
         narration=item.narration,
         visual=visual_data,
     )
+
+
+# ---------------------------------------------------------------------------
+# plan-first 대조 헬퍼 함수들
+# ---------------------------------------------------------------------------
+
+
+def _build_plan_map(
+    slide_plan: list[dict[str, object]] | None,
+) -> dict[int, dict[str, object]]:
+    """slide_plan 목록을 slide_idx 키 dict로 변환한다."""
+    if not slide_plan:
+        return {}
+    result: dict[int, dict[str, object]] = {}
+    for slot in slide_plan:
+        if isinstance(slot, dict):
+            idx = slot.get("slide_idx")
+            if isinstance(idx, int):
+                result[idx] = slot
+    return result
+
+
+def _slide_idx(item: object) -> int:
+    """raw dict 항목에서 slide_idx를 꺼낸다. 없으면 -1."""
+    if isinstance(item, Mapping):
+        idx = item.get("slide_idx")
+        if isinstance(idx, int):
+            return idx
+    return -1
+
+
+def _normalize_visual_type(vt: str) -> str:
+    """하이픈·언더스코어 혼용 alias를 정규화한다."""
+    return VISUAL_TYPE_ALIASES.get(vt, vt)
+
+
+def _enforce_plan_visual_type(
+    data: dict[str, object],
+    plan_slot: dict[str, object] | None,
+) -> dict[str, object]:
+    """AI 반환 visual.type을 플랜 type과 대조해 다르면 플랜 type으로 강제 교체한다.
+
+    plan-first 원칙: type 결정권은 코드에 있고 AI는 data만 채운다.
+    alias 정규화 후 비교한다(comparison_table == comparison-table).
+    """
+    if plan_slot is None:
+        return data
+    plan_vt = plan_slot.get("visual_type")
+    if not isinstance(plan_vt, str) or not plan_vt:
+        return data
+    visual = data.get("visual")
+    if not isinstance(visual, Mapping):
+        return data
+    ai_vt = visual.get("type")
+    if not isinstance(ai_vt, str):
+        # type 자체 누락 → 플랜 type 삽입
+        data = {**data, "visual": {**dict(visual), "type": plan_vt}}
+        return data
+    # alias 정규화 후 비교: 다르면 플랜 type으로 교체
+    if _normalize_visual_type(ai_vt) != _normalize_visual_type(plan_vt):
+        data = {**data, "visual": {**dict(visual), "type": plan_vt}}
+    return data
+
+
+def _relabel_chapter_title(title: str, plan_slot: dict[str, object] | None) -> str:
+    """챕터명+번호 형태 제목을 plan.must_have 기반으로 결정적 재라벨한다.
+
+    감지·재라벨 로직은 title_rules.relabel_chapter_title(단일 진실 소스)에 위임한다.
+    plan_slot이 없으면 원본 유지(대조 기준이 없으므로 변경하지 않는다).
+    """
+    if plan_slot is None:
+        return title
+    must_have = plan_slot.get("must_have")
+    if not isinstance(must_have, list):
+        return title
+    return _relabel_title(title, must_have)
 
 
 def _slide_category(category: VisualSlideCategory) -> SlideCategory:
@@ -399,4 +528,7 @@ __all__ = [
     "parse_quizzes",
     "parse_slides",
     "parse_voice",
+    "_enforce_plan_visual_type",
+    "_relabel_chapter_title",
+    "_normalize_visual_type",
 ]

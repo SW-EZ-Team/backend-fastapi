@@ -141,7 +141,11 @@ def build_brief(state: ChapterStudioState) -> str:
 
 
 def build_outline_text(state: ChapterStudioState, slide_count: int) -> str:
-    """확정 슬라이드 역할(slide_outline)을 한 줄씩 텍스트로 펼친다."""
+    """확정 슬라이드 플랜(slide_outline)을 슬롯 단위 오더로 펼친다.
+
+    각 행에 visual_type을 포함해 AI가 단일값 고정 오더를 받도록 한다.
+    visual_type이 없는 레거시 행은 category 기본값으로 보완한다.
+    """
     rows = _outline_rows(state)
     if not rows:
         return f"슬라이드 역할 목록 없음(슬라이드 수 {slide_count})"
@@ -149,11 +153,40 @@ def build_outline_text(state: ChapterStudioState, slide_count: int) -> str:
     for row in rows:
         must_have = row.get("must_have")
         joined = ", ".join(str(item) for item in must_have) if isinstance(must_have, list) else ""
+        visual_type = _row_visual_type(row)
+        min_len, max_len = _row_narration_len(row)
         lines.append(
             f"slide {row.get('slide_idx')}: category={row.get('category')}, "
-            f"role={row.get('role')}, must_have={joined}"
+            f"role={row.get('role')}, must_have={joined}, "
+            f"visual_type={visual_type}(고정·변경불가), "
+            f"narration {min_len}~{max_len}자"
         )
     return "\n".join(lines)
+
+
+def _row_visual_type(row: dict[str, object]) -> str:
+    """outline row에서 visual_type을 꺼낸다. 없으면 category 기본값으로 보완한다."""
+    vt = row.get("visual_type")
+    if isinstance(vt, str) and vt:
+        return vt
+    # 레거시 행: category에서 기본값 유도
+    cat = _as_text(row.get("category"))
+    _defaults = {
+        "text": "example_box", "diagram": "concept_map", "code": "example_box",
+        "math": "step_flow", "chart": "comparison-table", "interactive": "example_box",
+    }
+    return _defaults.get(cat, "example_box")
+
+
+def _row_narration_len(row: dict[str, object]) -> tuple[int, int]:
+    """outline row에서 narration_len을 꺼낸다. 없으면 기본값 (200, 360)."""
+    nl = row.get("narration_len")
+    if isinstance(nl, (list, tuple)) and len(nl) == 2:
+        try:
+            return (int(nl[0]), int(nl[1]))
+        except (TypeError, ValueError):
+            pass
+    return (200, 360)
 
 
 def build_voice_targets(state: ChapterStudioState, slide_count: int) -> list[VoiceTarget]:
@@ -252,4 +285,6 @@ __all__ = [
     "build_personalization_args",
     "build_voice_blueprint",
     "build_voice_targets",
+    "_row_visual_type",
+    "_row_narration_len",
 ]

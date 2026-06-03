@@ -3,6 +3,9 @@ from __future__ import annotations
 import re
 from html import unescape
 
+from app.modules.ChapterStudio_V1.postprocess.title_rules import (
+    relabel_chapter_title as _relabel_title,
+)
 from app.modules.ChapterStudio_V1.postprocess.visual_renderers import render_fallback_visual
 
 _VISUAL_MARKERS = (
@@ -171,4 +174,14 @@ def _specific_text(value: str) -> str:
     return "" if any(pattern.match(text) for pattern in _PLACEHOLDER_PATTERNS) else text
 
 
-__all__ = ["ensure_visual_body"]
+def relabel_chapter_title(title: str, must_have: list[str] | None = None) -> str:
+    """챕터명+번호 형태 제목 재라벨 — title_rules의 단일 진실 소스에 위임한다.
+
+    중복 정규식 정의를 제거하기 위해 로직을 title_rules로 통합했다(이전엔 여기와
+    parallel_prompts에 별도 정규식이 있었음). postprocess 계층에서 title 재검증이 필요할 때
+    쓸 수 있도록 얇은 re-export로 남긴다.
+    """
+    return _relabel_title(title, must_have)
+
+
+__all__ = ["ensure_visual_body", "relabel_chapter_title"]

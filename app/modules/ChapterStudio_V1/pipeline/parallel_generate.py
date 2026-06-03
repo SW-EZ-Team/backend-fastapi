@@ -47,6 +47,7 @@ from app.modules.ChapterStudio_V1.pipeline.parallel_inputs import (
     build_voice_targets,
 )
 from app.modules.ChapterStudio_V1.pipeline.payload import GeneratedLessonPayload, GeneratedSlide
+from app.modules.ChapterStudio_V1.pipeline.slide_plan import build_slide_plan, serialize_slide_plan
 from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState
 
 _Result = TypeVar("_Result")
@@ -78,8 +79,16 @@ async def _gather_components(
     personalization: PersonalizationArgs,
 ) -> ComponentBundle:
     """코어 컴포넌트 생성 후 화면 내용 기반 voice를 생성한다."""
+    # plan-first 강제: context_node가 채운 slide_outline(visual_type 포함)을 parse_slides의
+    # slide_plan으로 바인딩한다. 이렇게 해야 _enforce_plan_visual_type / _relabel_chapter_title이
+    # 프로덕션 경로에서 실제로 작동한다(함수참조만 넘기면 slide_plan=None이라 강제가 죽는다).
+    slide_plan_rows = _resolve_slide_plan(state, template_key, slide_count)
+    slides_parse = partial(pp.parse_slides, slide_plan=slide_plan_rows)
     slides_task = _component(
-        connector, pp.build_slides_request(brief, outline, slide_count, template_key, personalization), pp.parse_slides
+        connector,
+        # plan을 build_slides_request에도 넘겨 Modal guided enum을 plan 집합으로 좁힌다(P1).
+        pp.build_slides_request(brief, outline, slide_count, template_key, personalization, slide_plan_rows),
+        slides_parse,
     )
     quizzes_task = _component(
         connector, pp.build_quizzes_request(brief, outline, slide_count, template_key, personalization), pp.parse_quizzes
@@ -167,6 +176,37 @@ def _template_key(state: ChapterStudioState) -> str:
     if not isinstance(value, str) or value == "":
         raise ConversionError("template_key 문자열이 필요하다.")
     return value
+
+
+def _resolve_slide_plan(
+    state: ChapterStudioState, template_key: str, slide_count: int
+) -> list[dict[str, object]]:
+    """parse_slides에 넘길 slide_plan 행 목록을 확정한다(visual_type/must_have 포함).
+
+    우선순위:
+    1. state["slide_outline"] — context_node가 직렬화한 plan(visual_type 있음)을 그대로 사용.
+       단, visual_type 키가 실제로 채워진 행들만 plan으로 인정한다(레거시 outline 방어).
+    2. 누락/레거시면 build_slide_plan으로 결정적 재생성 후 직렬화한다(왕복 무결).
+
+    이 함수가 직렬→역직렬 왕복 무결성을 보장한다: 반환 행은 slide_idx·visual_type·must_have를
+    갖추어 _build_plan_map / _enforce_plan_visual_type / _relabel_chapter_title이 대조할 수 있다.
+    """
+    rows = state.get("slide_outline")
+    if isinstance(rows, list):
+        usable = [
+            row
+            for row in rows
+            if isinstance(row, dict)
+            and isinstance(row.get("slide_idx"), int)
+            and isinstance(row.get("visual_type"), str)
+            and row.get("visual_type")
+        ]
+        # slide_count개 슬롯이 모두 visual_type을 갖춘 경우에만 신뢰한다.
+        if len(usable) == slide_count:
+            return usable
+    # 폴백: state outline이 없거나 레거시면 plan을 결정적으로 재생성한다.
+    plans = build_slide_plan(template_key, slide_count)
+    return serialize_slide_plan(plans)
 
 
 def _state_with_slides(state: ChapterStudioState, slides: list[GeneratedSlide]) -> ChapterStudioState:

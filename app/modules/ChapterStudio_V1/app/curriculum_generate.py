@@ -360,6 +360,7 @@ def _slot_response_to_lesson(
         "order": sr.order,
         "title": sr.title,
         "description": sr.summary,
+        # slide_count는 블루프린트(slide_count_from_minutes)에서 결정된 값이다(AI 미관여).
         "slide_count": _clamp_int(slot.slide_count, 12, 10, 15),
         "estimated_minutes": _clamp_int(slot.estimated_minutes, 30, 20, 60),
         "learning_goal": sr.learning_goal,

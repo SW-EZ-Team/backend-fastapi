@@ -19,9 +19,32 @@ from app.modules.ChapterStudio_V1.app.tutor_blueprints import blueprint_for
 CURRICULUM_MIN_LESSONS: int = 1
 CURRICULUM_MAX_LESSONS: int = 30
 
-# 슬라이드 수·예상 시간 결정적 기본값
-_DEFAULT_SLIDE_COUNT: int = 12
+# 예상 소요 시간 결정적 기본값
 _DEFAULT_ESTIMATED_MINUTES: int = 30
+
+# 분당 슬라이드 비율 테이블 — (분 상한 포함, slide_count) 쌍의 순서 있는 목록.
+# estimated_minutes 값이 해당 구간에 속하면 그 slide_count를 반환한다.
+# AI에 절대 위임하지 않으며 동일 minutes → 동일 slide_count 재현성 보장.
+_MINUTES_TO_SLIDE_COUNT: tuple[tuple[int, int], ...] = (
+    (20, 10),   # ≤20분 → 10개 슬라이드
+    (25, 11),   # 21~25분 → 11개
+    (30, 12),   # 26~30분 → 12개 (기본)
+    (35, 13),   # 31~35분 → 13개
+    (45, 14),   # 36~45분 → 14개
+    (999, 15),  # 46분 이상 → 15개 (상한)
+)
+
+
+def slide_count_from_minutes(estimated_minutes: int) -> int:
+    """estimated_minutes로부터 결정적 slide_count를 산출한다(AI 미관여).
+
+    분당 슬라이드 비율 테이블(_MINUTES_TO_SLIDE_COUNT)을 사용해 구간별로 결정한다.
+    반환값은 항상 10~15 범위 내에 있다.
+    """
+    for minutes_limit, count in _MINUTES_TO_SLIDE_COUNT:
+        if estimated_minutes <= minutes_limit:
+            return count
+    return 15  # 방어적 폴백 (정상 경로에서는 도달하지 않음)
 
 # 역할 배분 기준: 전체 N강 중 위치 비율로 진행 역할을 결정적으로 배정한다
 # (0.0 ~ 1.0 구간 경계, 우측 경계 포함)
@@ -86,13 +109,15 @@ def build_curriculum_blueprint(
         role = _pick_role(i, n)
         topic_scope = _pick_topic_scope(i, n, topics, stage, bp.lens)
         key_hints = _build_key_hints(stage, topic_scope, bp.lens)
+        # slide_count를 결정적 함수로 산출한다(AI 미관여).
+        s_count = slide_count_from_minutes(_DEFAULT_ESTIMATED_MINUTES)
         slots.append(
             ChapterSlot(
                 order=order,
                 stage=stage,
                 topic_scope=topic_scope,
                 role=role,
-                slide_count=_DEFAULT_SLIDE_COUNT,
+                slide_count=s_count,
                 estimated_minutes=_DEFAULT_ESTIMATED_MINUTES,
                 key_topics=key_hints,
             )
@@ -190,3 +215,12 @@ def _build_key_hints(stage: str, topic_scope: str, lens: str) -> list[str]:
     lens(관점)·stage·topic_scope에서 유도한다.
     """
     return [stage, lens.split("·")[0].strip(), topic_scope.split("·")[0].strip()]
+
+
+__all__ = [
+    "ChapterSlot",
+    "CURRICULUM_MIN_LESSONS",
+    "CURRICULUM_MAX_LESSONS",
+    "build_curriculum_blueprint",
+    "slide_count_from_minutes",
+]

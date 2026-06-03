@@ -134,13 +134,43 @@ def response_schema(slide_count: int = 5) -> dict[str, Any]:
     }
 
 
-def slides_schema(slide_count: int = 5) -> dict[str, Any]:
+# slides visual.type 전체 허용 집합 — plan이 좁히기 전 기본값(union).
+_SLIDES_VISUAL_TYPE_ENUM_FULL = [
+    "number_line",
+    "comparison",
+    "comparison-table",
+    "step_flow",
+    "flow-strip",
+    "fraction_bar",
+    "concept_map",
+    "example_box",
+    "metric-card",
+]
+
+
+def slides_schema(
+    slide_count: int = 5,
+    plan_visual_types: list[str] | None = None,
+) -> dict[str, Any]:
     """구조화 visual 슬라이드 배열만 생성하는 작은 guided JSON 스키마다.
 
     Qwen은 raw HTML을 만들지 않고 visual.type/data만 만든다. Python 렌더러가 이 구조를
     검증된 SVG/HTML body로 바꾸므로, 깨진 마크업이 iframe까지 전파되지 않는다.
+
+    [plan-first 강제 범위 — 정직한 한계 명시]
+    xgrammar(guided_decoding_backend)는 JSON Schema의 prefixItems(위치별 다른 enum, 즉
+    slide i의 visual.type을 그 슬롯의 단일 plan 값으로 못박기)를 신뢰성 있게 지원하지 않는다.
+    배열은 단일 uniform `items` 스키마로만 제약된다. 따라서 이 스키마는:
+      - plan_visual_types가 주어지면 enum을 "plan이 실제 쓰는 type 집합"으로 좁힌다
+        (전체 9-enum 자유선택 → plan이 쓰는 3~5종으로 축소). 이는 schema가 지원하는 정직한
+        narrowing이며, AI가 plan에 없는 type을 만드는 것을 생성시점에 차단한다.
+      - 그러나 "slide i = 정확히 plan_vt_i 단일값"의 per-slot 강제는 schema가 못 한다.
+        그 강제의 유일한 진실 소스는 parse_slides의 _enforce_plan_visual_type(universal backstop)다.
+        schema가 per-slot 강제를 하는 척하지 않는다 — backstop이 책임진다.
+    plan_visual_types=None이면 전체 union enum으로 폴백한다(레거시·미주입 경로 호환).
     """
     bounded_count = max(5, min(15, slide_count))
+    visual_type_enum = _resolve_visual_type_enum(plan_visual_types)
     return {
         "type": "object",
         "additionalProperties": False,
@@ -167,14 +197,7 @@ def slides_schema(slide_count: int = 5) -> dict[str, Any]:
                             "properties": {
                                 "type": {
                                     "type": "string",
-                                    "enum": [
-                                        "number_line",
-                                        "comparison",
-                                        "step_flow",
-                                        "fraction_bar",
-                                        "concept_map",
-                                        "example_box",
-                                    ],
+                                    "enum": visual_type_enum,
                                 },
                                 "data": {"type": "object", "additionalProperties": True},
                             },
@@ -184,6 +207,24 @@ def slides_schema(slide_count: int = 5) -> dict[str, Any]:
             }
         },
     }
+
+
+def _resolve_visual_type_enum(plan_visual_types: list[str] | None) -> list[str]:
+    """plan이 실제 쓰는 visual.type 집합으로 enum을 좁힌다(순서·중복 정리).
+
+    plan_visual_types가 비었거나 None이면 전체 union enum으로 폴백한다.
+    좁힐 때는 full enum의 순서를 보존해 결정적 출력을 만든다(xgrammar 캐시 안정).
+    """
+    if not plan_visual_types:
+        return list(_SLIDES_VISUAL_TYPE_ENUM_FULL)
+    used = set(plan_visual_types)
+    narrowed = [vt for vt in _SLIDES_VISUAL_TYPE_ENUM_FULL if vt in used]
+    # plan에 full enum 밖 값이 있으면(이론상 없어야 함) 그대로 뒤에 붙여 schema 유효성을 지킨다.
+    extras = [vt for vt in plan_visual_types if vt not in _SLIDES_VISUAL_TYPE_ENUM_FULL]
+    seen: set[str] = set()
+    ordered_extras = [vt for vt in extras if not (vt in seen or seen.add(vt))]
+    result = narrowed + ordered_extras
+    return result or list(_SLIDES_VISUAL_TYPE_ENUM_FULL)
 
 
 def quizzes_schema(slide_count: int = 5) -> dict[str, Any]:
@@ -313,12 +354,37 @@ _SCHEMA_BUILDERS: dict[str, Any] = {
 }
 
 
-def _select_guided_schema(schema_kind: str, slide_count: int) -> dict[str, Any]:
-    """schema_kind에 맞는 guided JSON 스키마를 고른다(미지정/lesson은 전체 lesson 스키마)."""
+def _select_guided_schema(
+    schema_kind: str,
+    slide_count: int,
+    plan_visual_types: list[str] | None = None,
+) -> dict[str, Any]:
+    """schema_kind에 맞는 guided JSON 스키마를 고른다(미지정/lesson은 전체 lesson 스키마).
+
+    slides 경로에서 plan_visual_types가 주어지면 visual.type enum을 plan 집합으로 좁힌다
+    (slides_schema 참조 — per-slot 강제는 parse_slides backstop, schema는 집합 narrowing만).
+    """
+    if schema_kind == "slides":
+        return slides_schema(slide_count, plan_visual_types)
     builder = _SCHEMA_BUILDERS.get(schema_kind)
     if builder is None:
         return response_schema(slide_count)
     return builder(slide_count)
+
+
+def _extract_plan_visual_types(extra: dict[str, Any] | None) -> list[str] | None:
+    """extra에서 plan_visual_types를 꺼낸다(콤마 결합 문자열 → 리스트).
+
+    extra 값은 스칼라(str|int|float|bool)만 허용되므로 plan이 쓰는 visual.type 집합을
+    콤마로 결합한 문자열로 전달받는다. 미존재·빈값이면 None(전체 enum 폴백).
+    """
+    if not extra:
+        return None
+    raw = extra.get("plan_visual_types")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    types = [t.strip() for t in raw.split(",") if t.strip()]
+    return types or None
 
 
 RESPONSE_SCHEMA: dict[str, Any] = response_schema()
@@ -423,7 +489,17 @@ class Qwen27BServer:
         seed = int(extra.get("seed", 7)) if extra is not None else 7
         slide_count = int(extra.get("slide_count", 5)) if extra is not None else 5
         schema_kind = str(extra.get("schema", "lesson")) if extra is not None else "lesson"
-        return self._chat(system=system, user=user, max_tokens=max_tokens, temperature=temperature, seed=seed, slide_count=slide_count, schema_kind=schema_kind)
+        plan_visual_types = _extract_plan_visual_types(extra)
+        return self._chat(
+            system=system,
+            user=user,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            seed=seed,
+            slide_count=slide_count,
+            schema_kind=schema_kind,
+            plan_visual_types=plan_visual_types,
+        )
 
     @modal.method()
     def generate_batch(self, batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -436,6 +512,7 @@ class Qwen27BServer:
                 seed=int(dict(item.get("extra", {})).get("seed", 7)),
                 slide_count=int(dict(item.get("extra", {})).get("slide_count", 5)),
                 schema_kind=str(dict(item.get("extra", {})).get("schema", "lesson")),
+                plan_visual_types=_extract_plan_visual_types(dict(item.get("extra", {}))),
             )
             for item in batch
         ]
@@ -454,8 +531,8 @@ class Qwen27BServer:
                 time.sleep(5)
         raise TimeoutError("vLLM health check timed out")
 
-    def _chat(self, system: str, user: str, max_tokens: int, temperature: float, seed: int, slide_count: int, schema_kind: str) -> dict[str, Any]:
-        guided_schema = _select_guided_schema(schema_kind, slide_count)
+    def _chat(self, system: str, user: str, max_tokens: int, temperature: float, seed: int, slide_count: int, schema_kind: str, plan_visual_types: list[str] | None = None) -> dict[str, Any]:
+        guided_schema = _select_guided_schema(schema_kind, slide_count, plan_visual_types)
         payload: dict[str, Any] = {
             "model": MODEL_ALIAS,
             "messages": [

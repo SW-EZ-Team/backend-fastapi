@@ -95,14 +95,51 @@ def test_slides_schema_scopes_exactly_slide_count_slides() -> None:
     assert item["required"] == ["slide_idx", "title", "category", "narration", "visual", "checkpoint"]
     assert "html" not in item["properties"]
     assert "css" not in item["properties"]
-    assert item["properties"]["visual"]["properties"]["type"]["enum"] == [
+    # plan 미주입(None) → 전체 union enum 폴백. text-category가 쓰는 metric-card/comparison-table도
+    # 포함돼야 한다(과거 6-enum은 text 슬라이드가 필요로 하는 type을 못 만들던 잠재 결함).
+    full_enum = item["properties"]["visual"]["properties"]["type"]["enum"]
+    assert set(full_enum) == {
         "number_line",
         "comparison",
+        "comparison-table",
         "step_flow",
+        "flow-strip",
         "fraction_bar",
         "concept_map",
         "example_box",
-    ]
+        "metric-card",
+    }
+
+
+def test_slides_schema_narrows_enum_to_plan_visual_types() -> None:
+    """plan_visual_types가 주어지면 visual.type enum이 그 집합으로 좁혀진다(P1 narrowing)."""
+    plan_types = ["number_line", "step_flow", "metric-card"]
+    schema = slides_schema(10, plan_types)
+    enum = schema["properties"]["slides"]["items"]["properties"]["visual"]["properties"]["type"]["enum"]
+
+    # 좁힌 enum은 plan이 쓰는 type만 포함하고 full enum 순서를 보존한다.
+    assert set(enum) == set(plan_types)
+    assert enum == ["number_line", "step_flow", "metric-card"]
+    # plan에 없는 type(concept_map 등)은 schema 차원에서 차단된다.
+    assert "concept_map" not in enum
+    assert "comparison" not in enum
+
+
+def test_slides_schema_empty_plan_falls_back_to_full_enum() -> None:
+    """plan_visual_types가 비었으면 전체 union enum으로 폴백한다(레거시·미주입 호환)."""
+    schema_none = slides_schema(10, None)
+    schema_empty = slides_schema(10, [])
+    enum_none = schema_none["properties"]["slides"]["items"]["properties"]["visual"]["properties"]["type"]["enum"]
+    enum_empty = schema_empty["properties"]["slides"]["items"]["properties"]["visual"]["properties"]["type"]["enum"]
+    assert len(enum_none) == 9
+    assert enum_none == enum_empty
+
+
+def test_select_guided_schema_routes_slides_with_plan() -> None:
+    """_select_guided_schema가 slides에서 plan_visual_types를 반영한다."""
+    schema = _select_guided_schema("slides", 10, ["number_line", "metric-card"])
+    enum = schema["properties"]["slides"]["items"]["properties"]["visual"]["properties"]["type"]["enum"]
+    assert set(enum) == {"number_line", "metric-card"}
 
 
 def test_quizzes_schema_scopes_exactly_slide_count_quizzes() -> None:

@@ -2,6 +2,63 @@ from __future__ import annotations
 
 from app.modules.ChapterStudio_V1.app.template_types import SlideCategory, SlideFrame, StudyTemplate
 
+# frame3·frame4의 visual_type 순환 테이블 — 템플릿마다 다양한 type을 고정 배정한다.
+# (template_key → (frame3_visual_type, frame4_visual_type))
+# frame3(확장 질문): text category → metric-card / comparison-table / example_box 순환
+# frame4(강의 끝 점검): interactive category → example_box / comparison-table / metric-card 순환
+_FRAME_TAIL_VISUAL: dict[str, tuple[str, str]] = {
+    # group-A: metric-card + example_box
+    "concept_code": ("metric-card", "example_box"),
+    "debug_case": ("metric-card", "example_box"),
+    "exam_focus": ("metric-card", "example_box"),
+    "foundation_overview": ("metric-card", "example_box"),
+    "language_pattern": ("metric-card", "example_box"),
+    "vocab_memory": ("metric-card", "example_box"),
+    "law_policy": ("metric-card", "example_box"),
+    "health_lifestyle": ("metric-card", "example_box"),
+    "memory_drill": ("metric-card", "example_box"),
+    "reference_navigation": ("metric-card", "example_box"),
+    # group-B: comparison-table + comparison-table
+    "compare_practice": ("comparison-table", "comparison-table"),
+    "humanities_argument": ("comparison-table", "comparison-table"),
+    "psychology_behavior": ("comparison-table", "comparison-table"),
+    "sociology_culture": ("comparison-table", "comparison-table"),
+    "reading_argument": ("comparison-table", "comparison-table"),
+    "creative_critique": ("comparison-table", "comparison-table"),
+    "media_literacy": ("comparison-table", "comparison-table"),
+    "writing_structure": ("comparison-table", "comparison-table"),
+    # group-C: example_box + metric-card
+    "algorithm_trace": ("example_box", "metric-card"),
+    "system_design": ("example_box", "metric-card"),
+    "engineering_design": ("example_box", "metric-card"),
+    "code_visual_walkthrough": ("example_box", "metric-card"),
+    "physics_model": ("example_box", "metric-card"),
+    "chem_reaction": ("example_box", "metric-card"),
+    "electronics_signal": ("example_box", "metric-card"),
+    "math_reasoning": ("example_box", "metric-card"),
+    "statistics_inference": ("example_box", "metric-card"),
+    "research_method": ("example_box", "metric-card"),
+    # group-D: comparison-table + metric-card (3종 보장: chart계 type + comparison-table + metric-card)
+    "visual_map": ("comparison-table", "metric-card"),
+    "process_flow": ("comparison-table", "metric-card"),
+    "cause_effect": ("comparison-table", "metric-card"),
+    "data_analysis": ("metric-card", "step_flow"),   # chart→comparison-table 중복 방지: metric-card+step_flow
+    "bio_system": ("comparison-table", "metric-card"),
+    "clinical_reasoning": ("comparison-table", "metric-card"),
+    "history_timeline": ("comparison-table", "metric-card"),
+    "person_profile": ("comparison-table", "metric-card"),
+    "lab_protocol": ("comparison-table", "metric-card"),
+    "astronomy_space": ("comparison-table", "metric-card"),
+    "earth_science": ("comparison-table", "metric-card"),
+    "economics_model": ("metric-card", "step_flow"),  # chart→comparison-table 중복 방지
+    "business_strategy": ("metric-card", "step_flow"),  # chart→comparison-table 중복 방지
+    "geography_region": ("comparison-table", "metric-card"),
+    "environment_sustainability": ("metric-card", "step_flow"),  # chart→comparison-table 중복 방지
+    "visual_storyboard": ("comparison-table", "metric-card"),
+    "infographic_summary": ("comparison-table", "metric-card"),
+    "exam_visual_drill": ("comparison-table", "metric-card"),
+}
+
 
 def build_templates() -> dict[str, StudyTemplate]:
     """자유주제 학습을 학습 패턴 중심 템플릿으로 덮는다."""
@@ -56,19 +113,61 @@ def build_templates() -> dict[str, StudyTemplate]:
     return {item.key: item for item in specs}
 
 
-def _f(category: SlideCategory, role: str, *must_have: str) -> SlideFrame:
-    return SlideFrame(0, category, role, must_have)
+def _f(category: SlideCategory, role: str, *must_have: str, visual_type: str | None = None) -> SlideFrame:
+    """SlideFrame을 생성한다. visual_type이 None이면 category 기본 규칙을 따른다."""
+    return SlideFrame(0, category, role, must_have, visual_type)
+
+
+def _visual_type_for(category: SlideCategory, must_have: tuple[str, ...]) -> str | None:
+    """category에 따라 frame0·1·2의 기본 visual_type을 결정한다.
+
+    diagram→comparison/step_flow, chart→comparison/step_flow, code→example_box,
+    math→step_flow, text→example_box. must_have 힌트로 number_line·comparison 우선 선택.
+    """
+    h = " ".join(must_have).lower()
+    if category == "diagram":
+        if any(w in h for w in ("비교", "차이", "대조", "선택")):
+            return "comparison"
+        if any(w in h for w in ("흐름", "단계", "순서", "과정")):
+            return "step_flow"
+        return "concept_map"
+    if category == "chart":
+        return "comparison-table"
+    if category == "code":
+        # 코드 재현·추적 프레임은 단계별 흐름을 step_flow로 표현한다.
+        return "step_flow"
+    if category == "math":
+        return "step_flow"
+    if category == "interactive":
+        # interactive frame에는 example_box를 기본으로 준다.
+        return "example_box"
+    # text category → must_have로 세분화
+    if any(w in h for w in ("비교", "차이", "대조", "정답", "오개념")):
+        return "comparison-table"
+    if any(w in h for w in ("핵심", "기준", "정의", "포인트")):
+        return "metric-card"
+    return "example_box"
 
 
 def _t(
     key: str, label: str, intent: str, contract: str, one: SlideFrame, two: SlideFrame, three: SlideFrame,
     note_blocks: tuple[str, ...], quiz_mix: tuple[str, ...],
 ) -> StudyTemplate:
+    """StudyTemplate을 생성한다. frame0~4의 visual_type을 결정적으로 할당한다.
+
+    - frame0~2: _visual_type_for 로직으로 category+must_have에서 결정.
+    - frame3(확장 질문·text): 템플릿별 _FRAME_TAIL_VISUAL 테이블에서 고정.
+    - frame4(강의 끝 점검·interactive): 템플릿별 _FRAME_TAIL_VISUAL 테이블에서 고정.
+    """
+    tail = _FRAME_TAIL_VISUAL.get(key, ("comparison-table", "example_box"))
+    vt0 = one.visual_type or _visual_type_for(one.category, one.must_have)
+    vt1 = two.visual_type or _visual_type_for(two.category, two.must_have)
+    vt2 = three.visual_type or _visual_type_for(three.category, three.must_have)
     frames = (
-        SlideFrame(0, one.category, one.role, one.must_have),
-        SlideFrame(1, two.category, two.role, two.must_have),
-        SlideFrame(2, three.category, three.role, three.must_have),
-        SlideFrame(3, "text", "확장 질문", ("추가 질문", "전이 사례", "주의점")),
-        SlideFrame(4, "interactive", "강의 끝 점검", ("핵심 회상", "확장 질문", "퀴즈 준비")),
+        SlideFrame(0, one.category, one.role, one.must_have, vt0),
+        SlideFrame(1, two.category, two.role, two.must_have, vt1),
+        SlideFrame(2, three.category, three.role, three.must_have, vt2),
+        SlideFrame(3, "text", "확장 질문", ("추가 질문", "전이 사례", "주의점"), tail[0]),
+        SlideFrame(4, "interactive", "강의 끝 점검", ("핵심 회상", "확장 질문", "퀴즈 준비"), tail[1]),
     )
     return StudyTemplate(key, label, intent, contract, frames, note_blocks, quiz_mix)
