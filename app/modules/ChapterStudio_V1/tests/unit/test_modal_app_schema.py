@@ -46,12 +46,22 @@ def test_modal_response_schema_supports_actual_lesson_slide_count() -> None:
 
 
 def test_modal_voice_script_schema_supports_single_slide_retry() -> None:
+    """plan-first 섹션 스키마 — sections 배열을 guided decoding으로 강제한다."""
     schema = voice_script_schema(15)
 
-    assert schema["required"] == ["slide_idx", "script_text"]
+    # plan-first: 최상위 required는 slide_idx, sections (script_text는 파생이라 제외).
+    assert schema["required"] == ["slide_idx", "sections"]
     assert schema["properties"]["slide_idx"]["maximum"] == 14
-    assert schema["properties"]["script_text"]["minLength"] == 850
-    assert schema["properties"]["script_text"]["maxLength"] == 2400
+    # sections는 정확히 4개 array.
+    sections = schema["properties"]["sections"]
+    assert sections["type"] == "array"
+    assert sections["minItems"] == 4
+    assert sections["maxItems"] == 4
+    # 각 섹션 item은 role(enum) + text.
+    item = sections["items"]
+    assert item["required"] == ["role", "text"]
+    assert item["properties"]["role"]["enum"] == ["intro", "core", "example", "closing"]
+    assert item["properties"]["text"]["type"] == "string"
 
 
 def test_modal_voice_segment_schema_supports_parallel_segment_rewrite() -> None:
@@ -128,7 +138,7 @@ def test_select_guided_schema_routes_each_kind() -> None:
     assert "quizzes" in _select_guided_schema("quizzes", 10)["properties"]
     assert "note_blocks" in _select_guided_schema("note", 10)["properties"]
     assert "assignment" in _select_guided_schema("assignment", 10)["properties"]
-    assert _select_guided_schema("voice_script", 10)["required"] == ["slide_idx", "script_text"]
+    assert _select_guided_schema("voice_script", 10)["required"] == ["slide_idx", "sections"]
     # 미지정/lesson은 전체 lesson 스키마로 폴백한다(기존 호환).
     assert "slides" in _select_guided_schema("lesson", 10)["properties"]
     assert "quizzes" in _select_guided_schema("unknown_kind", 10)["properties"]

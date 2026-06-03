@@ -126,9 +126,11 @@ def apply_corrections(
         for quiz in payload.quizzes
     ]
     new_voice = [
+        # 교정 시 sections는 제거하고 script_text만 반영한다(교정기는 자유 텍스트 반환).
         GeneratedVoiceScript(
             slide_idx=script.slide_idx,
             script_text=voice_by_idx.get(script.slide_idx, script.script_text),
+            sections=None if script.slide_idx in voice_by_idx else script.sections,
         )
         for script in payload.voice_scripts
     ]

@@ -3,7 +3,14 @@ from __future__ import annotations
 import json
 from typing import Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from app.modules.ChapterStudio_V1.common.errors import ConversionError
 from app.modules.ChapterStudio_V1.pipeline.normalize import normalize_lesson_dict
@@ -11,6 +18,10 @@ from app.modules.ChapterStudio_V1.schemas.response import Difficulty
 from common.llm_output import extract_json_block, loads_lenient, strip_thinking
 
 SlideCategory = Literal["text", "diagram", "code", "math", "chart", "interactive", "table"]
+
+# 섹션 role 완전집합 — 결정적 순서 고정(AI가 변경 불가).
+VOICE_SECTION_ROLES: tuple[str, ...] = ("intro", "core", "example", "closing")
+VoiceSectionRole = Literal["intro", "core", "example", "closing"]
 
 
 class SlideIndexed(Protocol):
@@ -61,12 +72,87 @@ class GeneratedAssignment(BaseModel):
     rubric: list[str] = Field(min_length=1, max_length=8)
 
 
+class VoiceSection(BaseModel):
+    """음성대본 단일 섹션 슬롯 — role·text 두 키만 가진다."""
+
+    model_config = ConfigDict(strict=True, frozen=True)
+
+    role: VoiceSectionRole
+    # 섹션별 최소 하한(가장 짧은 closing 기준). 실제 범위는 config 상수로 강제한다.
+    text: str = Field(min_length=10)
+
+    @field_validator("text")
+    @classmethod
+    def _strip_and_check(cls, value: str) -> str:
+        """strip 후 길이로 판정해 전공백 텍스트가 통과하지 않게 한다.
+
+        공백 10자가 min_length=10을 통과하면 sections≠script_text 불일치가 생기므로,
+        실제 내용 길이로 검증하고 정규화한 값을 저장한다.
+        """
+        stripped = value.strip()
+        if len(stripped) < 10:
+            raise ValueError("섹션 text는 공백을 제외하고 최소 10자여야 한다.")
+        return stripped
+
+
+def _section_text(sec: object) -> str:
+    """VoiceSection 인스턴스 또는 dict에서 strip된 text를 안전하게 꺼낸다."""
+    if isinstance(sec, VoiceSection):
+        return sec.text.strip()
+    if isinstance(sec, dict):
+        text = sec.get("text", "")
+        if isinstance(text, str):
+            return text.strip()
+    return ""
+
+
+def _join_sections(sections: list) -> str:
+    """섹션 목록을 TTS 파이프라인이 소비하는 script_text로 결합한다(결정적 정책).
+
+    VoiceSection 인스턴스와 raw dict 모두를 받아 strip된 text를 공백 1개로 잇는다.
+    빈 섹션은 건너뛴다. 이 함수가 sections→script_text 파생의 단일 진실 소스다.
+    """
+    parts = [t for sec in sections if (t := _section_text(sec))]
+    return " ".join(parts)
+
+
 class GeneratedVoiceScript(BaseModel):
+    """음성대본 스키마 — plan-first 섹션 슬롯과 TTS 호환 script_text를 함께 관리한다.
+
+    하위호환 보장:
+    - sections 없이 script_text만 오는 레거시 입력도 파싱 가능(Optional + 폴백).
+    - script_text는 sections join 파생값으로 항상 유효하게 유지한다.
+      다운스트림 TTS·DB·소비자는 script_text만 읽으면 기존과 동일하게 동작한다.
+    """
+
     model_config = ConfigDict(strict=True, frozen=True)
 
     slide_idx: int = Field(ge=0, le=14)
     # 음성대본 하한을 보수적으로 둔다(40자). 본격 목표(900~1600자)는 self-check+repair가 채운다.
+    # TTS 파이프라인·DB·다운스트림이 소비하는 정본 필드 — 의미를 절대 바꾸지 않는다.
     script_text: str = Field(min_length=40)
+    # plan-first 섹션 슬롯 — 4개 고정(intro/core/example/closing). 레거시 경로는 None.
+    sections: list[VoiceSection] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_script_text(cls, data: object) -> object:
+        """sections가 있으면 script_text를 join 파생값으로 덮어쓴다.
+
+        레거시 입력(script_text만): sections=None → script_text 그대로 보존.
+        신규 입력(sections 있음): script_text를 sections join으로 파생해 항상 최신 유지.
+        """
+        if not isinstance(data, dict):
+            return data
+        sections_raw = data.get("sections")
+        if not sections_raw:
+            # 레거시 경로: script_text만 있으면 그대로 통과.
+            return data
+        # sections join 파생값으로 script_text를 결정적으로 덮어쓴다(_join_sections 단일 소스).
+        derived = _join_sections(sections_raw)
+        if derived:
+            data = {**data, "script_text": derived}
+        return data
 
 
 class GeneratedLessonPayload(BaseModel):

@@ -1,10 +1,17 @@
-"""슬라이드 음성대본 도입부 응집성 후처리."""
+# -*- coding: utf-8 -*-
+"""슬라이드 음성대본 도입부 응집성 후처리.
+
+plan-first 섹션 구조 지원:
+- sections가 있는 경우 intro 슬롯 text만 재작성하고 나머지 슬롯은 불변.
+- sections가 없는 레거시 경우 기존 첫 문장만 교정 동작을 유지한다.
+"""
 from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable
 
 _GREETING_RE = re.compile(r"^\s*(?:안녕하세요|안녕\b|반갑습니다|반가워요|다들\s*안녕)")
+# 스마트쿼트(U+201C–U+201F)를 문자 클래스에 포함해 도입부 정규화 시 따옴표 차이를 흡수한다.
 _PUNCT_SPACE_RE = re.compile(r"[\s,.!?…。！？~'\"“”‘’()\[\]{}]+")
 _SENTENCE_RE = re.compile(r"[^.!?。！？]+[.!?。！？]?")
 
@@ -51,7 +58,14 @@ async def rewrite_openings(
     topic: str,
     rewrite_fn: RewriteFn,
 ) -> dict[int, str]:
-    """대상 슬라이드의 첫 문장만 재작성해 나머지 본문은 그대로 보존한다."""
+    """대상 슬라이드의 첫 문장만 재작성해 나머지 본문은 그대로 보존한다.
+
+    이 함수는 평탄화된 script_text(섹션이 join된 단일 문자열) 수준에서만 동작한다.
+    첫 문장(보통 intro 도입부)만 교체하고 그 뒤 본문 전체는 그대로 잇는다. plan-first
+    섹션 구조를 슬롯 경계까지 정밀하게 재작성하지는 않는다(현 구현은 script_text 평탄화
+    기준). 응집성 교정 후 voice_cohesion_pass가 sections=None으로 리셋해 script_text를
+    정본으로 삼는다.
+    """
     by_idx = dict(scripts)
     rewritten: dict[int, str] = {}
     for slide_idx in target_idxs:
@@ -108,6 +122,7 @@ def _rewrite_prompt(slide_idx: int, intro: str, scripts: list[ScriptPair], topic
 
 
 def _clean_rewrite(text: str) -> str:
+    # 직선 따옴표와 스마트쿼트를 모두 벗겨 TTS에 따옴표가 잔류하지 않게 한다.
     cleaned = text.strip().strip("\"'“”‘’")
     if cleaned == "":
         raise ValueError("재작성 도입 문장이 비어 있다.")

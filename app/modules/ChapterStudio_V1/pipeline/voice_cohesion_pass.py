@@ -85,7 +85,8 @@ def _replace_voice_scripts(
 
 
 def _voice_with_text(item: GeneratedVoiceScript, script_text: str) -> GeneratedVoiceScript:
-    return GeneratedVoiceScript(slide_idx=item.slide_idx, script_text=script_text)
+    # cohesion 재작성은 도입 첫 문장만 교체하므로 sections는 무효화해 script_text 우선으로 둔다.
+    return GeneratedVoiceScript(slide_idx=item.slide_idx, script_text=script_text, sections=None)
 
 
 __all__ = ["apply_voice_cohesion_payload"]

@@ -179,10 +179,24 @@ def parse_assignment(text: str) -> GeneratedAssignment:
 
 
 def parse_voice(text: str, slide_idx: int) -> GeneratedVoiceScript:
-    """voice JSON을 파싱하고 raw 대본 반환 케이스는 slide_idx를 유지해 폴백한다."""
+    """voice JSON을 파싱한다. sections 형식(plan-first) 또는 legacy script_text 형식 모두 처리.
+
+    파싱 우선순위:
+    1. sections 배열이 있으면 VoiceSection 목록으로 검증 → script_text 파생.
+    2. script_text만 있으면 레거시 경로로 처리(하위호환).
+    3. JSON 파싱 자체 실패면 raw 텍스트 폴백(slide_idx 보존).
+    """
     from app.modules.ChapterStudio_V1.common.logging import logger  # 지역 import — 순환 방지
     try:
-        return GeneratedVoiceScript.model_validate(_loaded(text))
+        data = _loaded(text)
+        if isinstance(data, dict) and "sections" in data:
+            # plan-first 경로: sections 배열 포함 → GeneratedVoiceScript가 join 파생.
+            # slide_idx가 없으면 호출부 값으로 보완한다.
+            if "slide_idx" not in data:
+                data = {**data, "slide_idx": slide_idx}
+            return GeneratedVoiceScript.model_validate(data)
+        # 레거시 경로: script_text만 있는 경우.
+        return GeneratedVoiceScript.model_validate(data)
     except (ValueError, ValidationError) as exc:
         # Qwen이 guided_json 대신 대본만 반환한 경우에도 호출부의 slide_idx를 보존한다.
         script_text = _clean_raw_voice_text(text)

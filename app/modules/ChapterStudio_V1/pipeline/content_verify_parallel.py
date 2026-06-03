@@ -46,6 +46,7 @@ from app.modules.ChapterStudio_V1.pipeline.content_verify_prompts import (
 )
 from app.modules.ChapterStudio_V1.pipeline.payload import GeneratedLessonPayload
 from app.modules.ChapterStudio_V1.pipeline.voice_length_gate import length_gate_errors
+from app.modules.ChapterStudio_V1.pipeline.voice_structure_gate import structure_gate_errors
 
 # 검증/교정 토큰 상한 — content_verify.py와 동일 기준.
 _VERIFY_MAX_TOKENS = 8000
@@ -89,8 +90,20 @@ async def verify_and_correct_parallel(
 async def _collect_errors(
     connector: AIConnector, payload: GeneratedLessonPayload
 ) -> list[dict[str, object]]:
-    """LLM 병렬 검증 오류 + 결정적 voice 길이 게이트 오류를 합산한다."""
+    """LLM 병렬 검증 오류 + 결정적 voice 구조·길이 게이트 오류를 합산한다."""
     llm_errors = await _verify_all_groups(connector, payload)
+    # 결정적 구조 게이트(섹션 4개·role 완전집합·순서·intro 모드) — LLM 판단 없이 코드로 강제.
+    struct_errors = structure_gate_errors(payload)
+    if struct_errors:
+        existing_voice_idx = {
+            err.get("slide_idx")
+            for err in llm_errors
+            if str(err.get("field", "")) == "voice"
+        }
+        new_struct = [e for e in struct_errors if e.get("slide_idx") not in existing_voice_idx]
+        if new_struct:
+            logger.warning("parallel_verify: voice 구조 게이트 {}건 추가", len(new_struct))
+        llm_errors = llm_errors + new_struct
     if not voice_length_gate_enabled():
         return llm_errors
     gate_errors = length_gate_errors(payload, voice_min_chars())
@@ -100,7 +113,7 @@ async def _collect_errors(
             for err in llm_errors
             if str(err.get("field", "")) == "voice"
         }
-        # 이미 LLM이 오류로 잡은 인덱스는 중복 추가하지 않는다(교정 지시 충돌 방지).
+        # 이미 오류로 잡은 인덱스는 중복 추가하지 않는다(교정 지시 충돌 방지).
         new_gate = [e for e in gate_errors if e.get("slide_idx") not in existing_voice_idx]
         if new_gate:
             logger.warning("parallel_verify: voice 길이 게이트 {}건 추가(LLM 미검출 미달 항목)", len(new_gate))

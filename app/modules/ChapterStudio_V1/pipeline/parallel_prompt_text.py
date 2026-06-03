@@ -7,6 +7,7 @@ parallel_prompts.py에서 프롬프트 텍스트 구성 책임만 떼어낸 모�
 """
 from __future__ import annotations
 
+from app.modules.ChapterStudio_V1.pipeline.parallel_inputs import VoiceBlueprint, build_voice_blueprint
 from app.modules.ChapterStudio_V1.pipeline.personalization import personalization_contract
 
 _JSON_RULE = "출력은 단일 JSON 객체 한 개뿐이며 markdown fence·설명문·사고과정·<think> 블록을 금지한다. "
@@ -128,30 +129,60 @@ def assignment_prompts(brief: str, outline: str, *, weak_points: str, audience_l
 
 
 def voice_prompt(
-    brief: str, slide_title: str, slide_focus: str, slide_summary: str, slide_idx: int, *, weak_points: str, audience_level: str, tone: int, pace: int, tutor_depth: int, socratic: int, learning_goal: str, use_formal_speech: bool = True, use_emoji: bool = False, tutor_name: str = "", tutor_tagline: str = "", is_default_tutor: bool = True, voice_sample_url: str = "", previous_title: str = ""
+    brief: str,
+    slide_title: str,
+    slide_focus: str,
+    slide_summary: str,
+    slide_idx: int,
+    *,
+    weak_points: str,
+    audience_level: str,
+    tone: int,
+    pace: int,
+    tutor_depth: int,
+    socratic: int,
+    learning_goal: str,
+    use_formal_speech: bool = True,
+    use_emoji: bool = False,
+    tutor_name: str = "",
+    tutor_tagline: str = "",
+    is_default_tutor: bool = True,
+    voice_sample_url: str = "",
+    previous_title: str = "",
 ) -> tuple[str, str]:
-    """슬라이드 1개의 음성대본만 생성하는 (system, user) 프롬프트를 만든다.
+    """슬라이드 1개의 음성대본을 plan-first 슬롯 오더로 생성하는 (system, user) 프롬프트.
 
-    xgrammar가 minLength를 완전히 강제하지 못하는 실측을 보완하기 위해 프롬프트에 구체적
-    분량(900~1600자)과 4단 구조를 명시해 모델이 충분한 길이를 스스로 지키게 한다.
+    블루프린트(코드 결정)가 섹션 수·role·순서·길이 범위·intro 모드를 확정하고,
+    AI는 각 슬롯의 text만 채운다. AI가 섹션 개수/순서를 임의로 정하지 못한다.
     """
-    personalization = _personalization(weak_points, audience_level, tone, pace, tutor_depth, socratic, learning_goal, weak_rule="음성대본은 약점 개념을 더 천천히·예시 많이 설명하고 오개념을 짚는다.", use_formal_speech=use_formal_speech, use_emoji=use_emoji, tutor_name=tutor_name, tutor_tagline=tutor_tagline)
-    intro_rule = _voice_intro_rule(slide_idx, previous_title)
+    personalization = _personalization(
+        weak_points,
+        audience_level,
+        tone,
+        pace,
+        tutor_depth,
+        socratic,
+        learning_goal,
+        weak_rule="음성대본은 약점 개념을 더 천천히·예시 많이 설명하고 오개념을 짚는다.",
+        use_formal_speech=use_formal_speech,
+        use_emoji=use_emoji,
+        tutor_name=tutor_name,
+        tutor_tagline=tutor_tagline,
+    )
+    blueprint = build_voice_blueprint(slide_idx, previous_title)
     previous_line = _previous_slide_line(previous_title)
+    slot_spec = _build_slot_spec(blueprint)
     system = (
         "너는 ChapterStudio_V1의 음성대본 생성기다. "
         + _JSON_RULE
         + _CJK_BAN_RULE
-        + "키는 정확히 slide_idx, script_text 두 개다. "
-        # 분량 하한을 숫자로 못 박고 4단 구조를 강제 — xgrammar minLength 미강제 보완.
-        "script_text는 반드시 900~1600자 범위여야 한다(900자 미만이면 실패로 간주한다). "
-        "분량 기준: ① 도입(이 개념이 왜 중요한지 배경 2~3문장) ② 핵심 설명(개념·원리 3~4문장) "
-        "③ 구체적 예시·직관(한 번에 이해되는 사례 2~3문장) ④ 마무리 복습(다음 화면 연결·자가점검 1~2문장). "
-        "총 8~12문장, 과외 선생님 자연스러운 존댓말 한 문단으로 완성한다. "
-        "화면에 없는 깊은 설명·실수하기 쉬운 지점·바로 해볼 미니연습을 포함한다. "
+        # plan-first 구조 강제: 섹션 수·role·순서는 코드가 이미 결정했다. AI는 text만 채운다.
+        + "최상위 키는 정확히 slide_idx, sections 두 개다. "
+        "sections는 반드시 아래 명세한 순서대로 4개 role 슬롯을 가진다(섹션 수·순서 변경 불가). "
+        "각 슬롯은 role, text 두 키만 가진다. "
+        "HTML 태그·markdown·괄호 지시문을 넣지 않는다. "
         "여러 슬라이드가 같은 인사말/도입부로 시작하면 실패다. "
-        "900자 미만의 짧은 대본(한두 문장 나열)은 절대 허용되지 않는다. "
-        "HTML 태그·markdown·괄호 지시문을 넣지 않는다.\n"
+        "한자·중국어 문자 절대 금지, 순수 한글/숫자/영문만 사용한다.\n"
         f"{personalization}"
     )
     user = (
@@ -160,20 +191,28 @@ def voice_prompt(
         f"화면 요약: {slide_summary}\n"
         f"{previous_line}"
         f"{personalization}\n"
-        f"{intro_rule}\n"
-        "위 슬라이드의 음성대본을 900~1600자 범위로 만든다. "
-        "도입→핵심설명→구체예시→마무리복습 순서를 지킨다. "
+        f"아래 4개 섹션 슬롯을 순서대로 채워라(섹션 수·순서·role 변경 불가):\n"
+        f"{slot_spec}\n"
         f"slide_idx는 반드시 {slide_idx}로 고정한다."
     )
     return system, user
 
 
-def _voice_intro_rule(slide_idx: int, previous_title: str) -> str:
-    if slide_idx == 0:
-        return "첫 슬라이드이므로 짧은 인사말은 가능하지만, 바로 핵심 상황으로 들어간다."
-    if previous_title:
-        return f"첫 슬라이드가 아니므로 인사말을 쓰지 말고, 직전 화면 '{previous_title}'에서 이어지는 한 문장으로 시작한다."
-    return "첫 슬라이드가 아니므로 인사말과 '안녕하세요. 오늘 우리가...왜 하필...'식 정형 도입을 쓰지 말고 직전 흐름을 이어 시작한다."
+def _build_slot_spec(blueprint: VoiceBlueprint) -> str:
+    """블루프린트로부터 프롬프트 내 섹션 슬롯 명세 텍스트를 만든다."""
+    lines: list[str] = []
+    for sec in blueprint.sections:
+        mode_note = ""
+        if sec.role == "intro" and sec.intro_mode is not None:
+            if sec.intro_mode == "greeting":
+                mode_note = " [greeting 모드: 짧은 인사 후 바로 핵심 상황 진입]"
+            else:
+                mode_note = " [bridge 모드: 인사말 금지, 직전 화면에서 자연스럽게 이어지는 한 문장으로 시작]"
+        lines.append(
+            f"- role={sec.role}{mode_note}: {sec.instruction} "
+            f"(길이 {sec.min_chars}~{sec.max_chars}자)"
+        )
+    return "\n".join(lines)
 
 
 def _previous_slide_line(previous_title: str) -> str:

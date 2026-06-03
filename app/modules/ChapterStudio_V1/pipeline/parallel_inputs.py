@@ -12,7 +12,12 @@ LangGraph 상태(prepare_context가 채운 enriched_brief·slide_outline 등)에
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
+from app.modules.ChapterStudio_V1.common.config import (
+    VOICE_SECTION_INSTRUCTIONS,
+    VOICE_SECTION_RANGES,
+)
 from app.modules.ChapterStudio_V1.common.errors import ConversionError
 from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState
 from app.modules.ChapterStudio_V1.pipeline.voice_target_context import (
@@ -21,6 +26,83 @@ from app.modules.ChapterStudio_V1.pipeline.voice_target_context import (
     previous_title,
     voice_summary,
 )
+
+VoiceIntroMode = Literal["greeting", "bridge"]
+
+
+@dataclass(frozen=True)
+class VoiceSectionBlueprint:
+    """섹션 슬롯 1개의 결정적 메타데이터 — AI가 text만 채운다."""
+
+    role: str                     # intro / core / example / closing
+    min_chars: int                # 최소 문자 수 (결정적 상수)
+    max_chars: int                # 최대 문자 수 (결정적 상수)
+    instruction: str              # 내용 지시 (코드 상수)
+    intro_mode: VoiceIntroMode | None = None  # intro 슬롯에만 설정
+
+
+@dataclass(frozen=True)
+class VoiceBlueprint:
+    """슬라이드 1개의 섹션 블루프린트 전체 — 코드가 섹션 수·순서·길이를 결정한다."""
+
+    slide_idx: int
+    intro_mode: VoiceIntroMode    # greeting(slide_idx=0) / bridge(나머지)
+    sections: tuple[VoiceSectionBlueprint, ...]
+
+
+def _intro_instruction(intro_mode: VoiceIntroMode, previous_title: str) -> str:
+    """intro 슬롯 지시를 모드·직전 제목으로 구체화한다(레거시 _voice_intro_rule 품질 복원).
+
+    bridge 모드일 때 직전 화면 제목이 있으면 그 제목을 명시해 도입이 실제로 직전 내용을
+    잇게 한다. 제목이 없으면 일반 bridge 지시로 폴백한다.
+    """
+    base = VOICE_SECTION_INSTRUCTIONS["intro"]
+    if intro_mode == "greeting":
+        return base
+    if previous_title:
+        return (
+            f"{base} 직전 화면 '{previous_title}'에서 자연스럽게 이어지는 한 문장으로 시작한다."
+        )
+    return base
+
+
+def build_voice_blueprint(slide_idx: int, previous_title: str) -> VoiceBlueprint:
+    """슬라이드 인덱스·직전 제목으로부터 결정적 섹션 블루프린트를 만든다(AI 미관여).
+
+    섹션 개수·role·순서·길이 범위는 VOICE_SECTION_RANGES 상수에서 읽고,
+    intro 모드는 slide_idx로 결정한다. bridge intro는 previous_title을 지시에 포함한다.
+    """
+    # slide_idx==0이면 greeting(인사 허용), 그 외는 bridge(직전 연결 강제).
+    intro_mode: VoiceIntroMode = "greeting" if slide_idx == 0 else "bridge"
+    roles = ("intro", "core", "example", "closing")
+    blueprints: list[VoiceSectionBlueprint] = []
+    for role in roles:
+        min_c, max_c = VOICE_SECTION_RANGES[role]
+        # intro 슬롯에만 모드·직전 제목을 반영한 구체 지시를 넣는다.
+        if role == "intro":
+            blueprints.append(
+                VoiceSectionBlueprint(
+                    role=role,
+                    min_chars=min_c,
+                    max_chars=max_c,
+                    instruction=_intro_instruction(intro_mode, previous_title),
+                    intro_mode=intro_mode,
+                )
+            )
+        else:
+            blueprints.append(
+                VoiceSectionBlueprint(
+                    role=role,
+                    min_chars=min_c,
+                    max_chars=max_c,
+                    instruction=VOICE_SECTION_INSTRUCTIONS[role],
+                )
+            )
+    return VoiceBlueprint(
+        slide_idx=slide_idx,
+        intro_mode=intro_mode,
+        sections=tuple(blueprints),
+    )
 
 
 @dataclass(frozen=True)
@@ -159,4 +241,15 @@ def _state_text(state: ChapterStudioState, key: str) -> str:
     return value
 
 
-__all__ = ["PersonalizationArgs", "VoiceTarget", "build_brief", "build_outline_text", "build_personalization_args", "build_voice_targets"]
+__all__ = [
+    "PersonalizationArgs",
+    "VoiceBlueprint",
+    "VoiceIntroMode",
+    "VoiceSectionBlueprint",
+    "VoiceTarget",
+    "build_brief",
+    "build_outline_text",
+    "build_personalization_args",
+    "build_voice_blueprint",
+    "build_voice_targets",
+]

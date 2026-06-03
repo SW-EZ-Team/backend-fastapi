@@ -226,16 +226,46 @@ def assignment_schema(slide_count: int = 5) -> dict[str, Any]:
     }
 
 
+# plan-first 섹션 role 순서·길이 상한 — config.VOICE_SECTION_RANGES와 정합해야 한다.
+# modal_app은 deploy 독립 파일이라 app 패키지를 import하지 않으므로 값을 미러링한다.
+# 정합성은 test_voice_modal_schema_alignment가 강제한다(불일치 시 FAIL).
+# guided maxLength는 config의 max에 자연어 여유(80자)를 더해 모델 절단을 막되,
+# 실제 슬롯 범위 강제는 결정적 슬롯 길이 게이트(voice_length_gate)가 담당한다.
+_VOICE_SECTION_ORDER = ("intro", "core", "example", "closing")
+_VOICE_SECTION_MAXLEN = {"intro": 280, "core": 780, "example": 530, "closing": 330}
+
+
 def voice_script_schema(slide_count: int = 15) -> dict[str, Any]:
-    """슬라이드별 TTS 대본 재호출에 쓰는 작은 guided JSON 스키마다."""
+    """슬라이드별 TTS 대본 재호출에 쓰는 plan-first 섹션 guided JSON 스키마다.
+
+    sections 배열(정확히 4항목)을 guided decoding으로 강제해 Modal/Qwen 경로에서도
+    plan-first 구조가 생성시점에 보장되게 한다. role은 enum으로, 순서는 minItems/maxItems
+    4 고정 + parse_voice 검증으로 맞춘다. script_text는 sections에서 파생되므로 guided
+    required에서 제외한다(프롬프트 parallel_prompt_text.voice_prompt가 요구하는 최상위 키
+    {slide_idx, sections}와 정확히 일치).
+    """
     bounded_count = max(1, min(15, slide_count))
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": ["slide_idx", "script_text"],
+        "required": ["slide_idx", "sections"],
         "properties": {
             "slide_idx": {"type": "integer", "minimum": 0, "maximum": bounded_count - 1},
-            "script_text": {"type": "string", "minLength": 850, "maxLength": 2400},
+            "sections": {
+                "type": "array",
+                "minItems": 4,
+                "maxItems": 4,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["role", "text"],
+                    "properties": {
+                        "role": {"type": "string", "enum": list(_VOICE_SECTION_ORDER)},
+                        # 섹션 하한은 슬롯 게이트가 결정적으로 강제하므로 guided엔 보수적 하한만 둔다.
+                        "text": {"type": "string", "minLength": 10, "maxLength": 800},
+                    },
+                },
+            },
         },
     }
 

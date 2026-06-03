@@ -344,6 +344,38 @@ def voice_min_chars() -> int:
     return _int_value("CHAPTERSTUDIO_VOICE_MIN_CHARS", "900", 400, 1600)
 
 
+# ── plan-first 섹션 블루프린트 상수 ────────────────────────────────────
+# 섹션 role → (min_chars, max_chars) 결정적 테이블(AI 미관여).
+# 슬롯 min 합 = 110+420+250+120 = 900 → 글로벌 floor(voice_min_chars 기본 900)와 정확히 일치.
+# 슬롯 max 합 = 200+700+450+250 = 1600 → 글로벌 ceiling(기존 1600)과 정확히 일치.
+# 이렇게 슬롯합과 글로벌 게이트를 정합화해 plan-first가 레거시보다 짧은 대본을 허용하지 않게 한다.
+VOICE_SECTION_RANGES: dict[str, tuple[int, int]] = {
+    "intro":   (110, 200),
+    "core":    (420, 700),
+    "example": (250, 450),
+    "closing": (120, 250),
+}
+
+
+def voice_section_min_total() -> int:
+    """섹션 슬롯 min 합을 반환한다(글로벌 floor와 정합 검증용)."""
+    return sum(min_c for min_c, _ in VOICE_SECTION_RANGES.values())
+
+
+def voice_section_max_total() -> int:
+    """섹션 슬롯 max 합을 반환한다(글로벌 ceiling과 정합 검증용)."""
+    return sum(max_c for _, max_c in VOICE_SECTION_RANGES.values())
+
+
+# 섹션 role별 내용 지시 — 코드 상수로 보유해 AI에 결정적으로 전달한다.
+VOICE_SECTION_INSTRUCTIONS: dict[str, str] = {
+    "intro":   "이 개념이 왜 중요한지 배경 2~3문장. slide_idx==0이면 짧은 인사 후 핵심 상황 진입(greeting 모드). slide_idx>0이면 직전 화면 주제에서 자연스럽게 이어지는 한 문장으로 시작(bridge 모드, 인사말 금지).",
+    "core":    "핵심 개념·원리를 3~4문장으로 설명. 학습자가 처음 듣는다고 가정하고 단계별로 풀어 설명한다.",
+    "example": "한 번에 이해되는 구체적 사례 2~3문장. 실제 숫자·상황을 들어 직관적으로 보여준다.",
+    "closing": "다음 화면으로 연결하는 한 문장 + 자가점검 한 문장(총 1~2문장).",
+}
+
+
 def log_level() -> str:
     return (_optional_value("LOG_LEVEL") or "INFO").upper()
 
