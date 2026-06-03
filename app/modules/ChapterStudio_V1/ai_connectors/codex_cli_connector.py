@@ -5,24 +5,46 @@ import json
 from asyncio.subprocess import DEVNULL, PIPE
 from typing import TypeAlias, cast
 
+from ai_connectors.common.codex_retry import is_transient_error, run_codex_with_retry
 from app.modules.ChapterStudio_V1.ai_connectors.errors import ConnectorError, TimeoutError
 from app.modules.ChapterStudio_V1.ai_connectors.schemas import ChapterAIRequest, ChapterAIResponse
 from app.modules.ChapterStudio_V1.common.config import codex_cli_model, codex_cli_reasoning_effort, codex_cli_timeout_sec
 
 JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 
+# transient 판정은 공용 모듈에 위임한다(키워드 단일 소스 유지).
+# 하위호환을 위해 모듈 레벨 _is_transient 별칭을 유지한다(기존 테스트·import 보호).
+_is_transient = is_transient_error
+
 
 class CodexCLIConnector:
+    """로컬 Codex CLI 를 서브프로세스로 실행하는 커넥터.
+
+    transient 오류(rc=1 + 503/429/연결 키워드)는 지수 백오프 재시도하며,
+    영구 오류(인증 실패·잘못된 인자 등)는 즉시 실패한다(공용 retry 모듈 사용).
+    """
+
     name = "codex_cli"
 
     def __init__(self, command: str = "codex") -> None:
         self._command = command
 
     async def generate(self, req: ChapterAIRequest) -> ChapterAIResponse:
-        """ChatGPT OAuth 세션은 CLI에 맡기고 stdout만 정규화한다."""
-        stdout, stderr, returncode = await self._run(self._build_command(req))
-        if returncode != 0:
-            raise ConnectorError(_failure_message(stdout, stderr))
+        """ChatGPT OAuth 세션은 CLI에 맡기고 stdout만 정규화한다.
+
+        transient 오류 시 공용 retry 헬퍼가 지수 백오프 재시도를 수행한다.
+        영구 오류·한도 초과는 ConnectorError로 올린다.
+        """
+        cmd = self._build_command(req)
+        stdout, _stderr = await run_codex_with_retry(
+            lambda: self._run(cmd),
+            on_permanent=lambda out, err: ConnectorError(_failure_message(out, err)),
+            on_exhausted=lambda out, err, rc: ConnectorError(
+                "codex_cli transient 오류 재시도 한도 초과 — 포기: "
+                + _failure_message(out, err)
+            ),
+            connector_label="codex_cli",
+        )
         text = _extract_agent_text(stdout)
         return ChapterAIResponse(
             text=text,

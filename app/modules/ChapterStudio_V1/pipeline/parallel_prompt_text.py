@@ -13,6 +13,65 @@ from app.modules.ChapterStudio_V1.pipeline.personalization import personalizatio
 _JSON_RULE = "출력은 단일 JSON 객체 한 개뿐이며 markdown fence·설명문·사고과정·<think> 블록을 금지한다. "
 _CJK_BAN_RULE = "한자·중국어 문자 절대 금지, 순수 한글/숫자/영문만 사용한다. "
 
+# 강한 CS 신호 — 이 단어 하나만 있어도 프로그래밍·CS 과목으로 확정한다.
+# "함수"·"알고리즘" 같이 수학에서도 흔한 단어는 여기서 제외한다(오분류 방지).
+_CS_STRONG_KEYWORDS = (
+    "python", "java", "javascript", "c++", "c언어", "프로그래밍", "코딩",
+    "자료구조", "컴퓨터", "소프트웨어", "코드", "class", "객체지향",
+    "database", "sql", "네트워크 프로그래밍", "코드 작성", "디버깅",
+)
+
+# 약한 CS 신호 — 단독으로는 모호하다("정렬 알고리즘"=CS, "유클리드 호제법 알고리즘"=수학).
+# 강한 CS 신호와 공존할 때만 CS로 인정한다.
+_CS_WEAK_KEYWORDS = (
+    "알고리즘",
+    "개발",
+)
+
+# 수학·비CS 과목 신호 — 이 단어가 있으면 약한 CS 신호가 있어도 비CS로 본다.
+# "함수"는 한국 수학 핵심 단원어이므로 여기로 옮긴다(이차함수·일차함수 등).
+_NON_CS_OVERRIDE_KEYWORDS = (
+    "수학", "함수", "호제법", "방정식", "부등식", "도형", "기하", "미분", "적분",
+    "확률", "통계", "수열", "그래프", "정수", "유리수", "분수", "소인수",
+    "물리", "화학", "생물", "지구과학", "역사", "국어", "영어", "문학", "사회",
+)
+
+
+def _is_cs_subject(brief: str) -> bool:
+    """brief 문자열로부터 프로그래밍·CS 과목 여부를 판별한다.
+
+    LLM을 호출하지 않는 순수 함수 — 다음 우선순위로 결정한다:
+    1) 강한 CS 신호가 있으면 CS로 확정한다.
+    2) 비CS(수학·과학·인문) 신호가 있으면 비CS로 본다(약한 CS 신호 무시).
+    3) 약한 CS 신호만 있고 비CS 신호가 없으면 CS로 인정한다.
+
+    의도된 동작: "알고리즘"은 약한 CS 신호다. 수학 단원어(수학·호제법·함수 등)가
+    함께 없으면 "알고리즘 개론"처럼 CS 강의로 본다. 이는 코딩 메타포를 허용해야 하는
+    컴퓨터 알고리즘 강의를 비CS로 오분류하지 않기 위한 의도된 선택이다.
+    """
+    lower = brief.lower()
+    if any(kw in lower for kw in _CS_STRONG_KEYWORDS):
+        return True
+    # 수학·과학·인문 단원어가 있으면 약한 신호("알고리즘" 등)는 CS로 보지 않는다.
+    if any(kw in lower for kw in _NON_CS_OVERRIDE_KEYWORDS):
+        return False
+    return any(kw in lower for kw in _CS_WEAK_KEYWORDS)
+
+
+def _coding_metaphor_rule(brief: str) -> str:
+    """과목에 따라 코딩 메타포 허용·금지 규칙을 반환한다.
+
+    프로그래밍·CS 과목이 아니면 'class처럼', 'def처럼' 같은 코딩 비유를 금지한다.
+    CS 과목이면 빈 문자열을 반환해 기존 규칙을 그대로 유지한다.
+    """
+    if _is_cs_subject(brief):
+        return ""
+    return (
+        "이 강의는 프로그래밍·CS 과목이 아니므로 코딩·프로그래밍 용어를 비유로 쓰지 않는다 "
+        "(예: 'class처럼', 'def처럼', '함수처럼', '변수처럼', '루프처럼', '객체처럼' 금지). "
+        "수학·과학·인문 등 해당 과목의 고유 비유만 사용한다. "
+    )
+
 
 def slides_prompts(brief: str, outline: str, slide_count: int, template_key: str, *, weak_points: str, audience_level: str, tone: int, pace: int, tutor_depth: int, socratic: int, learning_goal: str, use_formal_speech: bool = True, use_emoji: bool = False, tutor_name: str = "", tutor_tagline: str = "", is_default_tutor: bool = True, voice_sample_url: str = "") -> tuple[str, str]:
     """슬라이드 배열만 생성하는 (system, user) 프롬프트를 만든다.
@@ -61,7 +120,8 @@ def slides_prompts(brief: str, outline: str, slide_count: int, template_key: str
         'few-shot: 정수 -3과 2 크기비교는 visual={"type":"number_line","data":{"min":-5,"max":5,"ticks":[{"value":-5,"label":"-5"},{"value":0,"label":"0"},{"value":5,"label":"5"}],"points":[{"value":-3,"label":"-3","color":"#2A5C7A"},{"value":2,"label":"2","color":"#207B4C"}],"highlights":[{"from":-3,"to":2,"label":"오른쪽 2가 더 큼"}]}}처럼 쓴다. '
         'few-shot text slide: {"slide_idx":1,"title":"오개념 바로잡기","category":"text","narration":"음수 비교에서 가장 많이 하는 실수는 숫자만 보고 8이 3보다 크니까 -8이 -3보다 크다고 생각하는 것입니다. 수직선에서는 오른쪽에 있을수록 큰 수이므로 -3이 -8보다 큽니다. 0에서 멀어지는 정도와 실제 크기 비교를 분리해서 보면 부호가 붙은 수를 더 안정적으로 판단할 수 있습니다.","visual":{"type":"comparison-table","data":{"left":{"title":"잘못된 판단","items":["숫자 8만 보고 -8이 더 크다고 결론","절댓값과 실제 크기를 섞어서 생각"]},"right":{"title":"올바른 판단","items":["수직선에서 더 오른쪽인 -3 선택","0과의 거리는 절댓값 비교에만 사용"]},"verdict":"음수 크기 비교는 수직선 위치가 기준입니다."}},"checkpoint":"-8과 -3 중 더 큰 수와 이유를 말할 수 있는가?"}. '
         "텍스트 문단만 있는 슬라이드는 실패다.\n"
-        f"{personalization}"
+        + _coding_metaphor_rule(brief)
+        + f"{personalization}"
     )
     user = (
         f"강의 요청: {brief}\n"
@@ -215,7 +275,11 @@ def voice_prompt(
 
 
 def _build_slot_spec(blueprint: VoiceBlueprint) -> str:
-    """블루프린트로부터 프롬프트 내 섹션 슬롯 명세 텍스트를 만든다."""
+    """블루프린트로부터 프롬프트 내 섹션 슬롯 명세 텍스트를 만든다.
+
+    각 슬롯에 최소 분량을 강하게 명시해 첫 패스 미달을 방지한다.
+    최소 분량 미달 시 해당 슬롯을 거부·재생성하므로 반드시 채워야 함을 명시한다.
+    """
     lines: list[str] = []
     for sec in blueprint.sections:
         mode_note = ""
@@ -224,9 +288,14 @@ def _build_slot_spec(blueprint: VoiceBlueprint) -> str:
                 mode_note = " [greeting 모드: 짧은 인사 후 바로 핵심 상황 진입]"
             else:
                 mode_note = " [bridge 모드: 인사말 금지, 직전 화면에서 자연스럽게 이어지는 한 문장으로 시작]"
+        # 길이 강제 지시 — 최소 분량 미달 시 거부됨을 명시해 첫 패스 순응률을 높인다
+        length_mandate = (
+            f"반드시 {sec.min_chars}자 이상 {sec.max_chars}자 이하로 작성한다 "
+            f"— {sec.min_chars}자 미만이면 이 슬롯은 거부되어 재생성된다"
+        )
         lines.append(
             f"- role={sec.role}{mode_note}: {sec.instruction} "
-            f"(길이 {sec.min_chars}~{sec.max_chars}자)"
+            f"({length_mandate})"
         )
     return "\n".join(lines)
 

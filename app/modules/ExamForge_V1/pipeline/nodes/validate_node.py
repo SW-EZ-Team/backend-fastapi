@@ -12,7 +12,10 @@ from app.modules.ExamForge_V1.templates.registry import get_template
 from app.modules.ExamForge_V1.quality.deduplicator import check_duplicates
 from app.modules.ExamForge_V1.quality.consistency_checker import check_consistency
 from app.modules.ExamForge_V1.quality.coverage_analyzer import analyze_coverage
-from app.modules.ExamForge_V1.quality.explanation_checker import check_explanation_quality
+from app.modules.ExamForge_V1.quality.explanation_checker import (
+    check_explanation_quality,
+    is_explanation_complete,
+)
 from app.modules.ExamForge_V1.common.logger import get_logger
 from app.modules.ExamForge_V1.pipeline.nodes.programming_context import has_code_snippets
 from app.modules.ExamForge_V1.pipeline.nodes.programming_context import looks_like_programming_source
@@ -162,9 +165,21 @@ def _validate_structure(
 
 
 def _check_single_structure(q: dict, template_id: str) -> list[str]:
-    """단일 문제의 구조 유효성을 확인한다."""
+    """단일 문제의 구조 유효성을 확인한다.
+
+    객관식 문항(options 4개 이상)에 한해 해설 완결성 게이트를 적용한다.
+    단답형·주관식은 해설이 짧아도 정상이므로 게이트를 건너뛴다.
+    """
     if not q.get("stem", "").strip():
         return ["문제 줄기(stem)가 비어 있음"]
+    # 객관식 문항에 한해 해설 완결성 게이트 적용 — truncation 조용한 통과 방지
+    options = q.get("options") or []
+    explanation = str(q.get("explanation", "")).strip()
+    if explanation and len(options) >= 4 and not is_explanation_complete(explanation):
+        return [
+            f"해설 미완성(truncation) — {len(explanation)}자, "
+            "정답 근거·오답 해설을 포함한 완결 문장으로 repair 필요"
+        ]
     try:
         template = get_template(template_id)
         from app.modules.ExamForge_V1.schemas.question import Question
