@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-import hashlib
-import random
 import re
 from collections import Counter
 
+from app.core.planfirst.positions import (
+    balanced_target_positions,  # 단일 소스 위임 — core/planfirst/positions.py
+    seed_from_key as _seed_from_key_impl,
+)
 from app.modules.ChapterStudio_V1.common.logging import logger
 from app.modules.ChapterStudio_V1.pipeline.payload import GeneratedQuiz
 
@@ -28,15 +30,9 @@ def strip_answer_position_reference(explanation: str) -> str:
     return stripped if stripped else explanation
 
 
-def balanced_target_positions(count: int, num_choices: int = 4, seed: int = 0) -> list[int]:
-    """문항 수만큼 목표 정답 위치를 균등하게 만들고 결정적으로 섞는다."""
-    if count < 0:
-        raise ValueError("count는 0 이상이어야 한다.")
-    if num_choices < 1:
-        raise ValueError("num_choices는 1 이상이어야 한다.")
-    positions = [idx % num_choices for idx in range(count)]
-    random.Random(seed).shuffle(positions)
-    return positions
+# balanced_target_positions는 app.core.planfirst.positions에서 re-export.
+# 기존 호출처(balance_quiz_answers 등)는 이 이름으로 계속 사용 가능하다.
+# 동작 무변경: byte-identical 알고리즘이 단일 소스로 통합됐다.
 
 
 def shuffle_quiz_choices(
@@ -106,11 +102,11 @@ def _has_position_token(text: str) -> bool:
 
 
 def _seed_from_key(seed_key: str) -> int:
-    """파이썬 해시 랜덤화에 영향받지 않는 고정 seed를 만든다."""
-    if seed_key == "":
-        return 0
-    digest = hashlib.sha256(seed_key.encode("utf-8")).digest()
-    return int.from_bytes(digest[:8], "big")
+    """파이썬 해시 랜덤화에 영향받지 않는 고정 seed를 만든다.
+
+    app.core.planfirst.positions.seed_from_key에 위임 — 동작 무변경.
+    """
+    return _seed_from_key_impl(seed_key)
 
 
 def _log_skip(quiz: GeneratedQuiz) -> None:

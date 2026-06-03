@@ -9,8 +9,10 @@ plan-first 원칙:
 """
 from __future__ import annotations
 
-import hashlib
-
+from app.core.planfirst.positions import (
+    balanced_target_positions as _balanced_target_positions_impl,
+    seed_from_key as _seed_from_key_impl,
+)
 from app.modules.ExamForge_V1.pipeline.nodes.question_metadata import bloom_for_difficulty
 
 # 5보기 템플릿 집합 — 카탈로그 spec 없이도 결정 가능한 명시 목록
@@ -48,11 +50,11 @@ def _num_choices_for_template(template_id: str) -> int:
 
 
 def _seed_from_key(seed_key: str) -> int:
-    """파이썬 해시 랜덤화에 영향받지 않는 고정 seed를 만든다."""
-    if not seed_key:
-        return 0
-    digest = hashlib.sha256(seed_key.encode("utf-8")).digest()
-    return int.from_bytes(digest[:8], "big")
+    """파이썬 해시 랜덤화에 영향받지 않는 고정 seed를 만든다.
+
+    app.core.planfirst.positions.seed_from_key에 위임 — 동작 무변경.
+    """
+    return _seed_from_key_impl(seed_key)
 
 
 def _balanced_target_positions(
@@ -61,14 +63,10 @@ def _balanced_target_positions(
     """count개 문항에 목표 정답 위치를 균등하게 만들고 결정적으로 섞는다.
 
     ChapterStudio_V1.postprocess.quiz_balance.balanced_target_positions 와
-    동일한 알고리즘을 사용해 모의고사 슬롯에 재적용한다.
+    동일한 알고리즘이다. app.core.planfirst.positions.balanced_target_positions에
+    위임해 단일 소스로 통합 — 동작 무변경.
     """
-    import random
-    if count <= 0:
-        return []
-    positions = [idx % num_choices for idx in range(count)]
-    random.Random(seed).shuffle(positions)
-    return positions
+    return _balanced_target_positions_impl(count, num_choices=num_choices, seed=seed)
 
 
 def build_question_blueprint(
