@@ -13,14 +13,10 @@ from app.modules.ChapterStudio_V1.app.curriculum_preview_types import (
     CurriculumPreviewRequest,
     SourceAnalysis,
 )
+from app.modules.ChapterStudio_V1.app.curriculum_stages import STAGES as _STAGES
 from app.modules.ChapterStudio_V1.common.errors import ConversionError
 
 _SCHEMA_PATH = Path(__file__).with_name("codex_curriculum_preview.schema.json")
-_STAGES = (
-    "관점 잡기", "핵심 언어", "작동 원리", "대표 사례", "구조화 연습",
-    "오개념 정리", "실전 적용", "비교와 반례", "종합 문제", "학습 전이",
-    "깊이 확장", "프로젝트", "평가", "복습 설계", "마무리",
-)
 
 
 async def build_curriculum_preview(req: CurriculumPreviewRequest) -> CurriculumPreview:
