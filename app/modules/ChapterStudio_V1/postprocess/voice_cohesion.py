@@ -7,6 +7,7 @@ plan-first 섹션 구조 지원:
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Awaitable, Callable
 
@@ -57,6 +58,7 @@ async def rewrite_openings(
     target_idxs: list[int],
     topic: str,
     rewrite_fn: RewriteFn,
+    semaphore: asyncio.Semaphore | None = None,
 ) -> dict[int, str]:
     """대상 슬라이드의 첫 문장만 재작성해 나머지 본문은 그대로 보존한다.
 
@@ -65,16 +67,28 @@ async def rewrite_openings(
     섹션 구조를 슬롯 경계까지 정밀하게 재작성하지는 않는다(현 구현은 script_text 평탄화
     기준). 응집성 교정 후 voice_cohesion_pass가 sections=None으로 리셋해 script_text를
     정본으로 삼는다.
+
+    semaphore: Gemini genai API rate limit 대응. None이면 제한 없이 병렬 실행.
+    슬라이드 수는 통상 10~15개로 소규모라 기본 unbounded gather로도 안전하지만,
+    외부에서 세마포어를 주입하면 동시성을 추가로 제어할 수 있다.
     """
     by_idx = dict(scripts)
-    rewritten: dict[int, str] = {}
-    for slide_idx in target_idxs:
+
+    async def _rewrite_one(slide_idx: int) -> tuple[int, str]:
+        """단일 슬라이드 도입부를 재작성해 (slide_idx, 새 텍스트)를 반환한다."""
         source = by_idx[slide_idx]
         intro, body = _split_first_sentence(source)
         prompt = _rewrite_prompt(slide_idx, intro, scripts, topic)
-        replacement = _clean_rewrite(await rewrite_fn(prompt))
-        rewritten[slide_idx] = f"{replacement}{_join_body(body)}"
-    return rewritten
+        if semaphore is not None:
+            async with semaphore:
+                replacement = _clean_rewrite(await rewrite_fn(prompt))
+        else:
+            replacement = _clean_rewrite(await rewrite_fn(prompt))
+        return slide_idx, f"{replacement}{_join_body(body)}"
+
+    # 슬라이드별 재작성을 병렬로 실행해 직렬 대비 슬라이드 수만큼 단축한다.
+    pairs = await asyncio.gather(*[_rewrite_one(idx) for idx in target_idxs])
+    return dict(pairs)
 
 
 async def apply_cohesion(

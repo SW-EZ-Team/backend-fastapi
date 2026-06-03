@@ -61,7 +61,10 @@ class CodexCLIConnector:
         return await asyncio.gather(*[self.generate(req) for req in reqs])
 
     def supports(self, feature: str) -> bool:
-        return feature in {"codex_oauth", "local_dev", "output_schema", "voice_quality_repair"}
+        # "batch" 포함: 12슬라이드+퀴즈+voice_scripts를 단일 거대 콜로 요청하면
+        # 180초 타임아웃을 초과하므로(P0), 컴포넌트별 병렬 경로를 쓴다.
+        # 각 컴포넌트 콜은 작아 180초 내에 충분히 완료된다.
+        return feature in {"batch", "codex_oauth", "local_dev", "output_schema", "voice_quality_repair"}
 
     def _build_command(self, req: ChapterAIRequest) -> list[str]:
         command = [

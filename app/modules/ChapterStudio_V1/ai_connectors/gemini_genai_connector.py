@@ -18,7 +18,11 @@ from app.modules.ChapterStudio_V1.ai_connectors.schemas import (
     ChapterAIRequest,
     ChapterAIResponse,
 )
-from app.modules.ChapterStudio_V1.common.config import gemini_text_model, google_api_key
+from app.modules.ChapterStudio_V1.common.config import (
+    gemini_text_max_concurrency,
+    gemini_text_model,
+    google_api_key,
+)
 
 try:
     from common.llm_output import strip_thinking as _strip_thinking
@@ -31,6 +35,18 @@ except ImportError:
 
 _MAX_ATTEMPTS = 3
 _RETRY_DELAYS: tuple[float, float] = (1.0, 2.0)
+
+# 프로세스 전역 Gemini genai 동시호출 세마포어 — 지연 생성(이벤트 루프 안전).
+# GeminiCliConnector의 asyncio.Lock(CLI 모드 직렬)과는 별개의 제어다.
+_genai_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_genai_semaphore() -> asyncio.Semaphore:
+    """Gemini genai API 동시호출 세마포어를 지연 생성해 반환한다."""
+    global _genai_semaphore
+    if _genai_semaphore is None:
+        _genai_semaphore = asyncio.Semaphore(gemini_text_max_concurrency())
+    return _genai_semaphore
 
 
 class _GenerateContentModels(Protocol):
@@ -58,10 +74,16 @@ class GeminiGenAIConnector:
         self._model = gemini_text_model()
 
     async def generate(self, req: ChapterAIRequest) -> ChapterAIResponse:
-        """동기 SDK 호출을 asyncio.to_thread로 감싸 블로킹을 막는다."""
+        """동기 SDK 호출을 asyncio.to_thread로 감싸 블로킹을 막는다.
+
+        프로세스 전역 세마포어로 동시 genai API 호출을 gemini_text_max_concurrency()
+        이하로 제한해 rate limit 폭주를 방지한다.
+        """
+        semaphore = _get_genai_semaphore()
         for attempt in range(_MAX_ATTEMPTS):
             try:
-                response = await asyncio.to_thread(self._generate_sync, req)
+                async with semaphore:
+                    response = await asyncio.to_thread(self._generate_sync, req)
                 return _to_response(response, req, self._model)
             except (RateLimitError, ConnectorTimeoutError):
                 if attempt >= _MAX_ATTEMPTS - 1:

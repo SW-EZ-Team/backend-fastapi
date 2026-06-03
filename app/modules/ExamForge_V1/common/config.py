@@ -152,18 +152,62 @@ def max_retries() -> int:
 
 
 def generation_concurrency() -> int:
-    """문제 생성 병렬 상한. 0 이하 설정 시 데드락 방지를 위해 최소 1로 보정한다."""
-    return max(1, _int_env("GENERATION_CONCURRENCY", 4))
+    """문제 생성 병렬 상한. 0 이하 설정 시 데드락 방지를 위해 최소 1로 보정한다.
+
+    기본값 3: codex 전역 세마포어(max_concurrent=3)와 일치시켜 노드 세마포어 ×
+    codex 세마포어 조합으로 실 동시 codex 프로세스를 3 이하로 보장한다.
+    env GENERATION_CONCURRENCY로 오버라이드 가능.
+    """
+    return max(1, _int_env("GENERATION_CONCURRENCY", 3))
 
 
 def verification_concurrency() -> int:
-    """정답 검증 병렬 상한. 0 이하 설정 시 데드락 방지를 위해 최소 1로 보정한다."""
-    return max(1, _int_env("VERIFICATION_CONCURRENCY", 2))
+    """정답 검증 병렬 상한. 0 이하 설정 시 데드락 방지를 위해 최소 1로 보정한다.
+
+    기본값 3: codex 세마포어(3)가 상한을 보장하므로 높여도 폭주 없음.
+    env VERIFICATION_CONCURRENCY로 오버라이드 가능.
+    """
+    return max(1, _int_env("VERIFICATION_CONCURRENCY", 3))
 
 
 def pipeline_llm_budget() -> int:
-    """파이프라인 1회 실행당 최대 LLM 호출 허용 횟수 (서킷 브레이커)."""
-    return _int_env("PIPELINE_LLM_BUDGET", 50)
+    """파이프라인 1회 실행당 최대 LLM 호출 허용 횟수 (서킷 브레이커, 고정값 기본).
+
+    문항 수를 모르는 호출부(테스트 더블 등)를 위한 폴백 기본값이다.
+    실제 라우터는 pipeline_llm_budget_for(total_questions)로 문항 수 비례 예산을 쓴다.
+    """
+    return _int_env("PIPELINE_LLM_BUDGET", 80)
+
+
+def pipeline_llm_budget_for(total_questions: int) -> int:
+    """문항 수에 비례한 LLM 호출 예산을 계산한다.
+
+    한 파이프라인 통과당 문항별 호출(생성·오답·해설·검증 ≈ 4단계)에 더해
+    재시도 여유를 둔다. 정상 동작이 예산에 굶지 않도록 문항당 약 8회 + 고정 오버헤드.
+    환경변수 PIPELINE_LLM_BUDGET가 명시되면 그 값을 하한으로 존중한다.
+
+    예: 5문항 → 8*5+24 = 64, 10문항 → 8*10+24 = 104.
+    """
+    n = max(1, total_questions)
+    scaled = n * _int_env("PIPELINE_LLM_BUDGET_PER_QUESTION", 8) + _int_env(
+        "PIPELINE_LLM_BUDGET_OVERHEAD", 24
+    )
+    # 명시 고정값이 있으면 둘 중 큰 값을 쓴다(사용자 상향 의도 존중).
+    explicit = _optional("PIPELINE_LLM_BUDGET")
+    if explicit is not None:
+        return max(scaled, _int_env("PIPELINE_LLM_BUDGET", 80))
+    return scaled
+
+
+def pipeline_llm_reserve_for(total_questions: int) -> int:
+    """해설 생성(answer-gen) 전용으로 예약할 호출 수를 계산한다.
+
+    출고되는 모든 문항이 완결 해설을 가지려면 최소 문항 수만큼의 해설 호출이
+    필요하고, 파싱 재시도(문항당 최대 3회)를 감안해 여유를 둔다.
+    환경변수 EXAMFORGE_ANSWER_RESERVE_PER_QUESTION로 조정 가능(기본 2).
+    """
+    n = max(1, total_questions)
+    return n * _int_env("EXAMFORGE_ANSWER_RESERVE_PER_QUESTION", 2)
 
 
 def pipeline_timeout_sec() -> int:

@@ -14,7 +14,25 @@ from app.modules.ExamForge_V1.common._ai_schemas import (
     LLMBudgetCounter,
     current_budget,
 )
-from app.modules.ExamForge_V1.common.config import gemini_text_model, google_api_key
+from app.modules.ExamForge_V1.common.config import (
+    gemini_text_model,
+    google_api_key,
+)
+
+# ExamForge용 Gemini genai 동시호출 세마포어 — 지연 생성.
+# ChapterStudio _get_genai_semaphore()와 프로세스를 공유하지 않으므로
+# ExamForge 경로 독립적으로 제어한다(기본 4, env GEMINI_TEXT_MAX_CONCURRENCY 오버라이드).
+_examforge_genai_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_examforge_genai_semaphore() -> asyncio.Semaphore:
+    """ExamForge 전용 Gemini genai 세마포어를 지연 생성해 반환한다."""
+    global _examforge_genai_semaphore
+    if _examforge_genai_semaphore is None:
+        import os
+        max_c = max(1, int(os.environ.get("GEMINI_TEXT_MAX_CONCURRENCY", "4")))
+        _examforge_genai_semaphore = asyncio.Semaphore(max_c)
+    return _examforge_genai_semaphore
 from app.modules.ExamForge_V1.common.errors import (
     AuthError,
     ConnectorError,
@@ -61,14 +79,20 @@ class GeminiGenAIConnector:
         req: ChapterAIRequest,
         budget: LLMBudgetCounter | None = None,
     ) -> ChapterAIResponse:
-        """예산 카운터와 bounded retry를 지키며 Gemini를 호출한다."""
+        """예산 카운터와 bounded retry를 지키며 Gemini를 호출한다.
+
+        프로세스 전역 세마포어로 동시 genai API 호출을 GEMINI_TEXT_MAX_CONCURRENCY
+        이하로 제한해 rate limit 폭주를 방지한다.
+        """
         budget = budget or current_budget.get()
         if budget is not None:
             budget.check()
 
+        semaphore = _get_examforge_genai_semaphore()
         for attempt in range(_MAX_ATTEMPTS):
             try:
-                response = await asyncio.to_thread(self._generate_sync, req)
+                async with semaphore:
+                    response = await asyncio.to_thread(self._generate_sync, req)
                 result = _to_response(response, req, self._model)
                 if budget is not None:
                     budget.increment()

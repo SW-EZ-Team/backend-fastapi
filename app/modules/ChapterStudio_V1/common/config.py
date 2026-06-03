@@ -245,6 +245,16 @@ def gemini_cli_max_concurrency() -> int:
     return _int_value("GEMINI_CLI_MAX_CONCURRENCY", "1", 1, 4)
 
 
+def gemini_text_max_concurrency() -> int:
+    """Gemini genai API 텍스트 생성 동시 호출 상한.
+
+    API rate limit(Gemini Flash 기준 분당 수백 RPM)을 고려해 기본값 3~4.
+    voice_cohesion rewrite_openings 병렬화 + ExamForge gemini_flash 경로에서 공유한다.
+    env GEMINI_TEXT_MAX_CONCURRENCY로 오버라이드 가능.
+    """
+    return _int_value("GEMINI_TEXT_MAX_CONCURRENCY", "4", 1, 16)
+
+
 def text_fallback_connector() -> str:
     return _optional_value("TEXT_FALLBACK_CONNECTOR") or "claude_sonnet"
 

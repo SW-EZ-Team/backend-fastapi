@@ -21,6 +21,7 @@ from app.modules.ExamForge_V1.common._ai_schemas import (
     ChapterAIRequest,
     ChapterAIResponse,
     LLMBudgetCounter,
+    allow_reserve_budget,
     current_budget,
 )
 from app.modules.ExamForge_V1.common._connector_anthropic import AnthropicConnector
@@ -112,6 +113,16 @@ def get_current_budget() -> LLMBudgetCounter | None:
     return current_budget.get()
 
 
+def set_allow_reserve(value: bool) -> contextvars.Token:
+    """해설 생성 구간에서 reserve 예산 사용을 허용/해제한다."""
+    return allow_reserve_budget.set(value)
+
+
+def get_allow_reserve() -> bool:
+    """현재 호출이 reserve 예산을 끌어쓸 수 있는지 반환한다."""
+    return allow_reserve_budget.get()
+
+
 def get_connector(name: str) -> AIConnector:
     """이름으로 커넥터 인스턴스를 반환한다 (캐싱).
 
@@ -159,20 +170,20 @@ async def run_connector_tasks(
     task_factories: Sequence[Callable[[], Awaitable[_TaskResult]]],
     connector: AIConnector,
 ) -> list[_TaskResult | Exception]:
-    """커넥터 batch 지원 여부에 따라 병렬/순차 실행을 선택한다."""
-    if connector_supports_batch(connector):
-        return await asyncio.gather(
+    """항상 asyncio.gather로 병렬 실행한다.
+
+    batch 지원 여부와 무관하게 병렬 실행한다. 동시성 제한은 각 팩토리가
+    보유한 asyncio.Semaphore(generation_concurrency())로 위임되며,
+    codex 전역 세마포어(max_concurrent=3)가 실 동시 codex 프로세스를 캡한다.
+    순서 정합은 gather가 입력 순서대로 결과를 반환하므로 보장된다.
+    예산 카운터 원자성은 단일 이벤트 루프 + await 경계 없는 check/increment로 유지된다.
+    """
+    return list(
+        await asyncio.gather(
             *(factory() for factory in task_factories),
             return_exceptions=True,
         )
-
-    results: list[_TaskResult | Exception] = []
-    for factory in task_factories:
-        try:
-            results.append(await factory())
-        except Exception as exc:
-            results.append(exc)
-    return results
+    )
 
 
 def connector_supports_batch(connector: AIConnector) -> bool:
@@ -225,4 +236,6 @@ __all__ = [
     "connector_supports_batch",
     "run_connector_tasks",
     "set_current_budget",
+    "set_allow_reserve",
+    "get_allow_reserve",
 ]
