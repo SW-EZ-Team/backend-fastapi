@@ -19,6 +19,11 @@ _CS_STRONG_KEYWORDS = (
     "python", "java", "javascript", "c++", "c언어", "프로그래밍", "코딩",
     "자료구조", "컴퓨터", "소프트웨어", "코드", "class", "객체지향",
     "database", "sql", "네트워크 프로그래밍", "코드 작성", "디버깅",
+    # 주요 프로그래밍 라이브러리·프레임워크 — 이 단어만 있어도 CS 과목으로 확정한다.
+    "numpy", "pandas", "matplotlib", "scipy", "sklearn", "scikit",
+    "tensorflow", "pytorch", "keras", "fastapi", "django", "flask",
+    "react", "vue", "angular", "nodejs", "typescript", "kotlin", "swift",
+    "rust", "golang", "opencv", "langchain", "langgraph",
 )
 
 # 약한 CS 신호 — 단독으로는 모호하다("정렬 알고리즘"=CS, "유클리드 호제법 알고리즘"=수학).
@@ -73,6 +78,25 @@ def _coding_metaphor_rule(brief: str) -> str:
     )
 
 
+def _cs_slides_concrete_rule(brief: str) -> str:
+    """프로그래밍·CS 과목 슬라이드에서 구체적 코드·연산·예시 필수 지시를 반환한다.
+
+    비CS 과목이면 빈 문자열을 반환해 기존 슬라이드 규칙을 그대로 유지한다.
+    CS 과목이면 각 슬라이드 narration에 추상 메타포가 아닌 실제 코드·값·연산 예시가
+    포함되도록 강제한다.
+    """
+    if not _is_cs_subject(brief):
+        return ""
+    return (
+        "이 강의는 프로그래밍·CS 과목이므로 슬라이드 narration은 추상 비유나 학습 태도 메타포가 아닌 "
+        "구체적 코드·연산·실행 결과·API 동작을 포함해야 한다. "
+        "예: NumPy 슬라이드라면 'arr[1:3]', 'np.array([1,2,3]).shape', "
+        "'arr * 2', 'broadcasting이 가능한 shape 조합' 등 실제 코드·값을 narration에 담는다. "
+        "example_box의 problem·steps·answer도 실제 코드와 실행 결과 값으로 채운다. "
+        "추상적 관점·태도·비유만 담은 슬라이드는 실패다. "
+    )
+
+
 def slides_prompts(brief: str, outline: str, slide_count: int, template_key: str, *, weak_points: str, audience_level: str, tone: int, pace: int, tutor_depth: int, socratic: int, learning_goal: str, use_formal_speech: bool = True, use_emoji: bool = False, tutor_name: str = "", tutor_tagline: str = "", is_default_tutor: bool = True, voice_sample_url: str = "") -> tuple[str, str]:
     """슬라이드 배열만 생성하는 (system, user) 프롬프트를 만든다.
 
@@ -121,6 +145,7 @@ def slides_prompts(brief: str, outline: str, slide_count: int, template_key: str
         'few-shot text slide: {"slide_idx":1,"title":"오개념 바로잡기","category":"text","narration":"음수 비교에서 가장 많이 하는 실수는 숫자만 보고 8이 3보다 크니까 -8이 -3보다 크다고 생각하는 것입니다. 수직선에서는 오른쪽에 있을수록 큰 수이므로 -3이 -8보다 큽니다. 0에서 멀어지는 정도와 실제 크기 비교를 분리해서 보면 부호가 붙은 수를 더 안정적으로 판단할 수 있습니다.","visual":{"type":"comparison-table","data":{"left":{"title":"잘못된 판단","items":["숫자 8만 보고 -8이 더 크다고 결론","절댓값과 실제 크기를 섞어서 생각"]},"right":{"title":"올바른 판단","items":["수직선에서 더 오른쪽인 -3 선택","0과의 거리는 절댓값 비교에만 사용"]},"verdict":"음수 크기 비교는 수직선 위치가 기준입니다."}},"checkpoint":"-8과 -3 중 더 큰 수와 이유를 말할 수 있는가?"}. '
         "텍스트 문단만 있는 슬라이드는 실패다.\n"
         + _coding_metaphor_rule(brief)
+        + _cs_slides_concrete_rule(brief)
         + f"{personalization}"
     )
     user = (
@@ -142,6 +167,7 @@ def slides_prompts(brief: str, outline: str, slide_count: int, template_key: str
 def quizzes_prompts(brief: str, outline: str, slide_count: int, *, weak_points: str, audience_level: str, tone: int, pace: int, tutor_depth: int, socratic: int, learning_goal: str, use_formal_speech: bool = True, use_emoji: bool = False, tutor_name: str = "", tutor_tagline: str = "", is_default_tutor: bool = True, voice_sample_url: str = "") -> tuple[str, str]:
     """퀴즈 배열만 생성하는 (system, user) 프롬프트를 만든다."""
     personalization = _personalization(weak_points, audience_level, tone, pace, tutor_depth, socratic, learning_goal, weak_rule="퀴즈는 약점 개념을 직접 겨냥한 진단·교정형 문항을 우선한다.", use_formal_speech=use_formal_speech, use_emoji=use_emoji, tutor_name=tutor_name, tutor_tagline=tutor_tagline)
+    cs_subject_rule = _quiz_cs_rule(brief)
     system = (
         "너는 ChapterStudio_V1의 퀴즈 생성기다. "
         + _JSON_RULE
@@ -150,16 +176,45 @@ def quizzes_prompts(brief: str, outline: str, slide_count: int, *, weak_points: 
         "quizzes[i] 키는 정확히 slide_idx, question, choices, answer_idx, difficulty, explanation 여섯 개다. "
         "choices는 문자열 4개 배열, answer_idx는 0~3 정수이며 정답은 한 보기에만 해당한다. "
         "difficulty는 기억, 이해, 적용, 함정 교정, 실전 판단, 오해 중 하나만 쓴다. Easy/Medium/Hard 금지. "
-        "explanation은 120~180자로 정답 이유와 오답 함정을 함께 적고 약점 개념과 연결한다.\n"
-        f"{personalization}"
+        "difficulty 분포: 전체 문항 중 기억·이해는 최대 40%로 제한하고 나머지 60% 이상은 적용·함정 교정·실전 판단·오해 중 하나여야 한다. "
+        "explanation은 120~180자로 정답 이유와 오답 함정을 함께 적고 약점 개념과 연결한다. "
+        # 메타·태도 질문 명시 금지
+        "절대 금지 — 다음 유형의 문항을 생성하지 않는다: "
+        "(1) 강의·학습 태도·관점 문항: '이 강의에서 강조한 관점은', '바람직한 학습자 반응은', "
+        "'잘 이해한 학습자의 말은', '확장 질문 단계에서 바람직한 반응은', "
+        "'강의 끝 점검에서 이해한 학습자가 할 말은' 같이 학습 메타·태도·강의 구조를 묻는 문항. "
+        "(2) 슬라이드 역할·구조 문항: 도입·본론·마무리 등 강의 구성 자체를 묻는 문항. "
+        "퀴즈는 반드시 학습 주제 자체의 지식·개념·적용·계산을 측정해야 한다. "
+        "보기(choices)는 개념 혼동을 유발하는 그럴듯한 오답으로 구성해 실제 이해 없이는 풀 수 없게 한다. "
+        + cs_subject_rule
+        + f"{personalization}"
     )
     user = (
         f"강의 요청: {brief}\n"
-        f"확정 슬라이드 역할:\n{outline}\n"
+        f"확정 슬라이드 역할(role은 슬라이드 구조 참고용이며 퀴즈 내용과 무관 — 주제 지식만 출제):\n{outline}\n"
         f"{personalization}\n"
-        f"각 slide_idx마다 그 슬라이드 내용에서만 출제한 퀴즈 1개씩, 총 {slide_count}개를 만든다."
+        f"각 slide_idx마다 그 슬라이드의 구체적 학습 내용(개념·연산·동작·사례)에서만 출제한 퀴즈 1개씩, 총 {slide_count}개를 만든다. "
+        "role(도입/확장 질문/강의 끝 점검 등)은 슬라이드 구조 표시일 뿐이며 퀴즈에서 언급하거나 '학습자 반응'을 묻는 문항으로 쓰지 않는다."
     )
     return system, user
+
+
+def _quiz_cs_rule(brief: str) -> str:
+    """프로그래밍·CS 과목이면 퀴즈에 코드·연산·출력 기반 문항 요구 지시를 반환한다.
+
+    비CS 과목이면 빈 문자열을 반환한다. 슬라이드 메타포 규칙과 동일한 판별 함수를 재사용한다.
+    """
+    if not _is_cs_subject(brief):
+        return ""
+    return (
+        "이 강의는 프로그래밍·CS 과목이므로 퀴즈 문항은 다음 유형을 우선한다: "
+        "① 코드 출력 예측(실행 결과 고르기), "
+        "② 연산·인덱싱·슬라이싱 결과 계산, "
+        "③ shape·dtype·브로드캐스팅 가능 여부 판단, "
+        "④ 함수·메서드 동작 결과 고르기, "
+        "⑤ 오류(TypeError·IndexError 등) 발생 여부 판단. "
+        "추상적 설명만 묻는 문항은 금지하고 실제 코드·값을 문항에 포함한다. "
+    )
 
 
 def note_prompts(brief: str, outline: str, *, weak_points: str, audience_level: str, tone: int, pace: int, tutor_depth: int, socratic: int, learning_goal: str, use_formal_speech: bool = True, use_emoji: bool = False, tutor_name: str = "", tutor_tagline: str = "", is_default_tutor: bool = True, voice_sample_url: str = "") -> tuple[str, str]:
