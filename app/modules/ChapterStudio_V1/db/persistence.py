@@ -144,7 +144,7 @@ async def _insert_assignment(conn: PersistenceConnection, context: GenerationCon
         context.tutoring_id,
         context.lesson_id,
         _record_default_text(meta, "title", _first_line(prompt)),
-        _record_default_text(meta, "assignment_format", "text"),
+        _record_default_text(meta, "assignment_format", "text")[:40],
         _json([]),
         prompt,
     )
