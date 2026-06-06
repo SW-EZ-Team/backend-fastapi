@@ -1,6 +1,8 @@
 """ExamForge 제출 채점 API 테스트."""
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -30,22 +32,31 @@ async def test_grade_submission_endpoint_executes_business_logic() -> None:
     assert response.results[0].is_correct is True
 
 
-def test_http_endpoint_rejects_invalid_answer_key_seal() -> None:
-    """HTTP 표면에서 위조된 정답 키 서명을 403으로 거부한다."""
+def test_http_endpoint_rejects_invalid_answer_key_seal_in_enforce_mode() -> None:
+    """HTTP 표면에서 위조된 정답 키 서명을 ENFORCE 모드에서 403으로 거부한다.
+
+    advisory 모드(기본)에서는 seal 불일치가 채점 차단을 일으키지 않으므로,
+    EXAMFORGE_SEAL_ENFORCE=true 강제 모드일 때만 403이 반환되는지 검증한다.
+    """
     from app.modules.ExamForge_V1.app.routers.exam_forge import router
 
     app = FastAPI()
     app.include_router(router)
-    response = TestClient(app).post(
-        "/api/exam-forge/grade-submission",
-        json={
-            "attempt_id": "attempt-forged",
-            "exam_id": "exam-forged",
-            "answer_key_seal": "v1." + ("x" * 43),
-            "questions": [choice_question().model_dump(mode="json")],
-            "submitted_answers": [{"question_id": "q-choice", "answer": "2"}],
-        },
-    )
+
+    with patch(
+        "app.modules.ExamForge_V1.grading.engine.seal_enforce_mode",
+        return_value=True,
+    ):
+        response = TestClient(app).post(
+            "/api/exam-forge/grade-submission",
+            json={
+                "attempt_id": "attempt-forged",
+                "exam_id": "exam-forged",
+                "answer_key_seal": "v1." + ("x" * 43),
+                "questions": [choice_question().model_dump(mode="json")],
+                "submitted_answers": [{"question_id": "q-choice", "answer": "2"}],
+            },
+        )
 
     assert response.status_code == 403
 

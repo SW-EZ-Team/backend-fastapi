@@ -50,7 +50,7 @@ class StreamingASRSession:
             min_silence_ms=config.vad_min_silence_ms or 800,
             turn_min_chars=config.turn_min_chars or 2,
         )
-        self._engine = ASREngine(model_name=config.model or "mlx-qwen3-asr")
+        self._engine = ASREngine(model_name=config.model or "gemini-asr")
         # 플러시 버퍼 — 확정 전사 누적용
         self._flush_buffer: str = ""
         # 부분 전사 동시 실행 방지 세마포어

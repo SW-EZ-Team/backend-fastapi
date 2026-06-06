@@ -4,6 +4,7 @@ from .exam_plan import ExamPlan, TypeAllocation
 from .request import ExamForgeRequest, ExamConfig
 from .response import ExamForgeResponse, QualityMetrics
 from .grading import (
+    GradeQuestion,
     GradeSubmissionRequest,
     GradeSubmissionResponse,
     GradingMode,
@@ -16,6 +17,7 @@ from .grading import (
 __all__ = [
     "ExamConfig",
     "ExamPlan",
+    "GradeQuestion",
     "MatchingPair",
     "ExamForgeRequest",
     "ExamForgeResponse",

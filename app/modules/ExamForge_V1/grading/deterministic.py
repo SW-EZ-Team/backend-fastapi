@@ -11,12 +11,12 @@ from app.modules.ExamForge_V1.grading.normalization import (
     split_sequence_text,
 )
 from app.modules.ExamForge_V1.schemas.grading import (
+    GradeQuestion,
     GradingMode,
     JsonValue,
     QuestionGradeResult,
     RubricCriterionResult,
 )
-from app.modules.ExamForge_V1.schemas.question import Question
 
 _CHOICE_TEMPLATES = {
     "ko_multiple_choice_4", "ko_multiple_choice_5",
@@ -31,7 +31,7 @@ _MATCH_TEMPLATES = {"ko_matching", "us_matching"}
 
 
 def grade_objective_question(
-    question: Question,
+    question: GradeQuestion,
     answer: JsonValue,
 ) -> QuestionGradeResult:
     """템플릿별 결정론 채점기를 선택한다."""
@@ -162,7 +162,7 @@ def _points(question: Question) -> float:
 def _criterion(
     name: str,
     score: float,
-    question: Question,
+    question: GradeQuestion,
     reason: str,
     max_score: float | None = None,
 ) -> RubricCriterionResult:
@@ -176,7 +176,7 @@ def _criterion(
 
 
 def _result(
-    question: Question,
+    question: GradeQuestion,
     score: float,
     feedback: str,
     criteria: list[RubricCriterionResult],

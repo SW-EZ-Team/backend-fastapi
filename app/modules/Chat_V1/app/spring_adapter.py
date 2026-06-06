@@ -4,8 +4,8 @@ Spring `ChatService.callFastapi`가 `POST {base}/api/chat` 로 snake_case 바디
 전송하고 동기 JSON 응답을 기대한다(2xx + body, 실패 시 CHAT_001).
 
 이 어댑터의 책임은 순수 매핑 + 호출뿐이다:
-  Spring 바디(dict) → ChatRequest 변환 → answer_question 호출 →
-  ChatResponse → Spring이 추출하는 키(response_text, citations) 형태로 반환.
+  Spring 바디(dict) → DB에서 실제 슬라이드 조회 → ChatRequest 변환 →
+  answer_question 호출 → ChatResponse → Spring이 추출하는 키 형태로 반환.
 
 Spring과 Chat_V1의 스키마 필드명이 다르므로(예: message↔user_message,
 referenced_slides↔citations) 불일치는 전부 이 어댑터 안에서 변환한다.
@@ -24,7 +24,9 @@ from app.modules.Chat_V1.app.schemas import (
     LectureContext,
     SlideContext,
 )
+from app.modules.Chat_V1.app.scope_guard import OUT_OF_SCOPE_REPLY, _REFUSAL_MARKERS
 from app.modules.Chat_V1.app.service import answer_question
+from app.modules.Chat_V1.app.slide_context_loader import load_slides
 
 _LOG = logging.getLogger(__name__)
 
@@ -39,7 +41,7 @@ async def chat_from_spring(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     Spring은 2xx + body 를 성공으로 간주하므로, 내부 처리 실패 시에도
     5xx로 떨어뜨려 Spring이 CHAT_001을 일관되게 처리하도록 한다.
     """
-    chat_request = _to_chat_request(body)
+    chat_request = await _to_chat_request(body)
     try:
         result = await answer_question(chat_request)
     except ValueError as exc:
@@ -51,13 +53,12 @@ async def chat_from_spring(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     return _to_spring_response(result)
 
 
-def _to_chat_request(body: dict[str, Any]) -> ChatRequest:
+async def _to_chat_request(body: dict[str, Any]) -> ChatRequest:
     """Spring snake_case 바디를 Chat_V1 ChatRequest로 변환한다.
 
-    Spring은 슬라이드 본문을 보내지 않고 식별자(slide_id/slide_idx)와
-    context(tutor/course/recent_qa)만 보낸다. 그러나 ChatRequest는
-    비어 있지 않은 LectureContext.slides 를 요구하므로, context에서
-    얻은 메타로 최소한의 유효한 LectureContext를 합성한다.
+    lesson_id / slide_id / slide_idx 가 있으면 public.slide에서 실제 슬라이드를 조회해
+    LectureContext를 구성한다. 식별자가 없거나 DB 조회가 실패하면 슬라이드 컨텍스트
+    없이 폴백한다 — 가짜 슬라이드 텍스트를 만들지 않는다.
     """
     message = _as_str(body.get("message")).strip()
     if not message:
@@ -73,10 +74,22 @@ def _to_chat_request(body: dict[str, Any]) -> ChatRequest:
         f"[선택한 내용]\n{selected_text}\n\n[질문]\n{message}" if selected_text else message
     )
 
+    # Spring이 전달한 슬라이드 위치 식별자로 실제 슬라이드를 조회한다.
+    lesson_id = _as_str(body.get("lesson_id")).strip() or None
+    slide_id = _as_str(body.get("slide_id")).strip() or None
+    slide_idx_raw = body.get("slide_idx")
+    # slide_idx는 정수형으로만 수용한다 — 문자열 전달 시 무시해 안전하게 폴백
+    slide_idx = int(slide_idx_raw) if isinstance(slide_idx_raw, int) else None
+
+    lecture_context = await _build_lecture_context(context, lesson_id, slide_idx)
+
     return ChatRequest(
         session_id=_build_session_id(body),
         user_message=user_message,
-        lecture_context=_build_lecture_context(context),
+        lecture_context=lecture_context,
+        lesson_id=lesson_id,
+        slide_id=slide_id,
+        slide_idx=slide_idx,
     )
 
 
@@ -92,29 +105,38 @@ def _build_session_id(body: dict[str, Any]) -> str:
     return ":".join(parts) if parts else "unknown"
 
 
-def _build_lecture_context(context: dict[str, Any]) -> LectureContext:
-    """Spring context 메타로 최소 유효 LectureContext를 합성한다.
+async def _build_lecture_context(
+    context: dict[str, Any],
+    lesson_id: str | None,
+    slide_idx: int | None,
+) -> LectureContext:
+    """실제 슬라이드를 DB에서 조회해 LectureContext를 구성한다.
 
-    Spring은 슬라이드 본문을 전달하지 않으므로 lesson_title/course_subject로
-    단일 안내 슬라이드를 구성한다. recent_qa(이전 문답)는 voice_scripts 자리에
-    실어 모델이 대화 맥락을 참고하도록 한다.
+    lesson_id가 있으면 slide_context_loader를 통해 public.slide를 조회한다.
+    슬라이드가 있으면 실제 데이터로, 없으면 과목/강의 제목만 담은 최소 폴백으로 구성한다.
+    가짜 슬라이드 텍스트는 절대 생성하지 않는다.
     """
     lesson_title = _as_str(context.get("lesson_title")).strip()
     course_subject = _as_str(context.get("course_subject")).strip()
-
     chapter_title = lesson_title or course_subject or "학습 대화"
-    # SlideContext.title/content 는 min_length=1 — 빈 값이 되지 않도록 폴백을 둔다.
-    slide_content = (
-        f"과목: {course_subject or '미지정'} / 강의: {lesson_title or '미지정'}.\n"
-        "별도 슬라이드 본문 없이 전달된 학습 대화 요청이에요."
-    )
-    slides = [SlideContext(slide_idx=0, title=chapter_title, content=slide_content)]
-
     voice_scripts = _format_recent_qa(context.get("recent_qa"))
 
+    if lesson_id:
+        slides = await load_slides(lesson_id, slide_idx)
+        if slides:
+            return LectureContext(
+                chapter_title=chapter_title,
+                slides=slides,
+                voice_scripts=voice_scripts,
+                quiz_items=None,
+            )
+        _LOG.warning("[chat-adapter] lesson_id=%s 슬라이드 없음 — 최소 폴백 사용", lesson_id)
+
+    # 슬라이드 없음 시 과목/강의 제목만 담는 최소 폴백 — 가짜 본문 생성 금지
+    fallback_content = f"과목: {course_subject or '미지정'} / 강의: {lesson_title or '미지정'}"
     return LectureContext(
         chapter_title=chapter_title,
-        slides=slides,
+        slides=[SlideContext(slide_idx=0, title=chapter_title, content=fallback_content)],
         voice_scripts=voice_scripts,
         quiz_items=None,
     )
@@ -125,6 +147,10 @@ def _format_recent_qa(recent_qa: Any) -> list[str] | None:
 
     voice_scripts(list[str]) 자리에 실어 모델이 직전 대화를 참고하게 한다.
     형식이 어긋나면 None을 반환해 선택 필드를 비운다.
+
+    거부 전염 방지(2차 방어선): Spring이 거부 답변을 포함한 QA 쌍을 보내더라도
+    _REFUSAL_MARKERS 어구가 포함된 항목은 여기서 추가로 걸러 codex/게이트가
+    거부문을 정상 컨텍스트로 오인하지 않도록 한다.
     """
     if not isinstance(recent_qa, list) or not recent_qa:
         return None
@@ -134,6 +160,9 @@ def _format_recent_qa(recent_qa: Any) -> list[str] | None:
             continue
         question = _as_str(qa.get("question")).strip()
         answer = _as_str(qa.get("answer")).strip()
+        # 거부 답변 쌍은 컨텍스트에서 제외 — 어구 일치 여부로 식별한다
+        if answer and any(marker in answer for marker in _REFUSAL_MARKERS):
+            continue
         if question or answer:
             lines.append(f"Q: {question}\nA: {answer}")
     return lines or None

@@ -53,6 +53,18 @@ packages = ["app", "ai_connectors", "common"]
 [tool.hatch.metadata]
 allow-direct-references = true
 
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+
+# marker-pdf와 magic-pdf는 공식 타입 스텁(.pyi)을 제공하지 않는 선택적 OCR 라이브러리다.
+# 두 패키지가 설치되지 않은 환경에서도 모듈 로드가 가능하도록 지연 임포트를 사용하며,
+# 스텁 부재로 인한 import-untyped 오류를 프로젝트 수준에서 일괄 허용한다.
+[[tool.mypy.overrides]]
+module = ["marker", "marker.*", "magic_pdf", "magic_pdf.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 # importlib 모드: 각 테스트 파일을 독립 모듈로 로드해 패키지 __init__.py 체인 실행을 방지
 addopts = "--import-mode=importlib"

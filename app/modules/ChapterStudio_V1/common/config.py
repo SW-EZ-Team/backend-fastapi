@@ -87,7 +87,7 @@ def claude_sonnet_api_key() -> str | None:
 
 
 def claude_sonnet_model() -> str:
-    return _optional_value("CLAUDE_SONNET_MODEL") or "claude-sonnet-4-5-20250929"
+    return _optional_value("CLAUDE_SONNET_MODEL") or "claude-sonnet-4-6"
 
 
 def claude_sonnet_timeout_sec() -> float:
@@ -138,7 +138,7 @@ def active_verifier_model() -> str | None:
 
 
 def active_tts_model() -> str:
-    return _optional_value("ACTIVE_TTS_MODEL") or "tts_v1"
+    return _optional_value("ACTIVE_TTS_MODEL") or "gemini_tts"
 
 
 def tts_endpoint() -> str | None:
@@ -233,18 +233,6 @@ def modal_teardown_enabled() -> bool:
     return _bool_value("CHAPTERSTUDIO_MODAL_TEARDOWN", False)
 
 
-def gemini_cli_model() -> str:
-    return _optional_value("GEMINI_CLI_MODEL") or "gemini-2.5-pro"
-
-
-def gemini_cli_timeout_sec() -> int:
-    return _int_value("GEMINI_CLI_TIMEOUT_SEC", "240", 30, 600)
-
-
-def gemini_cli_max_concurrency() -> int:
-    return _int_value("GEMINI_CLI_MAX_CONCURRENCY", "1", 1, 4)
-
-
 def gemini_text_max_concurrency() -> int:
     """Gemini genai API 텍스트 생성 동시 호출 상한.
 
@@ -265,22 +253,6 @@ def text_fallback_after_failures() -> int:
 
 def text_primary_attempt_timeout_sec() -> float:
     return _float_value("TEXT_PRIMARY_ATTEMPT_TIMEOUT_SEC", "180", 30, 1200)
-
-
-def codex_cli_model() -> str:
-    return _optional_value("CODEX_CLI_MODEL") or "gpt-5.4"
-
-
-def codex_cli_reasoning_effort() -> str:
-    """로컬 검증용 Codex CLI 추론 강도를 반환한다."""
-    value = _optional_value("CODEX_CLI_REASONING_EFFORT") or "low"
-    if value not in {"low", "medium", "high", "xhigh"}:
-        raise RuntimeError("CODEX_CLI_REASONING_EFFORT 값이 올바르지 않다.")
-    return value
-
-
-def codex_cli_timeout_sec() -> int:
-    return _int_value("CODEX_CLI_TIMEOUT_SEC", "180", 30, 600)
 
 
 def _bool_value(key: str, default: bool) -> bool:

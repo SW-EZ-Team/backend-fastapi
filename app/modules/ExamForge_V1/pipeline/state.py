@@ -100,6 +100,9 @@ class ExamForgeState(TypedDict, total=False):
     # 줄지 않는 무한 루프를 캡으로 차단한다. retry_router_node가 갱신한다.
     count_stuck_rounds: int
     prev_missing_count: int
+    # 개수 부족(missing_count > 0) 전용 재시도 카운터 — env EXAMFORGE_MISSING_RETRY_CAP(기본 1)
+    # 만큼 재시도한 뒤에는 유효 문항만으로 passed 출고한다. codex 속도(~5분/회) 고려.
+    missing_retry_count: int
     # repair_questions 노드가 표적 교정을 적용했는지 여부.
     # True면 재검증(verify) 경로로, False면 기존 blind 재생성 경로로 라우팅한다.
     repair_applied: bool

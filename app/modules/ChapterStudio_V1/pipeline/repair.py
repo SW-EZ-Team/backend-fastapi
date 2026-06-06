@@ -21,6 +21,7 @@ from html import unescape
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.modules.ChapterStudio_V1.ai_connectors.base import AIConnector
+from app.modules.ChapterStudio_V1.ai_connectors.errors import ConnectorError
 from app.modules.ChapterStudio_V1.ai_connectors.schemas import ChapterAIRequest
 from app.modules.ChapterStudio_V1.pipeline.payload import (
     GeneratedLessonPayload,
@@ -32,7 +33,11 @@ from app.modules.ChapterStudio_V1.pipeline.quality import QualityReport
 from common.llm_output import extract_json_block, strip_thinking
 
 # repair 호출당 토큰 상한 — voice 한 묶음 + supporting을 한 번에 받을 수 있는 여유값.
-_REPAIR_MAX_TOKENS = 16000
+# gemini-3.5-flash는 thinking 토큰(실측 0~21000 변동)이 max_output_tokens 예산을 먼저
+# 잠식한다. 16000에서는 thinking이 크면 voice 보강 JSON 본문이 절단돼(finish_reason=MAX_TOKENS)
+# repair 전체가 ConnectorError로 실패했다. thinking(~21000) + voice 묶음 본문에 여유를 더해
+# 40000으로 올린다(메인 생성노드 prompt.py=48000과 동일 기준, 모델 한도 65536 이내).
+_REPAIR_MAX_TOKENS = 40000
 
 
 class _VoiceRepairItem(BaseModel):
@@ -71,8 +76,10 @@ async def repair_payload(
     try:
         response = await connector.generate(request)
         result = _parse_repair(response.text)
-    except (ValueError, ValidationError, json.JSONDecodeError):
-        # repair 응답이 깨지면 보강을 포기하고 원본을 그대로 쓴다(graceful, 우회 아님).
+    except (ConnectorError, ValueError, ValidationError, json.JSONDecodeError):
+        # repair 응답이 깨지거나(파싱 실패) 커넥터가 실패하면(절단 MAX_TOKENS·타임아웃·rate limit 등
+        # ConnectorError) 보강을 포기하고 원본을 그대로 쓴다(graceful, silent 빈출력 아님).
+        # ConnectorError를 빠뜨리면 절단 가드가 올린 예외가 stage 전체를 죽인다(docstring 계약 위반).
         return payload
     merged = _merge(payload, result)
     if not _indices_intact(merged, slide_count):

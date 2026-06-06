@@ -235,6 +235,25 @@ async def generate_questions_node(state: ExamForgeState) -> dict:
     )
     all_drafts = sanitize_exam_questions(attach_source_code_if_needed(candidates, source_text))
 
+    # 파이프라인 불변식 검증: template_id 또는 draft_id가 비어 있는 문항을 걸러낸다.
+    # 보충/보수 생성 경로에서 유실된 식별자가 Spring 콜백까지 전파되는 것을 차단한다.
+    valid_drafts: list[dict] = []
+    for d in all_drafts:
+        if not d.get("template_id"):
+            logger.error(
+                "generate_questions_node: template_id 누락 문항 제거 — draft_id=%s",
+                d.get("draft_id", "(없음)"),
+            )
+            continue
+        if not d.get("draft_id"):
+            logger.error(
+                "generate_questions_node: draft_id 누락 문항 제거 — template_id=%s",
+                d.get("template_id", "(없음)"),
+            )
+            continue
+        valid_drafts.append(d)
+    all_drafts = valid_drafts
+
     # 생성 결과가 0건이면 에러로 종료
     if not all_drafts:
         logger.error("generate_questions_node: 생성된 문제 0건 — 에러 처리")

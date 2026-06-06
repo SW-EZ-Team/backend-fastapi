@@ -6,7 +6,46 @@ from enum import Enum
 
 from pydantic import BaseModel, Field, JsonValue, field_validator, model_validator
 
-from app.modules.ExamForge_V1.schemas.question import Question
+from app.modules.ExamForge_V1.schemas.question import (
+    MatchingPair,
+    Question,
+    QuestionOption,
+)
+
+
+class GradeQuestion(BaseModel):
+    """채점 경로 전용 문항 스키마.
+
+    Spring이 서술형 채점 요청 시 draft_id·topic·difficulty·bloom_level을 null로 전송하는데
+    이 4개 필드는 grade_rubric_question에서 실제로 사용하지 않는다.
+    공유 Question 스키마에서 required를 풀면 생성 경로 검증이 약화되므로 분리한다.
+    채점 엔진이 실제 참조하는 필드(stem·correct_answer·explanation 등)는 required 유지.
+    """
+
+    # --- 채점에 불필요하여 Optional 처리 (Spring null 허용) ---
+    draft_id: str | None = None
+    topic: str | None = None
+    difficulty: int | None = None
+    bloom_level: str | None = None
+
+    # --- 채점 엔진이 실제 사용하는 필드 (required 유지) ---
+    question_id: str
+    template_id: str
+    stem: str
+    correct_answer: str
+    explanation: str
+    source_reference: str = ""
+    points: float = 1.0
+
+    # --- 문항 유형별 선택 필드 ---
+    options: list[QuestionOption] | None = None
+    matching_pairs: list[MatchingPair] | None = None
+    ordering_items: list[str] | None = None
+    correct_ordering: list[str] | None = None
+    blank_positions: list[int] | None = None
+    blank_answers: list[str] | None = None
+    code_snippet: str | None = None
+    distractor_rationale: str | None = None
 
 
 class GradingMode(str, Enum):
@@ -40,12 +79,17 @@ class SubmittedAnswer(BaseModel):
 
 
 class GradeSubmissionRequest(BaseModel):
-    """Spring이 FastAPI 채점 엔진에 넘기는 제출물."""
+    """Spring이 FastAPI 채점 엔진에 넘기는 제출물.
+
+    questions 필드는 GradeQuestion 타입을 사용한다.
+    GradeQuestion은 채점에 불필요한 draft_id·topic·difficulty·bloom_level을 Optional로
+    선언하여 Spring이 null을 전송해도 422 없이 통과한다.
+    """
 
     attempt_id: str = Field(min_length=1, max_length=120)
     exam_id: str = Field(min_length=1, max_length=120)
     answer_key_seal: str = Field(min_length=46, max_length=128)
-    questions: list[Question] = Field(min_length=1, max_length=100)
+    questions: list[GradeQuestion] = Field(min_length=1, max_length=100)
     submitted_answers: list[SubmittedAnswer] = Field(min_length=0, max_length=100)
     pass_percentage: float = Field(default=60.0, ge=0.0, le=100.0)
 

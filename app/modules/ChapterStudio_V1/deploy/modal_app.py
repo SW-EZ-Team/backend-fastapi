@@ -7,7 +7,10 @@ import time
 from typing import Any
 
 import modal
-import requests  # type: ignore[import-untyped]
+# requests는 Modal 컨테이너 내부에서만 설치되는 패키지다(deploy/image에 uv_pip_install 선언).
+# 로컬 ChapterStudio_V1 환경에는 직접 의존성이 없으므로 pyproject.toml의
+# mypy.overrides(requests.*)에서 프로젝트 수준으로 import 허용을 선언한다.
+import requests
 
 APP_NAME = os.environ.get("CHAPTERSTUDIO_MODAL_APP_NAME", "chapterstudio-qwen27b")
 MODEL_ID = os.environ.get("CHAPTERSTUDIO_MODAL_MODEL_ID", "Qwen/Qwen3.6-27B-FP8")

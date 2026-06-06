@@ -34,7 +34,10 @@ warn_unused_ignores = true
 files = ["app", "common", "ai_connectors", "pipeline", "schemas", "db", "design_system", "postprocess", "validators", "deploy"]
 
 [[tool.mypy.overrides]]
-module = ["asyncpg.*", "loguru.*", "modal", "modal.*", "anthropic", "anthropic.*", "matplotlib", "matplotlib.*", "nh3", "respx", "langgraph", "langgraph.*"]
+# requests는 Modal 컨테이너 내부에서 설치되는 패키지로, 로컬 ChapterStudio_V1 환경에는
+# 직접 의존성으로 선언되지 않는다. Modal 배포 전용 파일(deploy/modal_app.py)에서만 사용하며,
+# 로컬 mypy 검사 시 import 누락 오류가 발생하지 않도록 프로젝트 수준에서 허용한다.
+module = ["asyncpg.*", "loguru.*", "modal", "modal.*", "anthropic", "anthropic.*", "matplotlib", "matplotlib.*", "nh3", "respx", "langgraph", "langgraph.*", "requests", "requests.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

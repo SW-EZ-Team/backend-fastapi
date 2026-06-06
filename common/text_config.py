@@ -24,7 +24,7 @@ def claude_sonnet_api_key() -> str | None:
 
 def claude_sonnet_model() -> str:
     """사용할 Claude Sonnet 모델 식별자를 반환한다."""
-    return os.getenv("CLAUDE_SONNET_MODEL", "claude-sonnet-4-5-20250929")
+    return os.getenv("CLAUDE_SONNET_MODEL", "claude-sonnet-4-6")
 
 
 def claude_sonnet_timeout_sec() -> float:
@@ -53,6 +53,21 @@ def gemini_text_model() -> str:
     return os.getenv("GEMINI_TEXT_MODEL", "gemini-3.5-flash").strip() or "gemini-3.5-flash"
 
 
+# Gemini 3 계열(gemini-3.5-flash 등)은 thinking_budget를 지원하지 않고 thinking_level만
+# 받는다(공식 문서). 채팅 답변에 reasoning 스크래치패드가 새지 않게 기본을 LOW로 둔다.
+_GEMINI_THINKING_LEVELS: frozenset[str] = frozenset({"MINIMAL", "LOW", "MEDIUM", "HIGH"})
+
+
+def gemini_thinking_level() -> str:
+    """Gemini 텍스트 생성의 thinking_level을 반환한다(기본 LOW).
+
+    reasoning 모델이 추론 텍스트를 답변 본문에 노출하는 것을 막기 위해 사고량을
+    최소화한다. 허용값: MINIMAL / LOW / MEDIUM / HIGH. 잘못된 값은 LOW로 폴백한다.
+    """
+    raw = os.getenv("GEMINI_THINKING_LEVEL", "LOW").strip().upper()
+    return raw if raw in _GEMINI_THINKING_LEVELS else "LOW"
+
+
 def claude_sonnet_max_concurrency() -> int:
     """Claude Sonnet 배치 호출 병렬 상한을 반환한다."""
     raw = os.getenv("CLAUDE_SONNET_MAX_CONCURRENCY", "4").strip()
@@ -65,26 +80,3 @@ def claude_sonnet_max_concurrency() -> int:
     return value
 
 
-def codex_cli_model() -> str:
-    """Codex CLI 모델 이름을 반환한다."""
-    return os.getenv("CODEX_CLI_MODEL", "gpt-5.4")
-
-
-def codex_cli_reasoning_effort() -> str:
-    """Codex CLI 추론 강도를 반환한다. low/medium/high/xhigh 중 하나."""
-    value = (os.getenv("CODEX_CLI_REASONING_EFFORT") or "low").strip()
-    if value not in {"low", "medium", "high", "xhigh"}:
-        raise RuntimeError("CODEX_CLI_REASONING_EFFORT 값이 올바르지 않다.")
-    return value
-
-
-def codex_cli_timeout_sec() -> int:
-    """Codex CLI 단일 실행 제한 시간(초)를 반환한다."""
-    raw = os.getenv("CODEX_CLI_TIMEOUT_SEC", "180").strip()
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise RuntimeError("CODEX_CLI_TIMEOUT_SEC는 정수여야 한다.") from exc
-    if value < 30 or value > 600:
-        raise RuntimeError("CODEX_CLI_TIMEOUT_SEC는 30~600초여야 한다.")
-    return value

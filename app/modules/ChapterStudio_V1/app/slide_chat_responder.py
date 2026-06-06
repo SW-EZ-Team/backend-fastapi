@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from app.modules.ChapterStudio_V1.app.codex_chat_pipeline import generate_codex_chat_answer
+from app.modules.ChapterStudio_V1.app.gemini_chat_pipeline import generate_gemini_chat_answer
 from app.modules.ChapterStudio_V1.app.slide_chat_types import ChatIntent, SlideChatContext, SlideChatRequest
 
 
 async def stream_chat_response(req: SlideChatRequest, ctx: SlideChatContext) -> AsyncIterator[str]:
-    """엔진 선택에 따라 mock 또는 Codex OAuth 답변을 스트림처럼 흘린다."""
-    text = await generate_codex_chat_answer(req, ctx) if req.engine == "codex_cli" else _answer(req, ctx)
+    """엔진 선택에 따라 mock 또는 활성 Gemini 답변을 스트림처럼 흘린다."""
+    text = await generate_gemini_chat_answer(req, ctx) if req.engine == "gemini" else _answer(req, ctx)
     for chunk in _chunk(text):
         yield chunk
 

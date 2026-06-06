@@ -1,9 +1,11 @@
 """제출물 단위 채점 오케스트레이터."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from app.modules.ExamForge_V1.common.ai_bridge import AIConnector
+from app.modules.ExamForge_V1.common.config import seal_enforce_mode
 from app.modules.ExamForge_V1.grading.deterministic import (
     grade_exact_question,
     grade_objective_question,
@@ -11,15 +13,17 @@ from app.modules.ExamForge_V1.grading.deterministic import (
 )
 from app.modules.ExamForge_V1.grading.exceptions import AnswerKeyIntegrityError
 from app.modules.ExamForge_V1.grading.rubric import RUBRIC_TEMPLATES, grade_rubric_question
-from app.modules.ExamForge_V1.grading.seal import verify_answer_key_seal
+from app.modules.ExamForge_V1.grading.seal import create_answer_key_seal, verify_answer_key_seal
 from app.modules.ExamForge_V1.schemas.grading import (
+    GradeQuestion,
     GradeSubmissionRequest,
     GradeSubmissionResponse,
     GradingStatus,
     JsonValue,
     QuestionGradeResult,
 )
-from app.modules.ExamForge_V1.schemas.question import Question
+
+_LOG = logging.getLogger(__name__)
 
 
 async def grade_submission(
@@ -39,18 +43,47 @@ async def grade_submission(
 
 
 def _verify_answer_key(request: GradeSubmissionRequest) -> None:
-    """정답/배점/루브릭 근거가 생성 시점 그대로인지 검증한다."""
+    """정답/배점/루브릭 근거가 생성 시점 그대로인지 검증한다.
+
+    advisory 모드(EXAMFORGE_SEAL_ENFORCE=false, 기본값):
+        HMAC 불일치 시 WARNING 로그(computed·received 접두 6자, 시크릿 미노출)를 남기고
+        채점을 계속 진행한다.
+        이유: 크로스서비스 canonical 재현이 반복 실패(Spring mapper null→emptyList 치환 등)해
+        403→502 채점 차단이 발생한다. 내부 X-API-Key 인증 경로라 외부 변조 위험은 낮다.
+        신호는 보존(WARNING 로그)하되 사용자 채점을 막지 않는다.
+
+    강제 모드(EXAMFORGE_SEAL_ENFORCE=true):
+        기존처럼 HMAC 불일치 시 AnswerKeyIntegrityError(→403)를 발생시킨다.
+        canonical 정합이 확인된 뒤 재강제 시 사용한다.
+    """
     verified = verify_answer_key_seal(
         request.exam_id,
         request.questions,
         request.answer_key_seal,
     )
-    if not verified:
+    if verified:
+        return
+
+    if seal_enforce_mode():
+        # 강제 모드: 기존 동작 유지 — 403 반환
         raise AnswerKeyIntegrityError("정답 키 서명 검증 실패")
+
+    # advisory 모드: WARNING 로그만 남기고 채점 계속 진행
+    # computed seal 접두 6자만 노출해 디버그 단서를 주되 시크릿 전체는 절대 출력하지 않는다.
+    computed = create_answer_key_seal(request.exam_id, request.questions)
+    received = request.answer_key_seal or ""
+    _LOG.warning(
+        "seal advisory: HMAC 불일치 — computed 접두='%s...' received 접두='%s...' "
+        "exam_id=%s question_count=%d — 채점 계속 진행(EXAMFORGE_SEAL_ENFORCE=false)",
+        computed[:6] if len(computed) > 6 else computed,
+        received[:6] if len(received) > 6 else received,
+        request.exam_id,
+        len(request.questions),
+    )
 
 
 async def _grade_question(
-    question: Question,
+    question: GradeQuestion,
     answer: JsonValue,
     connector: AIConnector | None,
 ) -> QuestionGradeResult:

@@ -127,13 +127,23 @@ def _to_response(
     raw_text = getattr(response, "text", None)
     if not isinstance(raw_text, str) or not raw_text.strip():
         raise ConnectorError("gemini_flash: 응답 text가 비어 있다.")
+    finish_reason = _finish_reason(response)
+    # 출력 절단(MAX_TOKENS)이면 깨진 JSON을 다운스트림에 흘리지 않고 명확히 실패시킨다.
+    # gemini-3.5-flash는 thinking 토큰(실측 0~20000+ 변동)이 max_output_tokens를 잠식해
+    # 긴 레슨 JSON을 문장 중간에서 절단한다(Unterminated string/Expecting ',' delimiter).
+    # ConnectorError를 올리면 _parse_with_backfill/_component의 재생성 경로가 작동한다(silent-fail 금지).
+    if "MAX_TOKENS" in finish_reason:
+        raise ConnectorError(
+            f"gemini_flash: 응답이 max_output_tokens({req.max_tokens})에서 절단됐다"
+            f"(finish_reason={finish_reason}). JSON 불완결로 판단해 재생성을 요청한다."
+        )
     text = _strip_thinking(raw_text)
     return ChapterAIResponse(
         text=text,
         model=model,
         input_tokens=_input_tokens(response, req),
         output_tokens=_output_tokens(response, text),
-        finish_reason=_finish_reason(response),
+        finish_reason=finish_reason,
     )
 
 

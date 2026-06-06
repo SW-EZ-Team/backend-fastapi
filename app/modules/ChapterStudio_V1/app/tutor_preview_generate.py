@@ -2,7 +2,7 @@
 
 Spring TutorService.previewTutor 가 호출하는 POST /api/tutors/{tutorId}/preview 의
 실제 생성 로직이다. 튜터 설정(말투/속도/깊이/질문방식/이모지/존댓말)을 페르소나
-프롬프트로 변환해 ACTIVE_TEXT_MODEL 커넥터(로컬 기본 mlx_qwen3_local)로 짧은
+프롬프트로 변환해 ACTIVE_TEXT_MODEL 커넥터(활성 기본 gemini_flash)로 짧은
 한국어 미리보기 멘트를 실제 생성한다.
 
 DB 저장은 하지 않는다(프리뷰 전용). 커리큘럼 generate 가 planner 커넥터를 쓰는 것과
@@ -112,9 +112,12 @@ async def _attempt_preview(prompt: str) -> str:
     """
     connector = get_text_connector()
     req = ChapterAIRequest(
+        # gemini_flash thinking 토큰(~21000)이 예산을 먼저 잠식한다. 512에서는 thinking만으로 즉시
+        # 절단돼 미리보기 멘트가 빈 문자열로 떨어졌다. thinking 헤드룸 확보해 24000으로 올린다
+        # (출력은 짧은 멘트라 실제 과금 토큰은 작다).
         system=_PREVIEW_SYSTEM,
         user=prompt,
-        max_tokens=512,
+        max_tokens=24000,
         temperature=0.7,
     )
     resp = await connector.generate(req)

@@ -39,6 +39,8 @@ from app.modules.ChapterStudio_V1.app.routers.tutor_preview import router as tut
 from app.modules.Chat_V1.app.spring_adapter import router as chat_spring_adapter_router
 from app.modules.ExamForge_V1 import spring_adapter_router as mock_exam_adapter_router
 from app.modules.ExamForge_V1 import mock_exam_analysis_router
+from app.modules.ExamForge_V1 import mock_async_router as mock_exam_async_router
+from app.modules.AssignmentGrader_V1 import router as assignment_grader_router
 
 _LOG = logging.getLogger(__name__)
 
@@ -51,7 +53,9 @@ if not os.getenv("FASTAPI_API_KEY"):
 
 # 인증 면제 경로 — /health 만 항상 면제, 문서 경로는 개발 편의상 추가
 _HEALTH_PATHS = {"/health", "/docs", "/openapi.json", "/redoc", "/media"}
-_PUBLIC_PATH_PREFIXES = ("/media/",)
+# 내부 서비스 경로 — Spring → FastAPI 내부 호출은 X-API-Key 대신 X-Internal-Token으로 인증
+# ApiKeyMiddleware 면제 후 라우터 자체에서 APP_INTERNAL_TOKEN 검증
+_PUBLIC_PATH_PREFIXES = ("/media/", "/api/assignment-grader/")
 
 # CORS 허용 출처 결정 로직
 # - CORS_ORIGINS 환경변수 설정 시: 쉼표 구분 값 사용
@@ -141,6 +145,9 @@ app.include_router(tutor_preview_router)
 app.include_router(chat_spring_adapter_router)
 app.include_router(mock_exam_adapter_router)
 app.include_router(mock_exam_analysis_router)
+# 비동기 모의고사 생성 라우터 — X-API-Key 미들웨어가 인증을 담당한다
+app.include_router(mock_exam_async_router)
+app.include_router(assignment_grader_router)
 
 
 @app.get("/health")

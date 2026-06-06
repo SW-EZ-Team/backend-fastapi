@@ -9,7 +9,6 @@ import pytest
 from pydantic import ValidationError
 
 from app.modules.ExamForge_V1.common.ai_bridge import LLMBudgetCounter, _current_budget, set_current_budget
-from app.modules.ExamForge_V1.common.ai_bridge import _GeminiCliConnector
 from app.modules.ExamForge_V1.common.config import generation_concurrency, verification_concurrency
 from app.modules.ExamForge_V1.pipeline.nodes.retry_router_node import route_after_validation
 from app.modules.ExamForge_V1.pipeline.state import ExamForgeState
@@ -410,29 +409,6 @@ class TestP1_7_HtmlXss:
         html = build_exam_html([], {"exam_title": "<script>xss</script>"})
         assert "<script>xss</script>" not in html
         assert "&lt;script&gt;" in html
-
-
-class TestGeminiCliJsonOutput:
-    """Gemini CLI JSON 래퍼 출력 정규화 테스트."""
-
-    def test_clean_output_extracts_response_from_json_wrapper(self) -> None:
-        """--output-format json 응답에서 response 본문만 추출한다."""
-        raw = (
-            "Warning: Basic terminal detected\n"
-            "Ripgrep is not available. Falling back to GrepTool.\n"
-            '{"session_id":"s","response":"```json\\n[{\\"ok\\":true}]\\n```",'
-            '"stats":{"tools":{"totalCalls":0}}}'
-        )
-
-        cleaned = _GeminiCliConnector._clean_output(raw)
-
-        assert cleaned == '```json\n[{"ok":true}]\n```'
-
-    def test_clean_output_falls_back_to_cleaned_text(self) -> None:
-        """구버전 CLI 텍스트 출력도 기존처럼 본문을 보존한다."""
-        raw = "Warning: Basic terminal detected\n[{\"ok\": true}]"
-
-        assert _GeminiCliConnector._clean_output(raw) == '[{"ok": true}]'
 
 
 class TestDistractorRewriteFlag:

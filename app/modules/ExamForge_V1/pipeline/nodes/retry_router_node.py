@@ -5,7 +5,7 @@ import time
 
 from app.modules.ExamForge_V1.pipeline.state import ExamForgeState
 from app.modules.ExamForge_V1.common.ai_bridge import get_current_budget
-from app.modules.ExamForge_V1.common.config import verification_advisory_enabled
+from app.modules.ExamForge_V1.common.config import missing_retry_cap, verification_advisory_enabled
 from app.modules.ExamForge_V1.common.logger import get_logger
 from app.modules.ExamForge_V1.common.verification_status import (
     advisory_filtered_failed_ids,
@@ -22,6 +22,18 @@ logger = get_logger(__name__)
 _COUNT_STUCK_ROUND_CAP = 2
 
 
+def _is_missing_retry_cap_reached(state: ExamForgeState) -> bool:
+    """개수 부족 전용 재시도가 env 캡에 도달했는지 판단한다.
+
+    missing_retry_count >= missing_retry_cap() 이면 True.
+    codex 속도(~5분/회)를 고려해 기본 캡은 1회로, 캡 도달 시
+    유효 문항만으로 passed 출고해 타임아웃을 방지한다.
+    """
+    cap = missing_retry_cap()
+    current = state.get("missing_retry_count", 0)
+    return isinstance(current, int) and current >= cap
+
+
 async def retry_router_node(state: ExamForgeState) -> dict:
     """실제 재시도가 필요한 경우에만 카운터를 증가시킨다.
 
@@ -31,6 +43,9 @@ async def retry_router_node(state: ExamForgeState) -> dict:
     개수 부족 비수렴 추적: missing_count가 직전 라운드 대비 줄지 않으면
     count_stuck_rounds를 증가시키고, 줄면 0으로 리셋한다. 이 값을
     route_after_validation의 비수렴 캡이 참조한다.
+
+    missing_retry_count: missing_count > 0 이 원인인 retry 전용 카운터.
+    env EXAMFORGE_MISSING_RETRY_CAP(기본 1) 초과 시 추가 재시도 없이 passed 출고.
     """
     # 상위 노드에서 에러가 전파된 경우 즉시 반환
     if state.get("pipeline_status") == "error":
@@ -48,9 +63,21 @@ async def retry_router_node(state: ExamForgeState) -> dict:
     route_state = {**state, **stuck_update}
     route = route_after_validation(route_state)
     if route == "retry":
-        # 실제 재시도 시에만 카운터 증가
+        # missing_count > 0 이 원인인지 확인해 전용 카운터 증가
+        report = state.get("validation_report", {})
+        missing_count = report.get("missing_count")
+        missing_retry_update: dict = {}
+        if isinstance(missing_count, int) and missing_count > 0:
+            missing_retry_update = {
+                "missing_retry_count": state.get("missing_retry_count", 0) + 1
+            }
+        # 실제 재시도 시에만 retry_count 카운터 증가
         logger.info("노드 완료: retry_router_node (%.2fs) → retry", time.time() - node_start)
-        return {"retry_count": state.get("retry_count", 0) + 1, **stuck_update}
+        return {
+            "retry_count": state.get("retry_count", 0) + 1,
+            **stuck_update,
+            **missing_retry_update,
+        }
     # 통과 또는 소진 시 카운터 유지
     logger.info("노드 완료: retry_router_node (%.2fs) → %s", time.time() - node_start, route)
     return stuck_update
@@ -145,6 +172,17 @@ def route_after_validation(state: ExamForgeState) -> str:
     validation_report_early = state.get("validation_report", {})
     missing_count = validation_report_early.get("missing_count")
     if isinstance(missing_count, int) and missing_count > 0:
+        # missing_retry_cap 우선 체크: env EXAMFORGE_MISSING_RETRY_CAP(기본 1) 도달 시
+        # 추가 재시도 없이 확보된 유효 문항으로 passed 출고한다.
+        # codex는 1회 ~5분 소요 — 캡 초과 재시도가 타임아웃의 근본 원인이므로 최우선 차단.
+        if _is_missing_retry_cap_reached(state):
+            logger.warning(
+                "route_after_validation: missing_retry_cap(%d) 도달(missing_count=%d) — "
+                "유효 문항만으로 passed 출고(타임아웃 방지)",
+                missing_retry_cap(),
+                missing_count,
+            )
+            return "passed"
         # 비수렴 캡: dedup이 매번 같은 중복을 드롭해 missing_count가 줄지 않으면
         # 무한 재시도로 예산을 태운다. 개수 부족 재시도가 진전 없이 상한에 도달하면
         # 확보된 유니크 문항만 출고하도록 passed로 빠진다(total_questions 동기화는

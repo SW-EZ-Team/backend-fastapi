@@ -151,9 +151,11 @@ async def _plan_with_blueprint(
     connector = get_planner_connector()
     prompt = _build_slot_loop_prompt(topic, subject_name, blueprint)
     req = ChapterAIRequest(
+        # gemini_flash thinking 토큰(~21000)이 max_output_tokens 예산을 먼저 잠식하므로
+        # 8000은 전체 슬롯 커리큘럼 JSON이 절단되기 쉽다. thinking 헤드룸 포함 32000으로 올린다.
         system=_PLANNER_SYSTEM,
         user=prompt,
-        max_tokens=8000,
+        max_tokens=32000,
         temperature=0.2,
         extra=_codex_schema_extra(),
     )
@@ -218,8 +220,8 @@ def _codex_schema_extra() -> dict[str, str]:
     [중요] 기본 planner는 opus46(ACTIVE_PLANNER_MODEL 기본값)이며, 이 경로에서는
     output-schema 파일이 no-op이다 — Anthropic 커넥터는 extra의 output_schema_path를
     읽지 않기 때문이다. 따라서 opus46 경로의 유일한 안전망은 _parse_and_validate의
-    Pydantic strict 검증 + 슬롯 1:1 정합 게이트다. codex_cli 커넥터를 쓸 때만
-    이 스키마가 추가 방어층으로 작동한다.
+    Pydantic strict 검증 + 슬롯 1:1 정합 게이트다. output_schema_path 를 읽는
+    커넥터(예: Gemini)를 쓸 때만 이 스키마가 추가 방어층으로 작동한다.
     """
     if _GEN_SCHEMA_PATH.exists():
         return {"output_schema_path": str(_GEN_SCHEMA_PATH)}
@@ -230,7 +232,7 @@ def _extract_slots_list(text: str) -> list | None:
     """AI 응답 텍스트에서 슬롯 배열을 추출한다.
 
     우선순위:
-    1. codex CLI 경로: output-schema 래핑 형태 {"slots":[...]} — slots 키를 명시적으로 읽는다.
+    1. output-schema 래핑 경로: {"slots":[...]} — slots 키를 명시적으로 읽는다(Gemini 등).
     2. opus/기타 경로: bare array [...] — 최상위 배열을 직접 파싱한다.
     3. 두 경우 모두 실패 시: None 반환 (호출자가 빈 리스트로 처리).
 
@@ -241,7 +243,7 @@ def _extract_slots_list(text: str) -> list | None:
       그러나 이는 스키마 키 이름·구조 변경 시 조용히 깨질 수 있으므로
       slots 키를 먼저 명시적으로 시도하고 그 외에는 substring fallback으로 처리한다.
     """
-    # 1단계: 전체를 JSON 객체로 파싱 후 'slots' 키 추출 (codex 경로)
+    # 1단계: 전체를 JSON 객체로 파싱 후 'slots' 키 추출 (output-schema 래핑 경로)
     try:
         obj = json.loads(text)
         if isinstance(obj, dict) and "slots" in obj and isinstance(obj["slots"], list):
@@ -271,7 +273,7 @@ def _parse_and_validate(
 ) -> list[_SlotResponse]:
     """AI 출력을 Pydantic strict로 검증하고 블루프린트 슬롯과 1:1 정합을 확인한다.
 
-    codex CLI 경로({"slots":[...]})와 opus 경로(bare array) 모두 명시적으로 처리한다.
+    output-schema 래핑 경로({"slots":[...]})와 opus 경로(bare array) 모두 명시적으로 처리한다.
     슬롯 정합 실패(order/stage 불일치)는 해당 슬롯을 결과에서 제외한다.
     """
     text = _THINK_RE.sub("", raw).strip()
@@ -349,9 +351,11 @@ async def _repair_missing_slots(
 
     repair_prompt = _build_slot_loop_prompt(topic, subject, missing_slots)
     req = ChapterAIRequest(
+        # gemini_flash thinking 토큰(~21000)이 예산을 먼저 잠식하므로 4000은 부족 슬롯 보충 JSON이
+        # 절단되기 쉽다. 출력은 부분 슬롯이라 작지만 thinking 헤드룸을 확보해 24000으로 올린다.
         system=_PLANNER_SYSTEM,
         user=repair_prompt,
-        max_tokens=4000,
+        max_tokens=24000,
         temperature=0.15,
         extra=_codex_schema_extra(),
     )
@@ -441,9 +445,14 @@ async def _load_course(course_id: str) -> dict | None:
 
 
 def _clamp_int(value: object, default: int, low: int, high: int) -> int:
-    """정수로 변환하고 [low, high] 범위로 제한한다."""
+    """정수로 변환하고 [low, high] 범위로 제한한다.
+
+    `value`는 int·float·str 등 int() 변환이 가능한 값을 받는다.
+    변환 불가 시 TypeError/ValueError를 잡아 default를 반환한다.
+    `str(value)`를 거치면 mypy의 arg-type 경고 없이 안전하게 변환된다.
+    """
     try:
-        n = int(value)  # type: ignore[arg-type]
+        n = int(str(value))
     except (TypeError, ValueError):
         return default
     return max(low, min(high, n))

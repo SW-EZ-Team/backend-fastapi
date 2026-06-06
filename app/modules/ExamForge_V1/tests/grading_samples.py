@@ -1,7 +1,14 @@
-"""채점 테스트용 실제 스키마 샘플."""
+"""채점 테스트용 실제 스키마 샘플.
+
+기존 choice_question 등은 GradeQuestion을 반환하도록 변경됐다.
+Question(생성 경로) 스키마가 아닌 GradeQuestion(채점 경로) 스키마를 사용해야
+GradeSubmissionRequest.questions에 바로 넣을 수 있다.
+생성 경로 회귀 테스트는 별도 test_grade_question_schema.py에서 수행한다.
+"""
 from __future__ import annotations
 
 from app.modules.ExamForge_V1.common.ai_bridge import ChapterAIRequest, ChapterAIResponse
+from app.modules.ExamForge_V1.schemas.grading import GradeQuestion
 from app.modules.ExamForge_V1.schemas.question import MatchingPair, Question, QuestionOption
 
 
@@ -76,9 +83,9 @@ class BooleanScoreConnector(RecordingConnector):
         )
 
 
-def choice_question() -> Question:
-    """객관식 테스트 문항."""
-    return Question(
+def choice_question() -> GradeQuestion:
+    """객관식 테스트 문항 — GradeQuestion 반환 (채점 경로 타입)."""
+    return GradeQuestion(
         question_id="q-choice",
         draft_id="d-choice",
         template_id="ko_multiple_choice_5",
@@ -98,9 +105,9 @@ def choice_question() -> Question:
     )
 
 
-def blank_question() -> Question:
-    """빈칸 테스트 문항."""
-    return Question(
+def blank_question() -> GradeQuestion:
+    """빈칸 테스트 문항 — GradeQuestion 반환 (채점 경로 타입)."""
+    return GradeQuestion(
         question_id="q-blank",
         draft_id="d-blank",
         template_id="ko_fill_blank",
@@ -116,9 +123,9 @@ def blank_question() -> Question:
     )
 
 
-def ordering_question() -> Question:
-    """순서형 테스트 문항."""
-    return Question(
+def ordering_question() -> GradeQuestion:
+    """순서형 테스트 문항 — GradeQuestion 반환 (채점 경로 타입)."""
+    return GradeQuestion(
         question_id="q-order",
         draft_id="d-order",
         template_id="ko_ordering",
@@ -135,9 +142,9 @@ def ordering_question() -> Question:
     )
 
 
-def matching_question() -> Question:
-    """연결형 테스트 문항."""
-    return Question(
+def matching_question() -> GradeQuestion:
+    """연결형 테스트 문항 — GradeQuestion 반환 (채점 경로 타입)."""
+    return GradeQuestion(
         question_id="q-match",
         draft_id="d-match",
         template_id="ko_matching",
@@ -156,9 +163,9 @@ def matching_question() -> Question:
     )
 
 
-def essay_question() -> Question:
-    """서술형 테스트 문항."""
-    return Question(
+def essay_question() -> GradeQuestion:
+    """서술형 테스트 문항 — GradeQuestion 반환 (채점 경로 타입)."""
+    return GradeQuestion(
         question_id="q-essay",
         draft_id="d-essay",
         template_id="ko_descriptive",
@@ -173,9 +180,9 @@ def essay_question() -> Question:
     )
 
 
-def practical_question() -> Question:
-    """실기형 테스트 문항."""
-    return Question(
+def practical_question() -> GradeQuestion:
+    """실기형 테스트 문항 — GradeQuestion 반환 (채점 경로 타입)."""
+    return GradeQuestion(
         question_id="q-practical",
         draft_id="d-practical",
         template_id="engineer_practical",
@@ -187,4 +194,42 @@ def practical_question() -> Question:
         explanation="표준 조인 키워드 표기를 허용한다.",
         source_reference="SQL JOIN",
         points=4.0,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GradeQuestion 기반 샘플 — Spring null 전송 시나리오 재현용
+# draft_id·topic·difficulty·bloom_level 을 의도적으로 누락하거나 None으로 설정한다.
+# ---------------------------------------------------------------------------
+
+
+def grade_essay_question_null_meta() -> GradeQuestion:
+    """메타 필드 4개가 null인 서술형 채점 문항 — Spring 실제 전송 패턴."""
+    return GradeQuestion(
+        question_id="q-essay-null",
+        # draft_id, topic, difficulty, bloom_level 모두 전달하지 않음 (None)
+        template_id="ko_descriptive",
+        stem="애자일 방법론이 변화 대응에 유리한 이유를 설명하시오.",
+        correct_answer="짧은 반복과 피드백으로 변화에 유연하게 대응한다.",
+        explanation="핵심 개념 3점, 근거 제시 2점으로 채점한다.",
+        source_reference="짧은 주기의 반복적 개발",
+        points=5.0,
+    )
+
+
+def grade_choice_question_null_meta() -> GradeQuestion:
+    """메타 필드 4개가 null인 객관식 채점 문항 — Spring 실제 전송 패턴."""
+    return GradeQuestion(
+        question_id="q-choice-null",
+        template_id="ko_multiple_choice_5",
+        stem="애자일의 특징은?",
+        options=[
+            QuestionOption(label="1", text="순차 진행"),
+            QuestionOption(label="2", text="변화 대응", is_correct=True),
+            QuestionOption(label="3", text="문서 중심"),
+        ],
+        correct_answer="2",
+        explanation="애자일은 변화에 유연하게 대응한다.",
+        source_reference="애자일 방법론은 변화에 유연하게 대응",
+        points=2.0,
     )

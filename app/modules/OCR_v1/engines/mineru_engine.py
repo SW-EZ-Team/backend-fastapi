@@ -91,10 +91,13 @@ class MinerUEngine:
         """
         try:
             if force_ocr:
-                from magic_pdf.pipe.OCRPipe import OCRPipe  # type: ignore[import]
+                # magic-pdf 패키지는 공식 타입 스텁을 제공하지 않는 선택적 라이브러리다.
+                # stubs 부재는 pyproject.toml의 mypy.overrides(magic_pdf.*)에서 프로젝트 수준으로 허용한다.
+                from magic_pdf.pipe.OCRPipe import OCRPipe
                 pipe_cls = OCRPipe
             else:
-                from magic_pdf.pipe.UNIPipe import UNIPipe  # type: ignore[import]
+                # 마찬가지로 magic-pdf 내부 모듈 — 동일한 mypy.overrides 적용 범위.
+                from magic_pdf.pipe.UNIPipe import UNIPipe
                 pipe_cls = UNIPipe
 
             reader = FileBasedDataReader("")

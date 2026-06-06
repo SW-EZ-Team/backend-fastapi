@@ -15,7 +15,11 @@ from app.modules.ChapterStudio_V1.postprocess.voice_cohesion import (
     needs_cohesion_fix,
 )
 
-_MAX_TOKENS = 220
+# 출력은 첫 문장 한 줄(짧음)이지만 gemini-3.5-flash thinking 토큰(~21000)이 max_output_tokens
+# 예산을 먼저 잠식한다. 220에서는 thinking만으로 즉시 절단(finish_reason=MAX_TOKENS)돼 ConnectorError로
+# 재작성이 실패했다(graceful 폴백으로 원본 유지되긴 하나 교정이 항상 무력화됨). thinking 헤드룸을
+# 확보해 24000으로 올린다(짧은 출력이라 실제 과금 토큰은 작다, 한도 65536 이내).
+_MAX_TOKENS = 24000
 
 
 async def apply_voice_cohesion_payload(

@@ -396,10 +396,14 @@ class TestTextCategoryVisualTypeGuarantee:
         }
         plan_slot = {"slide_idx": 0, "visual_type": "metric-card", "must_have": []}
         result = _enforce_plan_visual_type(data, plan_slot)
-        assert result["visual"]["type"] == "metric-card"  # type: ignore[index]
+        visual = result["visual"]
+        assert isinstance(visual, dict)
+        assert visual["type"] == "metric-card"
 
     def test_enforce_plan_visual_type_noop_when_no_plan(self) -> None:
         """plan_slot=None이면 data를 변경하지 않는다."""
         data = {"slide_idx": 0, "visual": {"type": "concept_map", "data": {}}}
         result = _enforce_plan_visual_type(data, None)
-        assert result["visual"]["type"] == "concept_map"  # type: ignore[index]
+        visual = result["visual"]
+        assert isinstance(visual, dict)
+        assert visual["type"] == "concept_map"

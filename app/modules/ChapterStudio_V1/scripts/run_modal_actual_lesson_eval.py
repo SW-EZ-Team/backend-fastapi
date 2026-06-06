@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-# ruff: noqa: E402
-
 import argparse
 import asyncio
 import json
@@ -15,15 +13,19 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+# 이 스크립트는 독립 실행용 평가 도구이므로 ChapterStudio_V1 패키지 루트를
+# sys.path에 추가한 뒤 내부 모듈을 임포트한다.
+# 이후 import 문은 위 경로 조작 이후에 위치해야 하므로 E402(모듈 최상단 아님)가 발생한다.
+# 파일 전체가 아닌 해당 임포트 라인에만 # noqa: E402를 한정 적용한다.
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.modules.ChapterStudio_V1.ai_connectors.qwen27b_modal_connector import Qwen27BModalConnector
-from app.modules.ChapterStudio_V1.ai_connectors.schemas import ChapterAIRequest, ChapterAIResponse
-from app.modules.ChapterStudio_V1.app.frontend_payload import iframe_srcdoc
-from app.modules.ChapterStudio_V1.postprocess.pipeline import PostprocessResult, SlideInput, postprocess_all
-from app.modules.ChapterStudio_V1.scripts.run_modal_quality_eval import (
+from app.modules.ChapterStudio_V1.ai_connectors.qwen27b_modal_connector import Qwen27BModalConnector  # noqa: E402
+from app.modules.ChapterStudio_V1.ai_connectors.schemas import ChapterAIRequest, ChapterAIResponse  # noqa: E402
+from app.modules.ChapterStudio_V1.app.frontend_payload import iframe_srcdoc  # noqa: E402
+from app.modules.ChapterStudio_V1.postprocess.pipeline import PostprocessResult, SlideInput, postprocess_all  # noqa: E402
+from app.modules.ChapterStudio_V1.scripts.run_modal_quality_eval import (  # noqa: E402
     DEFAULT_OCR_JSONL,
     _count_refs,
     _extract_ref_pages,
@@ -219,6 +221,8 @@ async def main() -> None:
         _write_json(out_dir / "payload.json", payload_dump)
         _write_json(out_dir / "lesson_result.json", result)
     except Exception as exc:  # noqa: BLE001
+        # 평가 스크립트 최상위 오류 경계: 파싱·후처리 단계의 어떤 예외든 HTML 보고서에
+        # 기록하고 정상 종료해야 한다. 예외를 전파하면 scorecard·report 파일이 생성되지 않는다.
         parse_error = f"{type(exc).__name__}: {exc}"
 
     _write_json(out_dir / "response_meta.json", meta)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -18,6 +19,8 @@ from .config import (
 from .fallback import render_jinja_caption
 from .model_loader import get_llama
 from .validator import sanitize
+
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -84,8 +87,9 @@ def _run_gemini(user_prompt: str) -> str | None:
         return None
     try:
         return _run_gemini_sync(user_prompt)
-    except Exception:
-        # 캡션은 알림 보조 문구라 외부 API 장애보다 폴백 보장이 우선이다.
+    except Exception as exc:
+        # 캡션은 알림 보조 문구라 외부 API 장애보다 폴백 보장이 우선이다
+        _LOG.warning("[caption] Gemini 캡션 생성 실패, Kanana 폴백으로 이동 — error=%s", exc)
         return None
 
 
@@ -133,8 +137,9 @@ def _run_kanana_safely(user_prompt: str) -> str | None:
     """Kanana 모델이 없거나 실패해도 Jinja 폴백까지 진행한다."""
     try:
         return _run_kanana(user_prompt)
-    except Exception:
-        # 로컬 GGUF 파일 부재는 정상 폴백 조건이다.
+    except Exception as exc:
+        # 로컬 GGUF 파일 부재는 정상 폴백 조건이므로 파이프라인은 계속 진행한다
+        _LOG.warning("[caption] Kanana 캡션 생성 실패, Jinja2 폴백으로 이동 — error=%s", exc)
         return None
 
 

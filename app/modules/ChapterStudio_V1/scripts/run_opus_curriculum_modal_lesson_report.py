@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-# ruff: noqa: E402
-
 import argparse
 import asyncio
 import html
@@ -13,14 +11,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+# 이 스크립트는 독립 실행용 평가 도구이므로 ChapterStudio_V1 패키지 루트를
+# sys.path에 추가한 뒤 내부 모듈을 임포트한다.
+# 이후 import 문은 위 경로 조작 이후에 위치해야 하므로 E402(모듈 최상단 아님)가 발생한다.
+# 파일 전체가 아닌 해당 임포트 라인에만 # noqa: E402를 한정 적용한다.
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ai_connectors.errors import ConnectorError
-from app.curriculum_preview import build_curriculum_preview
-from app.curriculum_preview_types import CurriculumLesson, CurriculumPreview, CurriculumPreviewRequest
-from app.generation_context import GenerationContext
+from ai_connectors.errors import ConnectorError  # noqa: E402
+from app.curriculum_preview import build_curriculum_preview  # noqa: E402
+from app.curriculum_preview_types import CurriculumLesson, CurriculumPreview, CurriculumPreviewRequest  # noqa: E402
+from app.generation_context import GenerationContext  # noqa: E402
 
 REPORT_ROOT = ROOT / "artifacts" / "curriculum_lesson_actual"
 
@@ -69,6 +71,8 @@ async def main() -> None:
                 seed=args.seed,
             )
     except Exception as exc:  # noqa: BLE001
+        # 평가 스크립트 최상위 오류 경계: 어떤 예외가 발생하더라도 HTML 보고서에
+        # 오류 내용을 기록하고 정상 종료해야 한다. 예외를 전파하면 보고서가 생성되지 않는다.
         error = f"{type(exc).__name__}: {exc}"
         if isinstance(exc, ConnectorError):
             error = f"{error} (커넥터 계층에서 중단)"
@@ -92,7 +96,7 @@ async def main() -> None:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="커리큘럼 5강 + Modal 실제 강의 1개 통합 보고서")
-    parser.add_argument("--curriculum-engine", default="codex_cli", choices=("codex_cli", "opus46"), help="운영은 opus46, 이번 실전 테스트는 codex_cli OAuth 우회")
+    parser.add_argument("--curriculum-engine", default="gemini", choices=("gemini", "opus46"), help="운영은 opus46, 실전 테스트는 활성 gemini 커넥터")
     parser.add_argument("--title", default="Rust 언어 5강 실전 과외 커리큘럼")
     parser.add_argument("--topic", default="Rust 언어 기초: 소유권, 빌림, 라이프타임, 에러 읽기")
     parser.add_argument("--subject", default="프로그래밍")
@@ -256,7 +260,7 @@ def _error_html(error: str) -> str:
 def _engine_label(engine: str) -> str:
     if engine == "opus46":
         return "Claude Opus 4.6 API"
-    return "Codex CLI OAuth"
+    return "Gemini API"
 
 
 def _curriculum_html(curriculum: CurriculumPreview | None) -> str:

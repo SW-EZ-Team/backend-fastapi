@@ -40,17 +40,6 @@ except ImportError as _gemini_import_err:
         _gemini_import_err,
     )
 
-# Codex CLI — codex 바이너리가 없는 환경에서도 다른 커넥터는 정상 동작하도록 보호
-try:
-    from .text.codex_cli_connector import CodexCLIConnector
-    CONNECTORS["codex_cli"] = lambda: CodexCLIConnector()
-except ImportError as _codex_import_err:
-    _LOG.warning(
-        "Codex CLI 커넥터 등록 건너뜀 (ImportError: %s).",
-        _codex_import_err,
-    )
-
-
 def get_connector(model_name: str | None = None) -> AIConnector:
     """.env 의 AI_MODEL 또는 명시된 model_name 으로 텍스트 커넥터 반환."""
     name = model_name or os.getenv("AI_MODEL")
@@ -67,8 +56,7 @@ def get_text_connector(model_name: str | None = None) -> AIConnector:
     """.env 의 ACTIVE_TEXT_MODEL 또는 명시된 model_name 으로 텍스트 커넥터 반환.
 
     ACTIVE_TEXT_MODEL=claude_sonnet  → ClaudeSonnetConnector
-    ACTIVE_TEXT_MODEL=codex_cli      → CodexCLIConnector
-    ACTIVE_TEXT_MODEL=gemini_flash   → GeminiGenAIConnector
+    ACTIVE_TEXT_MODEL=gemini_flash   → GeminiGenAIConnector (활성 기본 경로)
     기본값: claude_sonnet
 
     관리자가 .env 값 하나만 바꾸면 즉시 커넥터가 교체된다.

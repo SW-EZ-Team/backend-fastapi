@@ -40,5 +40,5 @@ async def offline_transcribe(
 
     raw = await audio.read()
     audio_np, sr = load_audio_from_bytes(raw, target_sr=16000)
-    engine = ASREngine(model_name=model or "mlx-qwen3-asr")
+    engine = ASREngine(model_name=model or "gemini-asr")
     return await engine.transcribe(audio_np, sr=sr, lang=language)

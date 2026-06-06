@@ -139,6 +139,26 @@ async def generate_answers_node(state: ExamForgeState) -> dict:
             # 예외 시 원본 데이터에 빈 정답 추가
             answered.append(_empty_answer(questions[i]))
 
+    # 파이프라인 불변식 검증: question_id 또는 template_id가 비어 있는 문항을 걸러낸다.
+    # 보충/보수 경로에서 유실된 식별자가 Spring 콜백까지 전파되는 것을 차단한다.
+    valid_answered: list[dict] = []
+    for q in answered:
+        missing: list[str] = []
+        if not q.get("question_id"):
+            missing.append("question_id")
+        if not q.get("template_id"):
+            missing.append("template_id")
+        if missing:
+            logger.error(
+                "generate_answers_node: %s 누락 문항 제거 — draft_id=%s, template_id=%s",
+                "+".join(missing),
+                q.get("draft_id", "(없음)"),
+                q.get("template_id", "(없음)"),
+            )
+            continue
+        valid_answered.append(q)
+    answered = valid_answered
+
     logger.info("노드 완료: generate_answers_node (%.2fs)", time.time() - node_start)
     return {
         "answered_questions": answered,
@@ -258,11 +278,20 @@ def _extract_field_to_next_key(text: str, field: str) -> str:
 
 
 def _empty_answer(q: dict) -> dict:
-    """정답 생성 실패 시 구조 검증에서 걸릴 빈 답안을 만든다."""
+    """정답 생성 실패 시 구조 검증에서 걸릴 빈 답안을 만든다.
+
+    question_id 보장 원칙:
+    - 항상 고유한 UUID 기반 question_id를 새로 발급한다.
+    - draft_id를 question_id로 재사용하면 동일 draft_id를 가진 문항이
+      repair_questions_node의 repaired_map 키 충돌을 일으킬 수 있다.
+    - template_id도 원본 q에서 보존하므로 빈 template_id는 전파되지 않는다.
+    """
+    import uuid
     fallback = q.copy()
     fallback["correct_answer"] = ""
     fallback["explanation"] = ""
-    fallback["question_id"] = fallback.get("draft_id", "")
+    # draft_id 기반 재사용 대신 항상 신규 UUID 발급 — 키 충돌 방지
+    fallback["question_id"] = f"q_{uuid.uuid4().hex[:8]}"
     return sanitize_exam_question(fallback)
 
 

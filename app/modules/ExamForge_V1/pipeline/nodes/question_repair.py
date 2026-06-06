@@ -85,10 +85,20 @@ def build_repair_tasks(
             ck = str(slot.get("concept_key", ""))
             if ck and ck in filled_keys:
                 continue
+            # template_id가 비어 있는 슬롯은 생성 불가 — 건너뛴다.
+            # _generate_chunk가 get_template("")로 TemplateNotFoundError를 던지고
+            # []를 반환하므로, 미리 차단해 불필요한 AI 호출을 줄인다.
+            slot_template_id = slot.get("template_id", "")
+            if not slot_template_id:
+                logger.warning(
+                    "build_repair_tasks: blueprint slot%s의 template_id가 비어 있음 — 건너뜀",
+                    slot.get("slot", "?"),
+                )
+                continue
             topic = slot.get("topic", topic_names[topic_cursor % len(topic_names)])
             topic_cursor += 1
             task: dict = {
-                "template_id": slot.get("template_id", ""),
+                "template_id": slot_template_id,
                 "topic": topic,
                 "difficulty": slot.get("difficulty", 3),
                 "count": 1,
@@ -110,6 +120,12 @@ def build_repair_tasks(
     # blueprint 없는 폴백 경로: 기존 방식으로 템플릿별 수량 보충
     for alloc in allocations:
         template_id = alloc.get("template_id", "")
+        # template_id가 비어 있는 할당은 생성 불가 — 건너뛴다.
+        if not template_id:
+            logger.warning(
+                "build_repair_tasks: alloc의 template_id가 비어 있음 — 건너뜀"
+            )
+            continue
         target = int(alloc.get("count", 0))
         missing = max(0, target - existing_counts.get(template_id, 0))
         difficulties = difficulty_sequence(alloc, missing)
