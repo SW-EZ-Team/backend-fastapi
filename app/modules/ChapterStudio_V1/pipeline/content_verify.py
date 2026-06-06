@@ -20,6 +20,7 @@ import json
 from pydantic import ValidationError
 
 from app.modules.ChapterStudio_V1.ai_connectors.base import AIConnector
+from app.modules.ChapterStudio_V1.ai_connectors.errors import ConnectorError
 from app.modules.ChapterStudio_V1.ai_connectors.schemas import ChapterAIRequest
 from app.modules.ChapterStudio_V1.common.logging import logger
 from app.modules.ChapterStudio_V1.pipeline.content_verify_merge import (
@@ -37,8 +38,10 @@ from app.modules.ChapterStudio_V1.pipeline.content_verify_prompts import (
 from app.modules.ChapterStudio_V1.pipeline.payload import GeneratedLessonPayload
 
 # 검증/교정 호출당 토큰 상한 — 오류 목록 또는 교정 묶음을 한 번에 받을 여유값.
-_VERIFY_MAX_TOKENS = 8000
-_CORRECT_MAX_TOKENS = 16000
+# gemini-3.5-flash thinking 토큰(~21000)이 max_output_tokens 예산을 먼저 잠식하므로
+# 8000/16000은 thinking이 크면 본문이 절단된다. thinking 헤드룸 포함 verify=32000, correct=40000.
+_VERIFY_MAX_TOKENS = 32000
+_CORRECT_MAX_TOKENS = 40000
 
 
 async def verify_and_correct(
@@ -75,8 +78,10 @@ async def _run_verify(
     try:
         response = await connector.generate(request)
         return parse_errors(response.text)
-    except (ValueError, ValidationError, json.JSONDecodeError) as exc:
-        logger.warning("content_verify: 검증 응답 파싱 실패 → 원본 유지({})", exc)
+    except (ConnectorError, ValueError, ValidationError, json.JSONDecodeError) as exc:
+        # 파싱 실패뿐 아니라 커넥터 실패(절단 MAX_TOKENS·타임아웃·rate limit)도 graceful 처리한다.
+        # ConnectorError를 빠뜨리면 절단 가드 예외가 stage를 죽인다 → 검증을 건너뛰고 원본 유지.
+        logger.warning("content_verify: 검증 호출 실패 → 원본 유지({})", exc)
         return []
 
 
@@ -97,8 +102,10 @@ async def _run_correct(
     try:
         response = await connector.generate(request)
         result = parse_correction(response.text)
-    except (ValueError, ValidationError, json.JSONDecodeError) as exc:
-        logger.warning("content_verify: 교정 응답 파싱 실패 → 원본 유지({})", exc)
+    except (ConnectorError, ValueError, ValidationError, json.JSONDecodeError) as exc:
+        # 파싱 실패뿐 아니라 커넥터 실패(절단 MAX_TOKENS·타임아웃·rate limit)도 graceful 처리한다.
+        # ConnectorError를 빠뜨리면 절단 가드 예외가 stage를 죽인다 → 교정을 건너뛰고 원본 유지.
+        logger.warning("content_verify: 교정 호출 실패 → 원본 유지({})", exc)
         return payload
     merged = apply_corrections(payload, result)
     if not indices_intact(merged, slide_count):

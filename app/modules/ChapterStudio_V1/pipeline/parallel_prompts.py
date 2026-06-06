@@ -32,11 +32,15 @@ from app.modules.ChapterStudio_V1.postprocess.title_rules import relabel_chapter
 from common.llm_output import extract_json_block, loads_lenient, strip_thinking
 
 # 컴포넌트별 토큰 상한 — 작은 단일목적 응답에 맞춰 여유 있게 잡는다.
-_SLIDES_MAX_TOKENS = 16000
-_QUIZZES_MAX_TOKENS = 9000
-_NOTE_MAX_TOKENS = 4000
-_ASSIGNMENT_MAX_TOKENS = 4000
-_VOICE_MAX_TOKENS = 4000
+# gemini_flash가 활성 텍스트 모델이면 thinking 토큰(~21000)이 max_output_tokens 예산을 먼저
+# 잠식한다(이 병렬 경로는 connector.supports("batch")=True인 Qwen Modal 전용이라 현재 gemini에선
+# 휴면이나, ACTIVE_TEXT_MODEL 전환 시 즉시 활성). thinking 헤드룸을 포함해 본문성(slides)=40000,
+# quizzes=32000, 짧은 보조(note/assignment/voice)=24000으로 통일한다(메인노드 48000과 정합, 한도 65536).
+_SLIDES_MAX_TOKENS = 40000
+_QUIZZES_MAX_TOKENS = 32000
+_NOTE_MAX_TOKENS = 24000
+_ASSIGNMENT_MAX_TOKENS = 24000
+_VOICE_MAX_TOKENS = 24000
 VisualSlideCategory = Literal["text", "diagram", "math", "chart"]
 
 
@@ -313,7 +317,7 @@ def _visual_slide_to_generated(
         if raw_data is not None:
             # 보완 우선순위: voice_script → script_text → focus/summary/description
             voice_text = _voice_text(raw_data.get("voice_script")) or _text_value(
-                raw_data.get("script_text"), ""  # type: ignore[arg-type]
+                raw_data.get("script_text"), ""
             )
             if _is_specific_narration(voice_text):
                 narration = _compact_sentences(voice_text)
@@ -325,7 +329,7 @@ def _visual_slide_to_generated(
             else:
                 # voice도 없으면 focus/summary에서 title-focus 문장 생성
                 focus_text = _first_specific_text(
-                    raw_data,  # type: ignore[arg-type]
+                    raw_data,
                     ("focus", "summary", "description"),
                 )
                 if focus_text:
@@ -552,7 +556,7 @@ def _voice_text(value: object) -> str:
     return ""
 
 
-def _first_specific_text(data: dict[object, object], keys: tuple[str, ...]) -> str:
+def _first_specific_text(data: dict[str, object], keys: tuple[str, ...]) -> str:
     """focus·summary 계열 필드에서 플레이스홀더가 아닌 첫 문장을 찾는다."""
     for key in keys:
         value = _text_value(data.get(key), "")

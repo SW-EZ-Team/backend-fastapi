@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import os
 
-# 기본 tier 순서 — Whisper(품질 1위) → SenseVoice(속도 1위) → Qwen(균형)
+# 기본 tier 순서 — Gemini(클라우드 1순위) → Qwen3 ASR Modal(배포 폴백).
+# MLX 로컬 ASR 은 프로덕션 전환으로 제거됐다.
 DEFAULT_TIER_MODELS: tuple[str, ...] = (
-    "mlx-whisper-turbo",
-    "sensevoice-small",
-    "mlx-qwen3-asr",
+    "gemini-asr",
+    "qwen3-asr-modal",
 )
 
 
@@ -19,7 +19,7 @@ def resolve_tier_models() -> tuple[str, ...]:
     """ASR_FALLBACK_TIERS 환경변수를 파싱해 tier 순서를 결정한다.
 
     미설정 시 DEFAULT_TIER_MODELS 를 그대로 반환한다.
-    형식: "mlx-whisper-turbo,sensevoice-small,mlx-qwen3-asr"
+    형식: "gemini-asr,qwen3-asr-modal"
     """
     raw = os.getenv("ASR_FALLBACK_TIERS", "").strip()
     if not raw:

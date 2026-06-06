@@ -1,10 +1,12 @@
 """ExamForge 제출 답안 채점 테스트."""
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from pydantic import ValidationError
 
-from app.modules.ExamForge_V1.grading.exceptions import RubricGradingError
+from app.modules.ExamForge_V1.grading.exceptions import AnswerKeyIntegrityError, RubricGradingError
 from app.modules.ExamForge_V1.grading.engine import grade_submission
 from app.modules.ExamForge_V1.grading.seal import create_answer_key_seal
 from app.modules.ExamForge_V1.schemas.grading import (
@@ -174,3 +176,61 @@ def test_grade_submission_rejects_duplicate_answer_id() -> None:
                 SubmittedAnswer(question_id="q-choice", answer="2"),
             ],
         )
+
+
+# ---------------------------------------------------------------------------
+# seal advisory 모드 단위 테스트
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_seal_mismatch_advisory_proceeds_with_grading() -> None:
+    """HMAC 불일치 시 advisory 모드(기본)에서 예외 없이 채점을 계속 진행한다.
+
+    크로스서비스 canonical 재현 반복 실패(Spring mapper null→emptyList 치환 등)로
+    HMAC이 달라도 채점이 차단되지 않아야 한다.
+    EXAMFORGE_SEAL_ENFORCE 미설정(=false=advisory)이 기본이다.
+    """
+    questions = [choice_question()]
+    request = GradeSubmissionRequest(
+        attempt_id="attempt-advisory",
+        exam_id="exam-advisory",
+        # 의도적으로 잘못된 seal — 불일치 유도
+        answer_key_seal="v1." + ("z" * 43),
+        questions=questions,
+        submitted_answers=[SubmittedAnswer(question_id="q-choice", answer="2")],
+    )
+
+    # EXAMFORGE_SEAL_ENFORCE=false(advisory 기본) 환경에서 채점 진행 확인
+    with patch(
+        "app.modules.ExamForge_V1.grading.engine.seal_enforce_mode",
+        return_value=False,
+    ):
+        response = await grade_submission(request)
+
+    # seal 불일치여도 채점 결과가 정상 반환된다
+    assert response.total_score == pytest.approx(2.0)
+    assert response.results[0].is_correct is True
+
+
+@pytest.mark.asyncio
+async def test_seal_mismatch_enforce_mode_raises_integrity_error() -> None:
+    """EXAMFORGE_SEAL_ENFORCE=true 강제 모드에서 HMAC 불일치 시 AnswerKeyIntegrityError를 발생시킨다.
+
+    canonical 정합 확인 후 재강제하는 경로가 기존처럼 동작해야 한다.
+    """
+    questions = [choice_question()]
+    request = GradeSubmissionRequest(
+        attempt_id="attempt-enforce",
+        exam_id="exam-enforce",
+        # 의도적으로 잘못된 seal — 불일치 유도
+        answer_key_seal="v1." + ("y" * 43),
+        questions=questions,
+        submitted_answers=[SubmittedAnswer(question_id="q-choice", answer="2")],
+    )
+
+    # EXAMFORGE_SEAL_ENFORCE=true 강제 모드에서 기존처럼 예외 발생 확인
+    with patch(
+        "app.modules.ExamForge_V1.grading.engine.seal_enforce_mode",
+        return_value=True,
+    ), pytest.raises(AnswerKeyIntegrityError):
+        await grade_submission(request)

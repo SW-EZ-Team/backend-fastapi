@@ -9,11 +9,15 @@ plan-first 원칙:
 """
 from __future__ import annotations
 
+import logging
+
 from app.core.planfirst.positions import (
     balanced_target_positions as _balanced_target_positions_impl,
     seed_from_key as _seed_from_key_impl,
 )
 from app.modules.ExamForge_V1.pipeline.nodes.question_metadata import bloom_for_difficulty
+
+_LOG = logging.getLogger(__name__)
 
 # 5보기 템플릿 집합 — 카탈로그 spec 없이도 결정 가능한 명시 목록
 _FIVE_OPTION_TEMPLATES: frozenset[str] = frozenset([
@@ -41,8 +45,13 @@ def _num_choices_for_template(template_id: str) -> int:
                 return 5
             if "4개" in clause and ("보기" in clause or "선택지" in clause):
                 return 4
-    except Exception:
-        pass
+    except Exception as exc:
+        # 카탈로그 로드 실패는 치명적이지 않으므로 경고 후 폴백으로 진행한다
+        _LOG.warning(
+            "[concept-blueprint] 템플릿 카탈로그 로드 실패, 폴백 사용 — template_id=%s, error=%s",
+            template_id,
+            exc,
+        )
     # 명시 집합으로 2차 폴백
     if template_id in _FIVE_OPTION_TEMPLATES:
         return 5

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from app.modules.ChapterStudio_V1.ai_connectors.codex_cli_connector import CodexCLIConnector
+from app.modules.ChapterStudio_V1.ai_connectors.registry import get_text_connector
 from app.modules.ChapterStudio_V1.ai_connectors.schemas import ChapterAIRequest
 from app.modules.ChapterStudio_V1.app.curriculum_preview_types import (
     CurriculumLesson,
@@ -20,18 +20,21 @@ _SCHEMA_PATH = Path(__file__).with_name("codex_curriculum_preview.schema.json")
 
 
 async def build_curriculum_preview(req: CurriculumPreviewRequest) -> CurriculumPreview:
-    """운영의 Opus Planner 자리를 mock 또는 Codex OAuth로 미리 검증한다."""
-    if req.engine == "codex_cli":
-        return await _codex_preview(req)
+    """운영의 Opus Planner 자리를 mock 또는 활성 Gemini 커넥터로 미리 검증한다."""
+    if req.engine == "gemini":
+        return await _gemini_preview(req)
     return _mock_preview(req)
 
 
-async def _codex_preview(req: CurriculumPreviewRequest) -> CurriculumPreview:
-    response = await CodexCLIConnector().generate(
+async def _gemini_preview(req: CurriculumPreviewRequest) -> CurriculumPreview:
+    """활성 텍스트 커넥터(gemini_flash)로 커리큘럼 초안 JSON 을 생성한다."""
+    response = await get_text_connector().generate(
         ChapterAIRequest(
+            # gemini_flash thinking 토큰(~21000)이 예산을 먼저 잠식하므로 4200은 커리큘럼 초안 JSON이
+            # 절단되기 쉽다. thinking 헤드룸을 확보해 24000으로 올린다(한도 65536 이내).
             system=_system_prompt(),
             user=_user_prompt(req),
-            max_tokens=4200,
+            max_tokens=24000,
             temperature=0.25,
             extra={"output_schema_path": str(_SCHEMA_PATH)},
         )
@@ -39,7 +42,7 @@ async def _codex_preview(req: CurriculumPreviewRequest) -> CurriculumPreview:
     try:
         return CurriculumPreview.model_validate_json(response.text)
     except ValidationError as exc:
-        raise ConversionError("Codex 커리큘럼 JSON을 검증하지 못했다.") from exc
+        raise ConversionError("Gemini 커리큘럼 JSON을 검증하지 못했다.") from exc
 
 
 def _mock_preview(req: CurriculumPreviewRequest) -> CurriculumPreview:
@@ -82,7 +85,7 @@ def _lesson(req: CurriculumPreviewRequest, index: int) -> CurriculumLesson:
 def _system_prompt() -> str:
     return (
         "너는 ChapterStudio_V1의 커리큘럼 Planner 미리보기다. "
-        "운영에서는 Claude Opus 4.6이 맡는 역할이며, 지금은 Codex OAuth로 로컬 검증만 한다. "
+        "운영에서는 Claude Opus 4.6이 맡는 역할이며, 지금은 활성 Gemini 커넥터로 초안을 만든다. "
         "커리큘럼은 10~15강, 각 강의는 10~15개 슬라이드로 생성될 수 있게 설계한다."
     )
 

@@ -30,7 +30,7 @@ async def _dispatch_chapter_studio(action: str, payload: dict[str, Any]) -> dict
     from app.modules.ChapterStudio_V1.app.curriculum_preview import build_curriculum_preview
     from app.modules.ChapterStudio_V1.app.curriculum_preview_types import CurriculumPreviewRequest
 
-    request_payload = {**payload, "engine": "codex_cli"}
+    request_payload = {**payload, "engine": "gemini"}
     result = await build_curriculum_preview(CurriculumPreviewRequest.model_validate(request_payload))
     return jsonable_encoder(result)
 

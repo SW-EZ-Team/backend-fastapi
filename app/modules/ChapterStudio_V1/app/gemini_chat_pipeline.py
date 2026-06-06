@@ -1,17 +1,20 @@
 from __future__ import annotations
 
-from app.modules.ChapterStudio_V1.ai_connectors.codex_cli_connector import CodexCLIConnector
+from app.modules.ChapterStudio_V1.ai_connectors.registry import get_text_connector
 from app.modules.ChapterStudio_V1.ai_connectors.schemas import ChapterAIRequest
 from app.modules.ChapterStudio_V1.app.slide_chat_types import SlideChatContext, SlideChatRequest
 
 
-async def generate_codex_chat_answer(req: SlideChatRequest, ctx: SlideChatContext) -> str:
-    """Codex OAuth 로컬 세션으로 슬라이드 동반 튜터 답변을 만든다."""
-    response = await CodexCLIConnector().generate(
+async def generate_gemini_chat_answer(req: SlideChatRequest, ctx: SlideChatContext) -> str:
+    """활성 Gemini 커넥터로 슬라이드 동반 튜터 답변을 만든다."""
+    response = await get_text_connector().generate(
         ChapterAIRequest(
+            # gemini_flash thinking 토큰(~21000)이 max_output_tokens 예산을 먼저 잠식한다.
+            # 1200에서는 thinking만으로 즉시 절단돼 답변 본문이 비거나 잘린다. thinking 헤드룸을
+            # 확보해 24000으로 올린다(짧은 채팅 답변이라 실제 과금 토큰은 작다).
             system=_system_prompt(),
             user=_user_prompt(req, ctx),
-            max_tokens=1200,
+            max_tokens=24000,
             temperature=0.2,
         )
     )

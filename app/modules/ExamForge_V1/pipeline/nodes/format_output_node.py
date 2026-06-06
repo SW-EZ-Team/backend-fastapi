@@ -89,6 +89,21 @@ async def format_output_node(state: ExamForgeState) -> dict:
         for q in questions
     ]
 
+    # ── 부분완료 출고 무결화: templateId/questionId 빈값 문항 사전 드롭 ──
+    # codex가 목표보다 적게/중복 생성할 때 templateId·question_id가 비어 있는
+    # 미완 문항이 섞이면 Spring 콜백이 VALIDATION_001(400)으로 거부된다.
+    # 출고 직전에 무결하지 않은 문항을 드롭해 유효 문항만 Spring에 전달한다.
+    # 드롭 후 seal은 하위 attach_answer_key_seal이 자동으로 유효 집합 기준으로 재계산한다.
+    valid_questions, dropped_count = _drop_invalid_questions(clean_questions)
+    if dropped_count > 0:
+        logger.warning(
+            "format_output_node: templateId/questionId 빈값 문항 %d개 드롭 (원본 %d → 유효 %d)",
+            dropped_count,
+            len(clean_questions),
+            len(valid_questions),
+        )
+    clean_questions = valid_questions
+
     # retry가 소진되었고 실패 문항이 남아있을 때만 "exhausted" 표시
     # (failed_question_ids만 보면 retry_router 10% 허용 케이스가 오분류됨)
     failed_ids = _active_failed_ids(state)
@@ -99,8 +114,24 @@ async def format_output_node(state: ExamForgeState) -> dict:
 
     # 완료 비율 검사 — outcome과 무관하게 항상 검사해 "축소된 시험" 문제를 감지한다
     requested_count = state.get("exam_config", {}).get("total_questions", 0)
+    # 드롭 이후의 유효 문항 수를 기준으로 비율을 계산한다
     actual_count = len(clean_questions)
     error_message = state.get("error_message")
+
+    # 유효 문항이 0개면 FAILED 콜백을 보내야 하므로 즉시 실패 처리한다
+    if actual_count == 0:
+        logger.error(
+            "format_output_node: 드롭 후 유효 문항 0개 — 파이프라인 실패 처리"
+        )
+        return {
+            "calibrated_questions": [],
+            "output_html": exam_html,
+            "answers_html": answers_html,
+            "quality_metrics": quality_metrics,
+            "pipeline_status": "failed",
+            "pipeline_outcome": "failed_no_valid_questions",
+            "error_message": "식별자 무결한 문항이 없음 — Spring 콜백 전송 불가",
+        }
 
     if requested_count > 0 and actual_count < requested_count:
         completion_ratio = actual_count / requested_count
@@ -218,3 +249,27 @@ def _active_failed_ids(state: ExamForgeState) -> list[str]:
 def _is_verification_advisory(state: ExamForgeState) -> bool:
     """상태 플래그나 env 설정으로 advisory 모드인지 확인한다."""
     return state.get("verification_advisory") is True or verification_advisory_enabled()
+
+
+def _drop_invalid_questions(
+    questions: list[dict],
+) -> tuple[list[dict], int]:
+    """templateId 또는 question_id가 빈값(공백 포함)인 문항을 드롭하고 유효 목록을 반환한다.
+
+    Spring 콜백은 두 식별자 중 하나라도 비어 있으면 VALIDATION_001(400)으로 거부한다.
+    codex가 목표보다 적게 생성하거나 중복 드롭 후 슬롯이 비어 있을 때
+    미완 placeholder 문항이 섞이는 것을 이 지점에서 차단한다.
+
+    Returns:
+        (유효_문항_리스트, 드롭_개수)
+    """
+    valid: list[dict] = []
+    dropped = 0
+    for q in questions:
+        template_id = str(q.get("template_id") or "").strip()
+        question_id = str(q.get("question_id") or "").strip()
+        if not template_id or not question_id:
+            dropped += 1
+            continue
+        valid.append(q)
+    return valid, dropped

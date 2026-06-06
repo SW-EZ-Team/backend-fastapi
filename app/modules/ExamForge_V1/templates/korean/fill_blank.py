@@ -25,7 +25,13 @@ class KoreanFillBlankTemplate:
     def build_generation_prompt(
         self, topic: str, difficulty: int, context: str, count: int,
     ) -> str:
-        """빈칸채우기 문제 생성 프롬프트."""
+        """빈칸채우기 문제 생성 프롬프트.
+
+        blank_positions 수와 실제 빈칸(___ 또는 (   )) 수의 불일치가
+        검증 탈락의 주요 원인이므로 둘을 반드시 일치시키도록 명시한다.
+        few-shot 예시로 형식을 명확히 한다.
+        """
+        blank_count_guide = {1: "1개", 2: "1~2개", 3: "2개", 4: "2~3개", 5: "3개"}
         return f"""다음 학습 자료를 기반으로 빈칸채우기 문제를 생성하시오.
 
 [학습 자료]
@@ -35,21 +41,49 @@ class KoreanFillBlankTemplate:
 - 주제: {topic}
 - 난이도: {difficulty}/5
 - 문항 수: {count}개
-- 빈칸은 (   ) 또는 ___로 표시
-- 빈칸에 들어갈 답은 핵심 용어, 코드 조각, 수식 중 하나
-- 빈칸 위치는 blank_positions 배열로 0-indexed 단어 위치 표기
-- 빈칸이 1~3개인 문제
+- 빈칸은 반드시 ___ (언더스코어 3개 이상) 기호로만 표시 (괄호 형식 금지)
+- 빈칸 수: {blank_count_guide.get(difficulty, "2개")}
+- 빈칸에 들어갈 답: 핵심 용어, 개념명, 숫자 중 하나 (코드 조각은 단순 키워드만)
+- 학습 자료에서 직접 도출 가능한 답만 사용
+
+[⚠️ 검증 통과를 위한 필수 규칙]
+1. stem의 ___ 기호 개수 == blank_positions 배열의 원소 개수 (반드시 일치)
+   예: stem에 ___ 2개 → blank_positions에 0-indexed 위치 2개
+2. blank_positions 값은 stem을 공백으로 분리한 단어 목록에서의 0-indexed 위치
+3. bloom_level: 기억|이해|적용 중 하나
+4. JSON 배열 외 추가 텍스트 출력 금지
 
 [출력 형식 - JSON 배열]
 [
   {{
-    "stem": "___은/는 객체지향 프로그래밍에서 ___을/를 구현하는 기법이다.",
+    "stem": "___은/는 [주제어]에서 ___을/를 나타낸다.",
     "topic": "{topic}",
     "difficulty": {difficulty},
     "bloom_level": "기억|이해|적용",
-    "blank_positions": [0, 5]
+    "blank_positions": [0, 6]
   }}
 ]
+
+[모범 예시 — 이 형식·수준으로 출력할 것 (내용은 학습 자료 기반으로 새로 작성)]
+[
+  {{
+    "stem": "___은 데이터를 후입선출(LIFO) 방식으로 관리하는 선형 자료구조이다.",
+    "topic": "자료구조",
+    "difficulty": 2,
+    "bloom_level": "기억",
+    "blank_positions": [0]
+  }},
+  {{
+    "stem": "프로세스가 ___ 상태에 있을 때 CPU를 점유하고 있으며 ___ 큐에서 실행된다.",
+    "topic": "운영체제",
+    "difficulty": 3,
+    "bloom_level": "이해",
+    "blank_positions": [1, 10]
+  }}
+]
+- 첫 예시: 빈칸 1개, blank_positions 원소 1개 (일치)
+- 두 번째 예시: 빈칸 2개, blank_positions 원소 2개 (일치)
+- stem 내 ___ 개수와 blank_positions 개수가 반드시 같아야 한다.
 
 정확히 {count}개를 JSON 배열로 출력하시오."""
 
@@ -62,10 +96,15 @@ class KoreanFillBlankTemplate:
     def build_answer_prompt(
         self, question_draft: QuestionDraft, source_text: str,
     ) -> str:
-        """정답 생성 프롬프트."""
+        """정답 생성 프롬프트.
+
+        blank_answers 배열 길이 == blank_positions 배열 길이를 강제해
+        '빈칸 수와 답 수 불일치' 검증 탈락을 사전 차단한다.
+        """
         code_section = ""
         if question_draft.code_snippet:
             code_section = f"\n[코드]\n{question_draft.code_snippet}\n"
+        blank_count = len(question_draft.blank_positions) if question_draft.blank_positions else 1
         return f"""다음 빈칸채우기 문제의 정답을 생성하시오.
 
 [원본 자료]
@@ -78,16 +117,22 @@ class KoreanFillBlankTemplate:
 {question_draft.blank_positions}
 
 [지시사항]
-1. 각 빈칸에 들어갈 정확한 답을 순서대로 제시
-2. 동의어/약어가 있으면 함께 언급
-3. 왜 그 답이 맞는지 해설
+1. blank_answers 배열에 정확히 {blank_count}개의 답을 순서대로 작성 (빈칸 개수와 반드시 일치)
+2. correct_answer는 blank_answers를 쉼표로 이어 붙인 문자열
+   예: blank_answers=["스택", "LRU"] → correct_answer="스택, LRU"
+3. 각 빈칸 답은 1~3단어 핵심어 (긴 문장 금지)
+4. explanation은 각 빈칸 답의 근거를 학습 자료에서 찾아 40자 이상 서술
+
+[⚠️ 출력 형식 — 반드시 준수]
+- blank_answers: 길이 {blank_count}인 JSON 배열 (더 많거나 적으면 검증 실패)
+- JSON 객체 하나만 출력
 
 [출력 형식 - JSON]
 {{
-  "correct_answer": "답1, 답2",
+  "correct_answer": "답1, 답2, ...",
   "blank_answers": ["답1", "답2"],
-  "explanation": "해설",
-  "source_reference": "관련 원문 인용"
+  "explanation": "각 빈칸 근거 해설 (40자 이상)",
+  "source_reference": "관련 원문 인용 구절"
 }}"""
 
     def parse_generation_response(

@@ -13,9 +13,13 @@ def build_generation_request(state: ChapterStudioState) -> ChapterAIRequest:
     slide_count = _state_int(state, "slide_count")
     template_key = _state_text(state, "template_key")
     return ChapterAIRequest(
+        # max_tokens=48000: gemini-3.5-flash는 thinking 토큰(실측 0~20735 변동)이
+        # max_output_tokens를 잠식한다. 24000에서는 thinking이 크면 레슨 JSON 본문이
+        # 절단돼(slides 0개 저장) 학습 불가였다. thinking(최대 ~21000)+풀 JSON(~13000 토큰,
+        # 한국어 ~26000자)에 여유를 더해 48000으로 올린다(모델 한도 65536 이내).
         system=_system_prompt(slide_count),
         user=_user_prompt(state, slide_count, template_key),
-        max_tokens=24000,
+        max_tokens=48000,
         temperature=0.35,
         extra={"slide_count": slide_count, "template_key": template_key},
     )

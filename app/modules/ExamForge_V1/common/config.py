@@ -128,10 +128,11 @@ def targeted_repair_enabled() -> bool:
 
 
 def verification_advisory_enabled() -> bool:
-    """신뢰 낮은 검증기에서는 검증 결과를 관측용으로만 사용한다."""
-    if _bool_env("EXAMFORGE_VERIFICATION_ADVISORY", False):
-        return True
-    return active_verifier_model().strip().lower() == "codex_cli"
+    """신뢰 낮은 검증기에서는 검증 결과를 관측용으로만 사용한다.
+
+    명시 플래그(EXAMFORGE_VERIFICATION_ADVISORY=true)일 때만 advisory 로 둔다.
+    """
+    return _bool_env("EXAMFORGE_VERIFICATION_ADVISORY", False)
 
 
 def verifier_max_tokens(base: int) -> int:
@@ -211,8 +212,22 @@ def pipeline_llm_reserve_for(total_questions: int) -> int:
 
 
 def pipeline_timeout_sec() -> int:
-    """모의고사 생성 API의 전체 실행 제한 시간."""
-    return max(60, _int_env("MOCK_EXAM_PIPELINE_TIMEOUT_SEC", 900))
+    """모의고사 생성 API의 전체 실행 제한 시간.
+
+    기본 750초(12.5분): codex 초기 생성(~5분) + 1회 missing 재시도(~5분) + 여유(~2.5분).
+    MOCK_EXAM_PIPELINE_TIMEOUT_SEC 환경변수로 조정 가능.
+    """
+    return max(60, _int_env("MOCK_EXAM_PIPELINE_TIMEOUT_SEC", 750))
+
+
+def missing_retry_cap() -> int:
+    """개수 부족(missing_count > 0) 전용 재시도 최대 횟수.
+
+    이 횟수를 소진하면 추가 재시도 없이 확보된 유효 문항만으로 passed 출고한다.
+    codex 속도(~5분/회)를 고려해 기본 1회로 제한한다.
+    EXAMFORGE_MISSING_RETRY_CAP 환경변수로 조정 가능.
+    """
+    return max(0, _int_env("EXAMFORGE_MISSING_RETRY_CAP", 1))
 
 
 def examforge_answer_key_secret() -> str:
@@ -223,19 +238,22 @@ def examforge_answer_key_secret() -> str:
     return secret
 
 
+def seal_enforce_mode() -> bool:
+    """정답 키 seal 불일치 시 403을 강제할지 advisory(WARNING+계속)로 둘지 결정한다.
+
+    기본값 false(advisory): 크로스서비스 canonical 재현이 반복 실패하는 동안
+    403→502 차단을 해소하고 채점을 계속 진행하기 위해 advisory가 기본이다.
+    내부 X-API-Key 인증 경로라 외부 변조 위험은 낮다.
+
+    EXAMFORGE_SEAL_ENFORCE=true 로 명시하면 기존처럼 HMAC 불일치 시 403을 반환한다
+    (canonical 정합이 확인된 뒤 재강제 시 사용).
+    """
+    return _bool_env("EXAMFORGE_SEAL_ENFORCE", default=False)
+
+
 def exam_forge_port() -> int:
     """샌드박스 서버 포트."""
     return _int_env("MOCK_EXAM_PORT", 8900)
-
-
-def codex_cli_model() -> str:
-    """Codex CLI에 사용할 GPT 모델명."""
-    return _optional("CODEX_CLI_MODEL") or "gpt-5.4"
-
-
-def codex_cli_timeout_sec() -> int:
-    """Codex CLI 단일 호출 타임아웃(초). 최소 60초."""
-    return max(60, _int_env("CODEX_CLI_TIMEOUT_SEC", 300))
 
 
 def log_level() -> str:

@@ -32,7 +32,7 @@ FLUSH_SECONDARY_SCAN: int = int(os.getenv("ASR_V1_FLUSH_SECONDARY_SCAN", "10"))
 # ── 서버 파라미터 ─────────────────────────────────────────────────────────────
 PORT: int = int(os.getenv("ASR_V1_PORT", "8011"))
 SAMPLE_RATE: int = int(os.getenv("ASR_V1_SAMPLE_RATE", "16000"))
-ASR_MODEL: str = os.getenv("ASR_V1_MODEL", "mlx-qwen3-asr")
+ASR_MODEL: str = os.getenv("ASR_V1_MODEL", "gemini-asr")
 
 # ── 버퍼 하드캡 ───────────────────────────────────────────────────────────────
 # 버퍼 최대 누적 시간(초) — 초과 시 자동 커밋

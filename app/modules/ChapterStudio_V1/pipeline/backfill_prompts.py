@@ -23,8 +23,10 @@ from app.modules.ChapterStudio_V1.pipeline.payload import (
 from common.llm_output import extract_json_block, strip_thinking
 
 # 보충 호출 토큰 상한 — quiz 한 묶음 또는 voice 한 개를 받기에 충분한 여유값.
-_QUIZ_MAX_TOKENS = 8000
-_VOICE_MAX_TOKENS = 4000
+# gemini-3.5-flash thinking 토큰(~21000)이 max_output_tokens 예산을 먼저 잠식하므로
+# 8000/4000은 thinking이 크면 본문이 절단된다. thinking 헤드룸 포함 quiz=32000, voice=24000.
+_QUIZ_MAX_TOKENS = 32000
+_VOICE_MAX_TOKENS = 24000
 
 
 class QuizBackfillResult(BaseModel):

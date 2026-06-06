@@ -61,3 +61,6 @@ app/modules/AI_CPU_Kanana_Nano_Q4/models/*.gguf
 
 # 추론 결과 로그 (로컬 실험용, 커밋 제외)
 results/*.log
+
+# 로컬 Claude/에디터 세션 설정 — 팀 공유 금지
+.claude/

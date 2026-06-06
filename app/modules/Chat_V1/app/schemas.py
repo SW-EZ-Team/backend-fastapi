@@ -41,13 +41,22 @@ class LectureContext(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    """스프링에서 전달받는 채팅 요청."""
+    """스프링에서 전달받는 채팅 요청.
+
+    슬라이드 컨텍스트 필드(lesson_id/slide_id/slide_idx)는 선택값이다.
+    Spring ChatService.buildFastapiRequestBody가 snake_case로 전송하므로
+    snake_case 그대로 수신한다. 모두 없으면 슬라이드 컨텍스트 없이 폴백한다.
+    """
 
     model_config = ConfigDict(strict=True, frozen=True)
 
     session_id: str = Field(min_length=1, description="채팅 세션 식별자")
     user_message: str = Field(min_length=1, description="학생 질문")
     lecture_context: LectureContext = Field(description="강의 콘텐츠 컨텍스트")
+    # Spring이 보내는 현재 슬라이드 위치 식별자 — spring_adapter가 DB 조회에 사용
+    lesson_id: str | None = Field(default=None, description="챕터(강의) ID — public.slide.chapter_id에 대응")
+    slide_id: str | None = Field(default=None, description="슬라이드 ID — public.slide.id에 대응")
+    slide_idx: int | None = Field(default=None, ge=0, description="슬라이드 인덱스 (0-based)")
 
 
 class ChatResponse(BaseModel):

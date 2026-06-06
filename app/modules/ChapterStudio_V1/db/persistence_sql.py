@@ -190,5 +190,27 @@ def audio_pending_status_sql(schema: str) -> str:
     )
 
 
+def save_reference_book_context_sql(schema: str) -> str:
+    """OCR 완료 후 참고도서 컨텍스트를 lesson_generation_status.generation_context JSONB에 저장한다.
+
+    generation_context JSONB에 reference_book_context 키만 병합(upsert)하고,
+    나머지 필드(depth, tone 등)는 건드리지 않는다.
+    lesson_generation_status 행이 없으면 tutoring_id='' 로 신규 생성한다.
+    """
+    return (
+        f"INSERT INTO {_table(schema, 'lesson_generation_status')} "
+        "(lesson_id, tutoring_id, status, current_node, completed_nodes, total_nodes, "
+        "progress_percent, chapter_id, generation_model, result_summary, error_message, "
+        "generation_context, updated_at, completed_at) "
+        "VALUES ($1, '', 'pending', 'ocr_done', 0, 3, 0, '', NULL, '{}'::jsonb, NULL, "
+        "$2::jsonb, NOW(), NULL) "
+        "ON CONFLICT (lesson_id) DO UPDATE SET "
+        "generation_context = COALESCE("
+        f"    {_table(schema, 'lesson_generation_status')}.generation_context, '{{}}' ::jsonb"
+        ") || jsonb_build_object('reference_book_context', ($2::jsonb)->'reference_book_context'), "
+        "updated_at = NOW()"
+    )
+
+
 def _table(schema: str, name: str) -> str:
     return f"{schema}.{name}"

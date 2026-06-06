@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.modules.ChapterStudio_V1.app.frontend_contract import TeacherId
 
 ChatIntent = Literal["definition", "code", "chart", "quiz", "confusion", "transfer"]
-ChatEngine = Literal["mock", "codex_cli"]
+ChatEngine = Literal["mock", "gemini"]
 
 
 class SlideChatRequest(BaseModel):

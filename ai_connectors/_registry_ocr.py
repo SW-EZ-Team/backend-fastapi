@@ -27,17 +27,7 @@ except ImportError as _gemini_ocr_import_err:
         _gemini_ocr_import_err,
     )
 
-try:
-    from .ocr.paddleocr_vl_mlx_connector import PaddleOCRVLMlxConnector
-    OCR_CONNECTORS["paddleocr-vl-mlx"] = lambda: PaddleOCRVLMlxConnector()
-except ImportError as _vl_import_err:
-    _LOG.warning(
-        "PaddleOCR-VL MLX 커넥터 등록 건너뜀 (ImportError: %s). "
-        "`.venv-paddleocr-vl` 활성화 여부와 mlx-vlm 설치를 확인하세요.",
-        _vl_import_err,
-    )
-
-# Nemotron-OCR-v2 Modal HTTP 커넥터 등록 — PaddleOCR-VL 대체용.
+# Nemotron-OCR-v2 Modal HTTP 커넥터 등록 — 배포용 클라우드 OCR.
 # httpx 만 요구하므로 mac 기본 venv 에서도 안전하게 import 된다.
 try:
     from .ocr.nemotron_ocr_v2_connector import NemotronOCRv2Connector
@@ -62,12 +52,12 @@ except ImportError as _ppv4_import_err:
     )
 
 # OCR 커넥터 shorthand 별칭 — 태스크 스펙의 AI_OCR 환경변수와 짧은 키를 모두 수용한다.
-# 기본 레지스트리 키(`paddleocr-vl-mlx`, `nemotron-ocr-v2`)는 변경하지 않는다.
+# MLX(paddleocr-vl-mlx) 제거 후, 과거 paddleocr_vl 축약어는 활성 클라우드 OCR(gemini-ocr)로 매핑한다.
 _OCR_ALIASES: dict[str, str] = {
     "nemotron_v2": "nemotron-ocr-v2",
     "nemotron-v2": "nemotron-ocr-v2",
-    "paddleocr_vl": "paddleocr-vl-mlx",
-    "paddleocr-vl": "paddleocr-vl-mlx",
+    "paddleocr_vl": "gemini-ocr",
+    "paddleocr-vl": "gemini-ocr",
     # 경로 A 호출 축약어 — task spec 의 AI_OCR shorthand 수용
     "paddleocr_ppv4": "paddleocr-ppv4",
     "paddleocr-pp-v4": "paddleocr-ppv4",
@@ -90,8 +80,8 @@ def _resolve_ocr_name(model_name: str | None) -> str:
     shorthand = os.getenv("AI_OCR", "").strip()
     if shorthand:
         return _OCR_ALIASES.get(shorthand, shorthand)
-    # PoC 안전 기본값 — 기존 PaddleOCR-VL 경로를 유지한다.
-    return "paddleocr-vl-mlx"
+    # 활성 기본값 — 클라우드 Gemini OCR 로 전환했다.
+    return "gemini-ocr"
 
 
 def get_ocr_connector(model_name: str | None = None) -> OCRConnector:

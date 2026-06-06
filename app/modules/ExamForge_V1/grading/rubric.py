@@ -13,12 +13,12 @@ from app.modules.ExamForge_V1.common.json_utils import parse_llm_json
 from app.modules.ExamForge_V1.grading.exceptions import RubricGradingError
 from app.modules.ExamForge_V1.grading.normalization import answer_to_text
 from app.modules.ExamForge_V1.schemas.grading import (
+    GradeQuestion,
     GradingMode,
     JsonValue,
     QuestionGradeResult,
     RubricCriterionResult,
 )
-from app.modules.ExamForge_V1.schemas.question import Question
 
 RUBRIC_TEMPLATES: frozenset[str] = frozenset({
     "ko_descriptive",
@@ -35,7 +35,7 @@ _SYSTEM_PROMPT = (
 
 
 async def grade_rubric_question(
-    question: Question,
+    question: GradeQuestion,
     answer: JsonValue,
     connector: AIConnector | None = None,
 ) -> QuestionGradeResult:
@@ -66,7 +66,7 @@ def _load_text_connector() -> AIConnector:
         raise RubricGradingError(f"텍스트 커넥터 초기화 실패: {exc}") from exc
 
 
-def _build_user_prompt(question: Question, answer: JsonValue) -> str:
+def _build_user_prompt(question: GradeQuestion, answer: JsonValue) -> str:
     """모델이 채점 외 작업을 하지 못하도록 입력과 출력 계약을 고정한다."""
     payload = {
         "question_id": question.question_id,
@@ -101,7 +101,7 @@ def _build_user_prompt(question: Question, answer: JsonValue) -> str:
     )
 
 
-def _parse_ai_result(question: Question, data: object) -> QuestionGradeResult:
+def _parse_ai_result(question: GradeQuestion, data: object) -> QuestionGradeResult:
     """AI 응답을 내부 채점 결과로 엄격하게 변환한다."""
     if not isinstance(data, Mapping):
         raise RubricGradingError("AI 채점 응답이 JSON 객체가 아니다.")

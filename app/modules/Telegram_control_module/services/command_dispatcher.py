@@ -7,7 +7,7 @@ from app.modules.Agent_orchestrator.job_store import JobNotFoundError, job_store
 
 from ..config import get_default_bot_token
 from ..schemas import TelegramMessageSummary
-from .telegram_client import TelegramClient
+from .protocols import TelegramClientLike
 
 if TYPE_CHECKING:
     from app.core.weakness_service import WeaknessConnection
@@ -18,7 +18,7 @@ _FILE_MESSAGE_TYPES = {"document", "photo"}
 
 async def dispatch_telegram_command(
     summary: TelegramMessageSummary | None,
-    client: TelegramClient,
+    client: TelegramClientLike,
     db_pool: "WeaknessConnection | None" = None,
 ) -> bool:
     """지원하는 Telegram 명령 또는 파일 제출이면 처리하고 True를 반환한다."""
@@ -46,7 +46,7 @@ async def dispatch_telegram_command(
 
 async def _handle_file_grading(
     summary: TelegramMessageSummary,
-    client: TelegramClient,
+    client: TelegramClientLike,
     db_conn: "WeaknessConnection",
 ) -> None:
     """파일 제출 채점 오케스트레이터를 호출한다."""
@@ -54,9 +54,12 @@ async def _handle_file_grading(
     from .grading_orchestrator import handle_file_submission
 
     file_name = summary.file_name or _default_file_name(summary.message_type)
+    # dispatch_telegram_command에서 summary.file_id가 None이 아님을 확인했다.
+    # assert로 타입 내로잉을 수행해 mypy가 str임을 추론할 수 있도록 한다.
+    assert summary.file_id is not None
     await handle_file_submission(
         summary=summary,
-        file_id=summary.file_id,  # type: ignore[arg-type]  # 호출 전 None 확인 완료
+        file_id=summary.file_id,
         file_name=file_name,
         client=client,
         db_conn=db_conn,
@@ -84,7 +87,7 @@ def _job_status_message(job_id: str) -> str:
 
 
 async def _send_if_configured(
-    client: TelegramClient,
+    client: TelegramClientLike,
     telegram_chat_id: int,
     message: str,
 ) -> None:

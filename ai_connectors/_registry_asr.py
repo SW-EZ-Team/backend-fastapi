@@ -9,7 +9,6 @@ import logging
 from typing import Callable
 
 from .asr.gemini_asr_connector import GeminiASRConnector
-from .asr.mlx_qwen3_asr_connector import MLXQwen3ASRConnector
 from .asr.qwen3_asr_modal_connector import Qwen3ASRModalConnector
 from .base import ASRConnector
 from .errors import ModelNotFoundError
@@ -19,38 +18,13 @@ import os
 _LOG = logging.getLogger(__name__)
 
 # ASR 커넥터 팩토리 맵 (ASRConnector 구현체)
+# 활성 기본은 gemini-asr. qwen3-asr-modal 은 배포 시에만 .env 로 선택한다.
 ASR_CONNECTORS: dict[str, Callable[[], ASRConnector]] = {
     "gemini-asr": lambda: GeminiASRConnector(),
-    "mlx-qwen3-asr": lambda: MLXQwen3ASRConnector(),
     "qwen3-asr-modal": lambda: Qwen3ASRModalConnector(),
 }
 
-# Whisper Large V3 Turbo MLX 커넥터 등록 — mlx-whisper 미설치 환경에서도
-# 다른 ASR 모델이 정상 동작하도록 OCR/Postproc 와 동일한 try/except 패턴을 따른다.
-try:
-    from .asr.mlx_whisper_turbo_connector import MLXWhisperTurboConnector
-    ASR_CONNECTORS["mlx-whisper-turbo"] = lambda: MLXWhisperTurboConnector()
-except ImportError as _whisper_turbo_import_err:
-    _LOG.warning(
-        "mlx-whisper-turbo 커넥터 등록 건너뜀 (ImportError: %s). "
-        "`uv pip install mlx-whisper` 실행 필요",
-        _whisper_turbo_import_err,
-    )
-
-# SenseVoice-Small MLX 커넥터 등록 — Whisper Turbo 와 동일한 패턴.
-# mlx-audio 는 이미 Phase C (TTS) 로 설치돼 있으므로 import 성공할 가능성이 높지만,
-# 샌드박스 의존성 변경으로 제거될 경우를 대비해 보호한다.
-try:
-    from .asr.sensevoice_small_connector import SenseVoiceSmallConnector
-    ASR_CONNECTORS["sensevoice-small"] = lambda: SenseVoiceSmallConnector()
-except ImportError as _sensevoice_import_err:
-    _LOG.warning(
-        "sensevoice-small 커넥터 등록 건너뜀 (ImportError: %s). "
-        "`uv pip install mlx-audio==0.4.2` 실행 필요",
-        _sensevoice_import_err,
-    )
-
-# FallbackASRConnector — Whisper → SenseVoice → Qwen 2단 폴백.
+# FallbackASRConnector — Gemini → Qwen3 ASR Modal 폴백.
 # LangGraph 의존성 미설치 환경에서도 개별 ASR 커넥터는 정상 동작하도록 보호한다.
 try:
     from .asr.fallback import FallbackASRConnector
@@ -87,7 +61,7 @@ except ImportError as _fallback_import_err:
 
 def get_asr_connector(model_name: str | None = None) -> ASRConnector:
     """.env 의 AI_MODEL_ASR 또는 명시된 model_name 으로 ASR 커넥터 반환."""
-    name = model_name or os.getenv("AI_MODEL_ASR", "mlx-qwen3-asr")
+    name = model_name or os.getenv("AI_MODEL_ASR", "gemini-asr")
     if name not in ASR_CONNECTORS:
         raise ModelNotFoundError(
             f"Unknown ASR model: {name}. Registered: {list(ASR_CONNECTORS.keys())}"

@@ -18,7 +18,7 @@ from ..schemas import TelegramMessageSummary
 from . import file_downloader
 from .assignment_grader import GradingResult
 from .assignment_grader import grade_submission
-from .telegram_client import TelegramClient
+from .protocols import TelegramClientLike
 
 # 과제 조회 쿼리 — 해당 사용자의 가장 최근 미완료 과제를 찾는다
 _FIND_ASSIGNMENT_SQL = """
@@ -94,7 +94,7 @@ async def _find_assignment(conn: WeaknessConnection, user_id: str) -> _Assignmen
     )
 
 
-async def _send_dm(client: TelegramClient, chat_id: int, message: str) -> None:
+async def _send_dm(client: TelegramClientLike, chat_id: int, message: str) -> None:
     """봇 토큰이 있을 때만 DM을 전송한다."""
     token = get_default_bot_token()
     if token is None:
@@ -142,7 +142,7 @@ async def handle_file_submission(
     summary: TelegramMessageSummary,
     file_id: str,
     file_name: str,
-    client: TelegramClient,
+    client: TelegramClientLike,
     db_conn: WeaknessConnection,
 ) -> None:
     """과제 파일 제출 채점 전체 흐름을 실행한다."""

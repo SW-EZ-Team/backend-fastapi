@@ -11,12 +11,16 @@ from app.modules.Telegram_control_module.services.command_dispatcher import disp
 
 
 class FakeTelegramClient:
-    """전송 요청을 메모리에 보존하는 테스트 클라이언트."""
+    """전송 요청을 메모리에 보존하는 테스트 클라이언트.
+
+    TelegramClientLike Protocol을 구조적으로 만족하므로 별도 상속이 불필요하다.
+    """
 
     def __init__(self) -> None:
         self.sent: list[tuple[str, str, str]] = []
 
-    async def send_message(self, token: str, chat_id: str, message: str):
+    async def send_message(self, token: str, chat_id: str, message: str) -> None:
+        """실제 HTTP 호출 없이 전송 내역만 기록한다."""
         self.sent.append((token, chat_id, message))
 
 
@@ -41,7 +45,7 @@ async def test_dispatch_job_status_command(monkeypatch: pytest.MonkeyPatch) -> N
             content=f"/job_status {record.job_id}",
             message_type="text",
         ),
-        fake,  # type: ignore[arg-type]
+        fake,
     )
 
     assert handled is True
@@ -61,7 +65,7 @@ async def test_dispatch_ignores_plain_text() -> None:
             content="안녕하세요",
             message_type="text",
         ),
-        fake,  # type: ignore[arg-type]
+        fake,
     )
     assert handled is False
     assert fake.sent == []

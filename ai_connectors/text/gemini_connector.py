@@ -16,7 +16,7 @@ from ai_connectors.errors import (
 )
 from ai_connectors.errors import TimeoutError as ConnectorTimeoutError
 from ai_connectors.text_schemas import ChapterAIRequest, ChapterAIResponse
-from common.text_config import gemini_text_model, google_api_key
+from common.text_config import gemini_text_model, gemini_thinking_level, google_api_key
 
 try:
     from common.llm_output import strip_thinking as _strip_thinking
@@ -56,6 +56,9 @@ class GeminiGenAIConnector:
             raise AuthError("GOOGLE_API_KEY 또는 GEMINI_API_KEY가 설정되지 않았다.")
         self._client: _GenAIClient = genai.Client(api_key=api_key)
         self._model = gemini_text_model()
+        # gemini-3.5-flash는 thinking 모델이라 사고량이 크면 reasoning 텍스트가 답변
+        # 본문으로 새어 나온다. thinking_level을 LOW(기본)로 낮춰 추론 노출을 차단한다.
+        self._thinking_level = gemini_thinking_level()
 
     async def generate(self, req: ChapterAIRequest) -> ChapterAIResponse:
         """동기 google-genai SDK 호출을 스레드로 감싸 텍스트를 생성한다."""
@@ -88,6 +91,11 @@ class GeminiGenAIConnector:
             system_instruction=req.system or None,
             temperature=req.temperature,
             max_output_tokens=req.max_tokens,
+            # Gemini 3 계열은 thinking_budget 미지원 → thinking_level로 사고량을 제어한다.
+            # reasoning 스크래치패드가 최종 답변에 노출되는 것을 모델 단에서 막는다.
+            thinking_config=genai.types.ThinkingConfig(
+                thinking_level=self._thinking_level
+            ),
         )
         try:
             return self._client.models.generate_content(

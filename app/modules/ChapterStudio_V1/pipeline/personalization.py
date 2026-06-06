@@ -55,9 +55,20 @@ def _weak_points_line(weak_points: str) -> str:
 
 
 def _speech_line(use_formal_speech: bool) -> str:
+    # ~봐요/~봐 어미 예시는 narration·음성대본 전용임을 명시한다.
+    # 퀴즈 발문(question 필드)은 이 말투 지시를 따르지 않고
+    # parallel_prompt_text.py의 question 발문 형식 규칙을 따른다.
     if use_formal_speech:
-        return "말투: 존댓말로 한다(~해요,~예요,~봐요). 다정하고 또렷한 과외쌤 톤."
-    return "말투: 반말체로 한다(~해,~야,~봐,~거야). 친근한 또래 과외쌤 톤. 과한 ㅋㅋ·은어 금지."
+        return (
+            "말투(narration·음성대본 한정): 존댓말로 한다(~해요,~예요,~습니다). "
+            "다정하고 또렷한 과외쌤 톤. "
+            "단, 이 말투 규칙은 설명·narration에만 적용한다 — 퀴즈 발문은 별도 형식 규칙을 따른다."
+        )
+    return (
+        "말투(narration·음성대본 한정): 반말체로 한다(~해,~야,~거야). "
+        "친근한 또래 과외쌤 톤. 과한 ㅋㅋ·은어 금지. "
+        "단, 이 말투 규칙은 설명·narration에만 적용한다 — 퀴즈 발문은 별도 형식 규칙을 따른다."
+    )
 
 
 def _emoji_line(use_emoji: bool) -> str:

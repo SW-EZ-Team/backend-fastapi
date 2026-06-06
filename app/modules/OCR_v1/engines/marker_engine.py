@@ -21,11 +21,14 @@ _LOG = logging.getLogger(__name__)
 # Marker 임포트 — 미설치 환경에서도 모듈 로드가 가능하도록 가용성만 사전 확인
 # 실제 import는 _run_marker 내부에서 필요 시점에 수행한다
 try:
-    import marker.converters.pdf  # type: ignore[import]
+    # marker-pdf 패키지는 공식 타입 스텁(.pyi)을 제공하지 않는 선택적 라이브러리다.
+    # 스텁 부재는 pyproject.toml의 mypy.overrides(marker.*)에서 프로젝트 수준으로 허용한다.
+    # 가용성 확인만이 목적이므로 실제 import는 _run_marker 내부에서 수행한다.
+    import marker.converters.pdf
     _MARKER_AVAILABLE = True
 except ImportError:
     try:
-        import marker.convert  # type: ignore[import]
+        import marker.convert
         _MARKER_AVAILABLE = True
     except ImportError:
         _MARKER_AVAILABLE = False
@@ -134,8 +137,8 @@ class MarkerEngine:
             return _parse_rendered(rendered, use_llm)
 
         except (ImportError, AttributeError):
-            # 구버전 Marker API 폴백
-            from marker.convert import convert_single_pdf  # type: ignore[import]
+            # 구버전 Marker API 폴백 — stubs 부재는 pyproject.toml mypy.overrides에서 허용한다.
+            from marker.convert import convert_single_pdf
             full_text, _images, _meta = convert_single_pdf(
                 str(pdf_path), self._model_dict, max_pages=None,
                 langs=None, batch_multiplier=2,

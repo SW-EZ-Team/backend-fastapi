@@ -22,59 +22,11 @@ def get_asr_model_name() -> str:
     return os.getenv("AI_MODEL_ASR", "mlx-qwen3-asr")
 
 
-def get_qwen3_asr_model_path() -> str:
-    """Qwen3-ASR 가중치 경로.
-
-    .env에 QWEN3_ASR_MODEL_PATH가 있으면 우선 사용.
-    없으면 HF 허브 repo id("Qwen/Qwen3-ASR-1.7B")를 그대로 반환해
-    커넥터가 HF 캐시에서 자동 다운로드/로드하도록 맡긴다.
-    """
-    # 사용자 지정 로컬 경로가 있으면 절대경로로 치환
-    local = os.getenv("QWEN3_ASR_MODEL_PATH", "").strip()
-    if local:
-        return str(Path(local).expanduser().resolve())
-    # 기본값: HF 허브 repo id — mlx_qwen3_asr 라이브러리가 내부에서 다운로드
-    return "Qwen/Qwen3-ASR-1.7B"
-
-
 def get_models_cache_dir() -> Path:
     """모델 가중치 로컬 캐시 디렉터리 경로."""
     # 없으면 생성해서 반환 — 다운로드 스크립트와 동일한 동작
     _DEFAULT_MODELS_DIR.mkdir(parents=True, exist_ok=True)
     return _DEFAULT_MODELS_DIR
-
-
-def get_whisper_turbo_model_path() -> str:
-    """Whisper Large V3 Turbo (MLX 변환본) 가중치 경로.
-
-    .env 의 WHISPER_TURBO_MODEL_PATH 가 우선 — 절대경로로 치환.
-    비어있으면 mlx-community 의 공식 변환본 repo id 를 반환해
-    mlx_whisper.transcribe 가 huggingface_hub 캐시에서 자동 다운로드/로드한다.
-    """
-    # 사용자 지정 로컬 경로 우선
-    local = os.getenv("WHISPER_TURBO_MODEL_PATH", "").strip()
-    if local:
-        return str(Path(local).expanduser().resolve())
-    # 기본값: mlx-community 공식 MLX 변환본 — float16 가중치 (~3GB)
-    return "mlx-community/whisper-large-v3-turbo"
-
-
-def get_sensevoice_model_path() -> str:
-    """SenseVoice-Small (MLX 변환본) 가중치 경로.
-
-    .env 의 SENSEVOICE_MODEL_PATH 가 우선 — 절대경로로 치환.
-    비어있으면 mlx-community 공식 변환본 repo id 를 반환해
-    mlx_audio.stt.utils.load 가 huggingface_hub 캐시에서 자동 다운로드/로드한다.
-
-    mlx-community/SenseVoiceSmall 은 mlx-audio 0.4.0 으로 변환된 quantized
-    safetensors (~936MB) 이며, chn/jpn/yue/eng/ko BPE 토크나이저를 포함한다.
-    """
-    # 사용자 지정 로컬 경로 우선 — 절대경로로 치환
-    local = os.getenv("SENSEVOICE_MODEL_PATH", "").strip()
-    if local:
-        return str(Path(local).expanduser().resolve())
-    # 기본값: mlx-community 공식 MLX 변환본 — 936MB quantized safetensors
-    return "mlx-community/SenseVoiceSmall"
 
 
 def get_denoise_model_name() -> str:
@@ -134,23 +86,6 @@ def get_postproc_model_name() -> str:
     return os.getenv("AI_MODEL_POSTPROC", "kanana2-mlx")
 
 
-def get_kanana_mlx_model_path() -> str:
-    """Kanana MLX 가중치 경로.
-
-    .env 의 KANANA_MLX_MODEL_PATH 가 우선 — 절대경로로 치환.
-    비어있으면 probe 검증된 기본 repo id 를 반환한다.
-    향후 Kanana-2 MLX 4bit 가 공개되면 .env 한 줄만 수정해 승격 가능하도록
-    경로/repo id 를 여기서 일원화한다.
-    """
-    # 사용자 지정 로컬 경로 우선
-    local = os.getenv("KANANA_MLX_MODEL_PATH", "").strip()
-    if local:
-        return str(Path(local).expanduser().resolve())
-    # 기본값: probe 에서 검증된 Kanana-1.5 2.1B Instruct 2505 MLX 4bit
-    # (CER 16→0.22, 할루시네이션 0%, 로드 1.16s 검증됨)
-    return "squeezebits/kanana-1.5-2.1b-instruct-2505-mlx"
-
-
 def get_rate_limit_rpm() -> int:
     """분당 최대 요청 수. 미지정 시 60."""
     # 내부 AI 서비스이므로 기본값을 넉넉히 설정 — GPU 집약 엔드포인트 보호가 목적
@@ -163,17 +98,3 @@ def get_rate_limit_burst() -> int:
     return int(os.getenv("RATE_LIMIT_BURST", "10"))
 
 
-def get_paddleocr_vl_mlx_model_path() -> str:
-    """PaddleOCR-VL MLX 가중치 경로.
-
-    .env 의 PADDLEOCR_VL_MLX_MODEL_PATH 가 우선 — 절대경로로 치환.
-    비어있으면 mlx-community 에서 검증된 기본 repo id 를 반환한다.
-    PaddleOCR-VL-1.5 보다 상위 버전 MLX 4bit 가 공개되면 .env 한 줄만 수정해
-    승격 가능하도록 경로/repo id 를 여기서 일원화한다.
-    """
-    # 사용자 지정 로컬 경로 우선
-    local = os.getenv("PADDLEOCR_VL_MLX_MODEL_PATH", "").strip()
-    if local:
-        return str(Path(local).expanduser().resolve())
-    # 기본값: mlx-community 4bit 양자화 레포 — 한글 bbox 추출 probe 통과
-    return "mlx-community/PaddleOCR-VL-1.5-4bit"

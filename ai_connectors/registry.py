@@ -29,7 +29,7 @@ from ._registry_voice import get_voice_connector
 _LOG = logging.getLogger(__name__)
 
 # 후처리를 건너뛰는 OCR 모델 목록 — Nemotron-OCR-v2 는 글자 추출만 수행하고 정확도는
-# 하위 LLM 이 커버하는 전략이라 후처리를 생략한다. PaddleOCR-VL 경로는 기존대로 후처리 유지.
+# 하위 LLM 이 커버하는 전략이라 후처리를 생략한다. 그 외 OCR 경로는 후처리를 유지한다.
 _POSTPROC_BYPASS_OCR = frozenset({"nemotron-ocr-v2"})
 
 
@@ -39,13 +39,13 @@ def get_textbook_ocr_pipeline(
 ) -> "TextbookOCRPipeline":
     """교재 OCR 파이프라인 factory.
 
-    ocr_key: OCR_CONNECTORS 키 (기본값: AI_MODEL_OCR/AI_OCR → 'paddleocr-vl-mlx')
-    postproc_key: POSTPROC_CONNECTORS 키 (기본값: AI_MODEL_POSTPROC → 'kanana2-mlx')
+    ocr_key: OCR_CONNECTORS 키 (기본값: AI_MODEL_OCR/AI_OCR → 'gemini-ocr')
+    postproc_key: POSTPROC_CONNECTORS 키 (기본값: AI_MODEL_POSTPROC → 'kanana2-modal')
     후처리 커넥터 미등록 시 None 으로 주입 — 파이프라인은 후처리 건너뛰고 동작한다.
 
     OCR 모델이 `_POSTPROC_BYPASS_OCR` 에 속하면(현재: nemotron-ocr-v2) 후처리는
-    명시적으로 건너뛴다 — Kanana-2 는 PaddleOCR-VL 전용 후처리 루프이고, Nemotron
-    경로는 후처리 없이 LLM 단계로 바로 넘기는 설계라서다.
+    명시적으로 건너뛴다 — Nemotron 경로는 후처리 없이 LLM 단계로 바로 넘기는 설계라서다.
+    그 외 OCR 모델은 Kanana-2 Modal 후처리 커넥터로 교정한다.
     """
     # 지연 import — 순환 참조 방지 (pipelines → registry → pipelines)
     from .pipelines.textbook_ocr_pipeline import TextbookOCRPipeline

@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.ChapterStudio_V1.app.frontend_contract import SourceMode, TeacherId
 
-CurriculumEngine = Literal["mock", "codex_cli"]
+CurriculumEngine = Literal["mock", "gemini"]
 CurriculumDifficulty = Literal["easy", "medium", "hard"]
 
 
@@ -22,7 +22,7 @@ class CurriculumPreviewRequest(BaseModel):
     difficulty: CurriculumDifficulty = "medium"
     lesson_count: int = Field(default=10, ge=10, le=15)
     teacher: TeacherId = "owl"
-    engine: CurriculumEngine = "codex_cli"
+    engine: CurriculumEngine = "gemini"
 
 
 class CurriculumLesson(BaseModel):

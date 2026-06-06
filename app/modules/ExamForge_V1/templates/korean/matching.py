@@ -20,8 +20,14 @@ class KoreanMatchingTemplate:
     def build_generation_prompt(
         self, topic: str, difficulty: int, context: str, count: int,
     ) -> str:
-        """연결형 문제 생성 프롬프트."""
+        """연결형 문제 생성 프롬프트.
+
+        matching_pairs 최소 3쌍 이상을 강제하고 few-shot 예시를 제공해
+        '매칭 쌍이 3개 미만' 검증 탈락을 사전 차단한다.
+        correct_answer 형식(A-1, B-2)도 명시해 정답 파싱 실패를 방지한다.
+        """
         pair_count = {1: 3, 2: 4, 3: 5, 4: 6, 5: 7}
+        required_pairs = pair_count.get(difficulty, 5)
         return f"""다음 학습 자료를 기반으로 연결형(매칭) 문제를 생성하시오.
 
 [학습 자료]
@@ -31,9 +37,16 @@ class KoreanMatchingTemplate:
 - 주제: {topic}
 - 난이도: {difficulty}/5
 - 문항 수: {count}개
-- 좌우 쌍 수: {pair_count.get(difficulty, 5)}개
-- 좌측: 용어/개념/코드, 우측: 설명/결과/정의
-- 1:1 대응만 허용 (중복 매칭 금지)
+- 좌우 쌍 수: 반드시 {required_pairs}개 (최소 3개 이상 필수)
+- 좌측: 용어/개념/연산자, 우측: 설명/결과/정의
+- 1:1 대응만 허용 (동일 우측 설명을 두 좌측 항목에 재사용 금지)
+- 좌측 항목들이 서로 같은 주제 영역에서 자연스럽게 짝 지을 수 있는 쌍 구성
+
+[⚠️ 검증 통과를 위한 필수 규칙]
+1. matching_pairs 배열 길이: 반드시 {required_pairs}개 (3개 미만이면 검증 실패)
+2. left/right 모두 비어있지 않은 문자열
+3. bloom_level: 기억|이해|분석 중 하나
+4. JSON 배열 외 추가 텍스트 출력 금지
 
 [출력 형식 - JSON 배열]
 [
@@ -44,10 +57,29 @@ class KoreanMatchingTemplate:
     "bloom_level": "기억|이해|분석",
     "matching_pairs": [
       {{"left": "용어A", "right": "설명A"}},
-      {{"left": "용어B", "right": "설명B"}}
+      {{"left": "용어B", "right": "설명B"}},
+      {{"left": "용어C", "right": "설명C"}}
     ]
   }}
 ]
+
+[모범 예시 — 이 형식·수준으로 출력할 것 (내용은 학습 자료 기반으로 새로 작성)]
+[
+  {{
+    "stem": "다음 자료구조와 그 특성을 올바르게 연결하시오.",
+    "topic": "자료구조",
+    "difficulty": 2,
+    "bloom_level": "기억",
+    "matching_pairs": [
+      {{"left": "스택(Stack)", "right": "LIFO — 마지막 삽입이 가장 먼저 삭제"}},
+      {{"left": "큐(Queue)", "right": "FIFO — 먼저 삽입된 것이 먼저 삭제"}},
+      {{"left": "덱(Deque)", "right": "양방향 삽입·삭제 가능한 선형 구조"}},
+      {{"left": "힙(Heap)", "right": "우선순위 기준으로 삭제되는 트리 기반 구조"}}
+    ]
+  }}
+]
+- 위 예시는 난이도 2 기준 4쌍이다. 요청 난이도({difficulty})에 맞게 {required_pairs}쌍을 생성한다.
+- matching_pairs가 {required_pairs}개 미만이면 반드시 추가해 {required_pairs}개를 맞춰라.
 
 정확히 {count}개를 JSON 배열로 출력하시오."""
 
@@ -60,10 +92,21 @@ class KoreanMatchingTemplate:
     def build_answer_prompt(
         self, question_draft: QuestionDraft, source_text: str,
     ) -> str:
-        """정답 매칭 검증."""
+        """정답 매칭 검증.
+
+        correct_answer 형식("A-1, B-2, ...")을 명시해
+        파싱 불가능한 자유 텍스트 응답을 방지한다.
+        """
+        pairs = question_draft.matching_pairs or []
         pairs_str = json.dumps(
-            [p.model_dump() for p in (question_draft.matching_pairs or [])],
+            [p.model_dump() for p in pairs],
             ensure_ascii=False,
+        )
+        # 좌측 레이블 생성 (A, B, C, ...) — 정답 형식 예시 제공에 사용
+        left_labels = [chr(65 + i) for i in range(len(pairs))]
+        right_labels = [str(i + 1) for i in range(len(pairs))]
+        answer_format_example = ", ".join(
+            f"{l}-{r}" for l, r in zip(left_labels, right_labels)
         )
         return f"""다음 연결형 문제의 정답과 해설을 생성하시오.
 
@@ -73,19 +116,25 @@ class KoreanMatchingTemplate:
 [문제]
 {question_draft.stem}
 
-[매칭 쌍]
+[매칭 쌍 — 좌측은 A·B·C... 순, 우측은 1·2·3... 순으로 번호 부여]
 {pairs_str}
 
 [지시사항]
-1. 각 좌-우 쌍의 연결이 올바른지 검증
-2. 올바른 매칭을 "A-1, B-2, ..." 형태로 정리
-3. 각 연결의 근거를 해설에 포함
+1. 각 좌측 항목(A, B, C...)이 연결되어야 할 우측 항목(1, 2, 3...)을 찾아라
+2. correct_answer: 반드시 "A-N, B-N, C-N, ..." 형식으로 작성
+   예: "{answer_format_example}" (이 예시는 좌측 순서 그대로 연결된 경우)
+3. 실제로 틀린 매칭이 있으면 올바른 번호로 교정해 정확한 매칭을 출력
+4. explanation: 각 매칭의 근거를 40자 이상 해설
+
+[⚠️ 출력 형식 — 반드시 준수]
+- correct_answer: "A-숫자, B-숫자, ..." 형식 (이 형식이 아니면 파싱 실패)
+- JSON 객체 하나만 출력
 
 [출력 형식 - JSON]
 {{
   "correct_answer": "A-1, B-2, C-3, ...",
-  "explanation": "각 매칭 근거 해설",
-  "source_reference": "관련 원문 인용"
+  "explanation": "각 매칭 근거 해설 (40자 이상)",
+  "source_reference": "관련 원문 인용 구절"
 }}"""
 
     def parse_generation_response(

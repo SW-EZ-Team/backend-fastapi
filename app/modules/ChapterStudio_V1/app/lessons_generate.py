@@ -16,6 +16,7 @@ from typing import Protocol
 
 from app.modules.ChapterStudio_V1.app.generation_context import GenerationContext
 from app.modules.ChapterStudio_V1.app.lesson_audio_backfill import backfill_lesson_audio
+from app.modules.ChapterStudio_V1.app.pdf_context_injector import inject_reference_context_if_pdf
 from app.modules.ChapterStudio_V1.common.config import tts_autogen_enabled
 from app.modules.ChapterStudio_V1.common.errors import StorageError
 from app.modules.ChapterStudio_V1.db.generation_context_loader import load_generation_context
@@ -171,6 +172,8 @@ async def _load_generation_context_after_spring_commit(lesson_id: str) -> Genera
 
 async def _generate_loaded_context(context: GenerationContext) -> bool:
     """로드된 생성 컨텍스트를 공통 생성·저장 경로로 실행한다."""
+    # PDF 소스 강의에서 참고도서 컨텍스트가 아직 없으면 Qdrant에서 자동 주입한다
+    context = await inject_reference_context_if_pdf(context)
     chapter_id = _chapter_id(context.lesson_id)
     stage = "generate_chapter_state"
     try:

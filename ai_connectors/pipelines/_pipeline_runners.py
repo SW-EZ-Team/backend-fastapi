@@ -48,5 +48,5 @@ async def run_postproc(
     response: PostprocResponse = await postproc_connector.refine(request)
     refined_text: str = response.refined_text
     corrections: list[Correction] = parse_corrections(response.corrections)
-    model_name: str = getattr(postproc_connector, "name", "kanana2-mlx")
+    model_name: str = getattr(postproc_connector, "name", "kanana2-modal")
     return refined_text, corrections, model_name

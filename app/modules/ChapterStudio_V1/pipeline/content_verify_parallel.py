@@ -49,8 +49,11 @@ from app.modules.ChapterStudio_V1.pipeline.voice_length_gate import length_gate_
 from app.modules.ChapterStudio_V1.pipeline.voice_structure_gate import structure_gate_errors
 
 # 검증/교정 토큰 상한 — content_verify.py와 동일 기준.
-_VERIFY_MAX_TOKENS = 8000
-_CORRECT_MAX_TOKENS = 16000
+# gemini-3.5-flash thinking 토큰(~21000)이 max_output_tokens 예산을 먼저 잠식한다.
+# 8000/16000에서는 thinking이 크면 검증 오류목록·교정 JSON 본문이 절단(finish_reason=MAX_TOKENS)돼
+# 그룹 교정이 실패했다. thinking 헤드룸을 포함해 verify=32000, correct=40000으로 올린다(한도 65536 이내).
+_VERIFY_MAX_TOKENS = 32000
+_CORRECT_MAX_TOKENS = 40000
 # 동시에 검증·교정하는 컴포넌트 그룹.
 _GROUPS = ("slides", "quizzes", "voice")
 

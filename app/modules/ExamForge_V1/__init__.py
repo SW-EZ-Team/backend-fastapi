@@ -1,5 +1,8 @@
 """AI 모의고사 생성 모듈."""
 from app.modules.ExamForge_V1.app.routers.exam_forge import router
+from app.modules.ExamForge_V1.app.routers.mock_async_router import (
+    router as mock_async_router,
+)
 from app.modules.ExamForge_V1.app.routers.mock_exam_analysis import (
     router as mock_exam_analysis_router,
 )
@@ -62,6 +65,7 @@ __all__ = [
     "ExamForgeRequest",
     "ExamForgeResponse",
     "generate_exam_forge",
+    "mock_async_router",
     "mock_exam_analysis_router",
     "router",
     "spring_adapter_router",

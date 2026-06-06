@@ -5,7 +5,7 @@
 
 벤더 중립: 특정 커넥터(Claude 등)를 직접 생성하지 않고 registry 의
 get_text_connector() 로 ACTIVE_TEXT_MODEL 이 가리키는 커넥터를 받는다.
-관리자가 .env 값 하나(codex_cli ↔ claude_sonnet ↔ Qwen 등)만 바꾸면
+관리자가 .env 값 하나(gemini_flash ↔ claude_sonnet ↔ Qwen 등)만 바꾸면
 Chat 호출 경로도 함께 스왑된다.
 """
 from __future__ import annotations
@@ -84,7 +84,10 @@ def build_system_prompt(request: ChatRequest | VoiceChatRequest) -> str:
         "4. 단순 정의만 나열하지 말고, 핵심 + 짧은 예시(강의 자료 범위 안)로 과외쌤처럼 "
         "설명해요. 단, 강의에 없는 내용을 만들어 내지 않아요.\n"
         f"5. 강의 범위 밖의 질문이면 '{OUT_OF_SCOPE_REPLY}'라고 안내해요.\n"
-        "6. 해요체(~해요, ~예요)를 사용해요.\n\n"
+        "6. 해요체(~해요, ~예요)를 사용해요.\n"
+        "7. 반드시 한국어 자연어 문장으로만 답해요. 내부 분석·사고 과정·체크리스트·"
+        "영어 메모·'Yes/No' 식 판단 메모를 절대 답변에 노출하지 않아요. 학생에게 보여줄 "
+        "최종 답변 문장만 출력해요(추론 흔적, 영어 불릿, 메타 설명 금지).\n\n"
         + _FEW_SHOT_BLOCK
     )
 

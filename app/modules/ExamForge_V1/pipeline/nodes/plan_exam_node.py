@@ -79,12 +79,57 @@ async def plan_exam_node(state: ExamForgeState) -> dict:
     return result
 
 
+def _coerce_to_list(value: object, field_name: str) -> list:
+    """LLM이 리스트 필드에 스칼라(float/int/str/None)를 줄 때 안전하게 리스트로 변환한다.
+
+    Gemini가 type_allocations 같은 배열 필드를 단일 숫자로 줄 경우
+    TypeError: 'float' object is not iterable 크래시가 발생한다.
+    명시적 isinstance 가드로 비정상 타입을 잡아 빈 리스트로 정규화한다.
+    """
+    if isinstance(value, list):
+        return value
+    # None이나 스칼라(float/int/str/dict)는 전부 빈 리스트로 처리한다
+    logger.warning(
+        "_normalize_plan: %s 필드가 list가 아닌 %s 타입(%r)으로 수신 → 빈 리스트로 정규화",
+        field_name,
+        type(value).__name__,
+        value,
+    )
+    return []
+
+
+def _coerce_to_dict(value: object, field_name: str) -> dict:
+    """LLM이 dict 필드에 스칼라를 줄 때 안전하게 dict로 변환한다.
+
+    topic_weights 같은 딕셔너리 필드에 float가 오면
+    AttributeError: 'float' object has no attribute 'items' 크래시가 발생한다.
+    명시적 isinstance 가드로 비정상 타입을 잡아 빈 딕셔너리로 정규화한다.
+    """
+    if isinstance(value, dict):
+        return value
+    logger.warning(
+        "_normalize_plan: %s 필드가 dict가 아닌 %s 타입(%r)으로 수신 → 빈 딕셔너리로 정규화",
+        field_name,
+        type(value).__name__,
+        value,
+    )
+    return {}
+
+
 def _normalize_plan(
     plan: dict,
     config: dict,
     topics: list[dict] | None = None,
 ) -> dict:
     """작은 시험에서도 계획이 생성/커버리지 계산에 맞게 수렴하도록 보정한다."""
+    # plan 자체가 dict가 아니면(Gemini가 최상위를 float/None으로 줄 경우)
+    # dict 변환이 TypeError를 일으키므로 먼저 타입을 확인한다.
+    if not isinstance(plan, dict):
+        logger.warning(
+            "_normalize_plan: plan이 dict가 아닌 %s 타입으로 수신 → 빈 plan으로 대체",
+            type(plan).__name__,
+        )
+        plan = {}
     normalized = dict(plan)
     # 비정수 값이 들어올 수 있으므로 변환 실패 시 내부 값으로 안전하게 폴백한다
     try:
@@ -92,12 +137,22 @@ def _normalize_plan(
     except (ValueError, TypeError):
         total = int(normalized.get("total_questions", 0) or 0)
     normalized["total_questions"] = total
+    # LLM이 hallucination으로 잘못된 template_id를 생성할 수 있으므로
+    # 허용된 question_types 목록과 대조해 유효하지 않은 template_id를 보정한다.
+    # Gemini가 type_allocations에 float/None/dict를 줄 경우 리스트로 정규화한다.
+    raw_allocations = _coerce_to_list(normalized.get("type_allocations"), "type_allocations")
+    normalized["type_allocations"] = _sanitize_template_ids(
+        raw_allocations,
+        _question_types(config),
+    )
     normalized["type_allocations"] = _ensure_reasoning_distribution(
         normalized.get("type_allocations", []),
         total,
     )
+    # Gemini가 topic_weights에 float/None/list를 줄 경우 빈 dict로 정규화한다.
+    raw_topic_weights = _coerce_to_dict(normalized.get("topic_weights"), "topic_weights")
     normalized["topic_weights"] = _trim_topic_weights(
-        normalized.get("topic_weights", {}),
+        raw_topic_weights,
         max_topics=max(1, total),
     )
     normalized["bloom_distribution"] = _bloom_distribution_from_allocations(
@@ -115,6 +170,34 @@ def _normalize_plan(
         # plan-first 검증 게이트용: 배정된 정답 위치 분포를 계획에 기록한다
         normalized["answer_position_plan"] = compute_answer_position_plan(blueprint)
     return normalized
+
+
+def _sanitize_template_ids(
+    allocations: list[dict],
+    allowed_types: list[str],
+) -> list[dict]:
+    """LLM이 생성한 allocations의 template_id를 허용 목록 기준으로 보정한다.
+
+    - template_id가 빈 문자열이거나 허용 목록에 없으면 allowed_types[0]으로 대체한다.
+    - allowed_types가 비어 있으면 원본 그대로 반환한다.
+    - Spring 콜백 "templateId must not be blank" 오류의 근본 원인 차단.
+    """
+    if not allowed_types:
+        return allocations
+    fallback = allowed_types[0]
+    sanitized: list[dict] = []
+    for alloc in allocations:
+        t_id = alloc.get("template_id", "")
+        if not t_id or t_id not in allowed_types:
+            # LLM 환각 template_id를 가장 가까운 허용 유형으로 교체한다
+            logger.warning(
+                "plan_exam_node: 유효하지 않은 template_id=%r → %r 로 보정",
+                t_id,
+                fallback,
+            )
+            alloc = {**alloc, "template_id": fallback}
+        sanitized.append(alloc)
+    return sanitized
 
 
 def _ensure_reasoning_distribution(allocations: list[dict], total: int) -> list[dict]:

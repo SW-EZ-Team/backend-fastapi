@@ -24,9 +24,13 @@ async def post_agent_callback(record: AgentJobRecord) -> tuple[bool, int, str | 
         return True, 0, None
     last_error: str | None = None
     payload = record.model_dump(mode="json")
+    # Spring InternalTokenFilter 통과용 내부 토큰 — FastAPI→Spring /internal/** 경로는
+    # 이 헤더가 없거나 불일치하면 403(SBM_003)으로 거절된다.
+    internal_token = os.environ.get("APP_INTERNAL_TOKEN", "")
     headers = {
         "Content-Type": "application/json",
         "X-FastAPI-Job-Id": record.job_id,
+        "X-Internal-Token": internal_token,
     }
     if record.correlation_id:
         headers["X-Correlation-Id"] = record.correlation_id
