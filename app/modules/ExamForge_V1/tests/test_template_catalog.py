@@ -29,12 +29,17 @@ from app.modules.ExamForge_V1.templates.registry import list_templates
 
 
 class _FakeResponse:
-    """생성기 더블 응답."""
+    """생성기 더블 응답.
+
+    finish_reason 기본값 "stop" — _is_max_tokens_truncated 검사 통과용.
+    """
 
     text: str
+    finish_reason: str
 
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, finish_reason: str = "stop") -> None:
         self.text = text
+        self.finish_reason = finish_reason
 
 
 class _CaptureConnector:

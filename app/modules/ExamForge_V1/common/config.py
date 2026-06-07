@@ -224,10 +224,11 @@ def missing_retry_cap() -> int:
     """개수 부족(missing_count > 0) 전용 재시도 최대 횟수.
 
     이 횟수를 소진하면 추가 재시도 없이 확보된 유효 문항만으로 passed 출고한다.
-    codex 속도(~5분/회)를 고려해 기본 1회로 제한한다.
+    누락 복구율 개선: Gemini JSON truncation 다발 환경에서 1회 시도로는 9/10 누락을
+    복구하지 못했다(실측 3/10 통과). 기본값을 3회로 올려 보충 생성 기회를 늘린다.
     EXAMFORGE_MISSING_RETRY_CAP 환경변수로 조정 가능.
     """
-    return max(0, _int_env("EXAMFORGE_MISSING_RETRY_CAP", 1))
+    return max(0, _int_env("EXAMFORGE_MISSING_RETRY_CAP", 3))
 
 
 def examforge_answer_key_secret() -> str:
