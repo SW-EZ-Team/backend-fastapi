@@ -28,6 +28,16 @@ from app.modules.ExamForge_V1.quality.cjk_sanitizer import sanitize_exam_questio
 logger = get_logger(__name__)
 
 
+def _is_max_tokens_truncated(finish_reason: str) -> bool:
+    """finish_reason이 MAX_TOKENS 계열인지 판별한다.
+
+    Gemini genai SDK는 finish_reason을 FinishReason 열거형 str 표현으로 반환한다.
+    MAX_TOKENS, max_tokens, FinishReason.MAX_TOKENS 등 표기가 섞이므로
+    대소문자 무관·부분 일치로 검사한다.
+    """
+    return "max_tokens" in finish_reason.lower()
+
+
 def _build_chunks(
     allocations: list[dict],
     topic_weights: dict[str, float],
@@ -145,6 +155,15 @@ async def _generate_chunk(
                 resp = await connector.generate(req)
             except Exception as exc:
                 logger.warning("청크 생성 커넥터 오류(%d차): %s", attempt + 1, exc)
+                continue
+            # finish_reason=MAX_TOKENS: thinking 토큰이 출력 예산을 잠식해 JSON이
+            # 중간에 절단된 경우다. 응답을 파싱하지 않고 즉시 재시도 경로로 이동한다.
+            if _is_max_tokens_truncated(resp.finish_reason):
+                logger.warning(
+                    "청크 생성 응답 절단(finish_reason=%s, %d차) — 재시도",
+                    resp.finish_reason, attempt + 1,
+                )
+                prompt = strict_generation_prompt(prompt, task)
                 continue
             try:
                 drafts = template.parse_generation_response(resp.text)

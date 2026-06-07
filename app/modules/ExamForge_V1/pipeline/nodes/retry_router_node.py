@@ -26,8 +26,8 @@ def _is_missing_retry_cap_reached(state: ExamForgeState) -> bool:
     """개수 부족 전용 재시도가 env 캡에 도달했는지 판단한다.
 
     missing_retry_count >= missing_retry_cap() 이면 True.
-    codex 속도(~5분/회)를 고려해 기본 캡은 1회로, 캡 도달 시
-    유효 문항만으로 passed 출고해 타임아웃을 방지한다.
+    누락 복구율 개선으로 기본 캡이 3회로 상향됐다(config.py 참조).
+    캡 도달 시 유효 문항만으로 passed 출고해 타임아웃을 방지한다.
     """
     cap = missing_retry_cap()
     current = state.get("missing_retry_count", 0)
@@ -45,7 +45,7 @@ async def retry_router_node(state: ExamForgeState) -> dict:
     route_after_validation의 비수렴 캡이 참조한다.
 
     missing_retry_count: missing_count > 0 이 원인인 retry 전용 카운터.
-    env EXAMFORGE_MISSING_RETRY_CAP(기본 1) 초과 시 추가 재시도 없이 passed 출고.
+    env EXAMFORGE_MISSING_RETRY_CAP(기본 3, 누락 복구율 개선) 초과 시 추가 재시도 없이 passed 출고.
     """
     # 상위 노드에서 에러가 전파된 경우 즉시 반환
     if state.get("pipeline_status") == "error":
@@ -172,9 +172,9 @@ def route_after_validation(state: ExamForgeState) -> str:
     validation_report_early = state.get("validation_report", {})
     missing_count = validation_report_early.get("missing_count")
     if isinstance(missing_count, int) and missing_count > 0:
-        # missing_retry_cap 우선 체크: env EXAMFORGE_MISSING_RETRY_CAP(기본 1) 도달 시
+        # missing_retry_cap 우선 체크: env EXAMFORGE_MISSING_RETRY_CAP(기본 3) 도달 시
         # 추가 재시도 없이 확보된 유효 문항으로 passed 출고한다.
-        # codex는 1회 ~5분 소요 — 캡 초과 재시도가 타임아웃의 근본 원인이므로 최우선 차단.
+        # 3회까지 보충 재시도를 허용해 Gemini truncation 환경에서 복구율을 높인다.
         if _is_missing_retry_cap_reached(state):
             logger.warning(
                 "route_after_validation: missing_retry_cap(%d) 도달(missing_count=%d) — "
