@@ -51,7 +51,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 USER appuser
 
-EXPOSE 8082
+EXPOSE 8000
 
 # 기본 커맨드는 api 서버 — compose에서 worker/beat용으로 override 한다
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8082"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

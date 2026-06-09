@@ -1,0 +1,78 @@
+name: ezteam-fastapi
+
+x-fastapi-common: &fastapi-common
+  image: "${DOCKER_USERNAME:?DOCKER_USERNAME is required}/${DOCKER_REPO:?DOCKER_REPO is required}:${DOCKER_TAG:-dev-latest}"
+  env_file:
+    - .env
+  environment:
+    APP_ENV: ${APP_ENV:-production}
+    ENVIRONMENT: ${ENVIRONMENT:-production}
+    APP_PORT: 8000
+    AGENT_JOB_STORE: ${AGENT_JOB_STORE:-redis}
+    AGENT_JOB_STORE_STRICT: ${AGENT_JOB_STORE_STRICT:-1}
+    AGENT_JOB_EXECUTOR: ${AGENT_JOB_EXECUTOR:-celery}
+    MEDIA_ROOT_DIR: ${MEDIA_ROOT_DIR:-/app/media}
+    QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+    OCR_V1_QDRANT_URL: ${OCR_V1_QDRANT_URL:-http://qdrant:6333}
+    TZ: Asia/Seoul
+  volumes:
+    - fastapi-media:/app/media
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  api:
+    <<: *fastapi-common
+    container_name: ezteam-fastapi-api
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    depends_on:
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    mem_limit: 700m
+
+  worker:
+    <<: *fastapi-common
+    container_name: ezteam-fastapi-worker
+    command: ["celery", "-A", "app.celery_app", "worker", "-l", "info", "--concurrency=1"]
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 500m
+
+  beat:
+    <<: *fastapi-common
+    container_name: ezteam-fastapi-beat
+    command: ["celery", "-A", "app.celery_app", "beat", "-l", "info"]
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 128m
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.6
+    container_name: ezteam-qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant-data:/qdrant/storage
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    mem_limit: 512m
+
+volumes:
+  fastapi-media:
+  qdrant-data:
