@@ -28,13 +28,15 @@ class Opus46Connector:
 
     async def generate(self, req: ChapterAIRequest) -> ChapterAIResponse:
         try:
-            msg = await self._client.messages.create(
+            # 스트리밍으로 응답을 수집 — 10분 이상 걸릴 수 있는 요청의 SDK 타임아웃 제약 우회
+            async with self._client.messages.stream(
                 model=_MODEL_ID,
                 max_tokens=req.max_tokens,
                 temperature=req.temperature,
                 system=req.system or "",
                 messages=[{"role": "user", "content": req.user}],
-            )
+            ) as stream:
+                msg = await stream.get_final_message()
             text = _first_text_block(msg)
             usage = _usage_pair(msg)
             return ChapterAIResponse(
