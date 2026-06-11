@@ -21,7 +21,11 @@ from app.modules.ChapterStudio_V1.common.config import tts_autogen_enabled
 from app.modules.ChapterStudio_V1.common.errors import StorageError
 from app.modules.ChapterStudio_V1.db.generation_context_loader import load_generation_context
 from app.modules.ChapterStudio_V1.db.persistence import persist_chapter_state
-from app.modules.ChapterStudio_V1.db.persistence_status import mark_audio_backfill_pending, mark_chapter_failed
+from app.modules.ChapterStudio_V1.db.persistence_status import (
+    mark_audio_backfill_pending,
+    mark_chapter_failed,
+    mark_chapter_running,
+)
 from app.modules.ChapterStudio_V1.db.weakness_aggregator import aggregate_weak_points
 from app.modules.ChapterStudio_V1.pipeline.converters import state_to_response
 from app.modules.ChapterStudio_V1.pipeline.graph import generate_chapter_state
@@ -126,6 +130,9 @@ async def generate_lesson_for_chapter(
         if context is None:
             _LOG.error("[lessons] 단건 강의 생성 입력 없음 — courseId=%s, lessonId=%s", course_id, lesson_id)
             return False
+        # 진단 우선: 무거운 생성에 들어가기 전에 진행중(running) 상태 행을 먼저 남긴다.
+        # 중간에 조용히 죽어도 0행이 아니라 running/failed 행이 남아 실패가 추적된다.
+        await _record_generation_running(context)
         personalized = _personalized_context(
             context,
             weak_points=weak_points,
@@ -188,6 +195,9 @@ async def _generate_loaded_context(context: GenerationContext) -> bool:
         _LOG.info("[lessons] 강의 완료 — lesson_id=%s, 슬라이드 %d", context.lesson_id, len(response.slides))
         return True
     except Exception as exc:
+        # 진단 우선: 실패 직전에 실제 예외 + 스택트레이스를 남겨 어느 stage에서 죽었는지 식별한다.
+        # (상태 행만으로는 원인이 보이지 않아 조용한 실패가 됐던 부분을 가시화한다.)
+        _LOG.exception("[lessons] 강의 생성 실패 — lessonId=%s, stage=%s", context.lesson_id, stage)
         await _record_generation_failure(context, chapter_id, stage, exc)
         return False
 
@@ -231,13 +241,28 @@ async def _mark_public_chapter_available(conn: ExecuteConnection, lesson_id: str
     )
 
 
+async def _record_generation_running(context: GenerationContext) -> None:
+    """생성 시작 시 running 상태 행을 짧은 독립 트랜잭션으로 커밋한다(진행률 0% 고정 완화).
+
+    이 행 기록 실패가 생성 자체를 막아선 안 되므로, 실패해도 로그만 남기고 진행한다.
+    """
+    chapter_id = _chapter_id(context.lesson_id)
+    try:
+        async with get_connection() as conn:
+            await mark_chapter_running(conn, context, chapter_id)
+        _LOG.info("[lessons] 생성 시작 상태 기록(running) — lessonId=%s", context.lesson_id)
+    except Exception:
+        _LOG.exception("[lessons] 생성 시작 상태 기록 실패 — lessonId=%s", context.lesson_id)
+
+
 async def _record_generation_failure(context: GenerationContext, chapter_id: str, stage: str, exc: Exception) -> None:
     _LOG.error("[lessons] 강의 실패 — lesson_id=%s, stage=%s, error=%s", context.lesson_id, stage, exc)
     try:
         async with get_connection() as conn:
             await mark_chapter_failed(conn, context, chapter_id, stage, exc)
-    except Exception as failure_exc:
-        _LOG.error("[lessons] 실패 상태 기록 실패 — lesson_id=%s, error=%s", context.lesson_id, failure_exc)
+    except Exception:
+        # 실패 상태 기록 자체가 또 실패하면 진짜 원인이 묻히므로 풀 스택으로 남긴다(삼키지 않음).
+        _LOG.exception("[lessons] 실패 상태 기록 실패 — lessonId=%s, stage=%s", context.lesson_id, stage)
 
 
 def _personalized_context(

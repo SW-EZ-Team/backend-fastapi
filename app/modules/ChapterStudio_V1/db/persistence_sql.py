@@ -155,6 +155,31 @@ def public_note_sql() -> str:
     )
 
 
+def running_status_sql(schema: str) -> str:
+    """생성 시작 시점에 진행중(running) 상태를 lesson_generation_status에 남기는 upsert 쿼리다.
+
+    조용한 실패로 0행만 남던 문제를 완화한다 — 중간에 죽어도 'running' 행이 남아
+    진행률 0% 고정과 진단 불가 상태를 막는다. result_summary/generation_model은 건드리지 않는다.
+    """
+    return (
+        f"INSERT INTO {_table(schema, 'lesson_generation_status')} "
+        "(lesson_id, tutoring_id, status, current_node, completed_nodes, total_nodes, "
+        "progress_percent, chapter_id, generation_model, result_summary, error_message, updated_at, completed_at) "
+        "VALUES ($1,$2,'running','generate_chapter_state',0,3,0,$3,NULL,'{}'::jsonb,NULL,NOW(),NULL) "
+        "ON CONFLICT (lesson_id) DO UPDATE SET "
+        "tutoring_id = EXCLUDED.tutoring_id, "
+        "status = EXCLUDED.status, "
+        "current_node = EXCLUDED.current_node, "
+        "completed_nodes = EXCLUDED.completed_nodes, "
+        "total_nodes = EXCLUDED.total_nodes, "
+        "progress_percent = EXCLUDED.progress_percent, "
+        "chapter_id = EXCLUDED.chapter_id, "
+        "error_message = NULL, "
+        "updated_at = NOW(), "
+        "completed_at = NULL"
+    )
+
+
 def failure_status_sql(schema: str) -> str:
     """실패 상태를 lesson_generation_status에 남기는 upsert 쿼리다."""
     return (
