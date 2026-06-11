@@ -6,6 +6,7 @@ from typing import Protocol
 
 from app.modules.ChapterStudio_V1.app.generation_context import GenerationContext
 from app.modules.ChapterStudio_V1.common.config import database_schema
+from app.modules.ChapterStudio_V1.common.errors import StorageError
 from app.modules.ChapterStudio_V1.db.persistence_sql import (
     assignment_sql,
     delete_queue_sql,
@@ -49,6 +50,9 @@ class PersistenceConnection(Protocol):
     async def execute(self, query: str, *args: object) -> object:
         """저장 쿼리를 실행한다."""
 
+    async def fetchval(self, query: str, *args: object) -> object:
+        """저장 후 검증 쿼리의 단일 값을 읽는다."""
+
 
 async def persist_chapter_state(
     conn: PersistenceConnection,
@@ -87,9 +91,12 @@ async def persist_chapter_state(
             step = "7/7 public 컨텐츠 저장"
             _LOG.info("[persist] 7/7 public 컨텐츠 저장 lessonId=%s", lesson_id)
             await persist_public_content(conn, context, state)
-            step = "7/7 완료 상태 기록"
-            _LOG.info("[persist] 7/7 완료 상태 기록 lessonId=%s", lesson_id)
-            await _mark_done(conn, context, chapter_id, state, schema)
+        step = "커밋 후 저장 검증"
+        _LOG.info("[persist] 커밋 후 저장 검증 시작 lessonId=%s", lesson_id)
+        await _verify_persisted_rows(conn, lesson_id, chapter_id, slide_count, schema)
+        step = "완료 상태 기록"
+        _LOG.info("[persist] 완료 상태 기록 lessonId=%s", lesson_id)
+        await _mark_done(conn, context, chapter_id, state, schema)
         _LOG.info("[persist] 저장 완료 lessonId=%s", lesson_id)
     except Exception:
         # 트랜잭션은 롤백되어 0행이 되므로, 어느 단계까지 진행됐는지를 로그로 남겨 원인을 좁힌다.
@@ -205,6 +212,45 @@ async def _insert_voice_scripts(conn: PersistenceConnection, context: Generation
 
 async def _mark_done(conn: PersistenceConnection, context: GenerationContext, chapter_id: str, state: ChapterStudioState, schema: str) -> None:
     await conn.execute(status_sql(schema), context.lesson_id, context.tutoring_id, chapter_id, _state_text(state, "generation_model"), _json(_summary(state)))
+
+
+async def _verify_persisted_rows(
+    conn: PersistenceConnection,
+    lesson_id: str,
+    chapter_id: str,
+    expected_slides: int,
+    schema: str,
+) -> None:
+    """커밋 이후 핵심 slide 행이 실제로 보이는지 검증한다.
+
+    status=done은 Spring 폴링이 생성 완료로 간주하는 신호다. 따라서 done을 기록하기 전
+    chapter_studio/public 양쪽 slide 행이 커밋 후 조회 가능한 상태인지 확인한다.
+    """
+    studio_slides = await conn.fetchval(
+        f"SELECT COUNT(*) FROM {schema}.slide WHERE lesson_id = $1 OR chapter_id = $2",
+        lesson_id,
+        chapter_id,
+    )
+    public_slides = await conn.fetchval(
+        "SELECT COUNT(*) FROM public.slide WHERE chapter_id = $1",
+        lesson_id,
+    )
+    studio_count = _as_int(studio_slides)
+    public_count = _as_int(public_slides)
+    if studio_count != expected_slides or public_count != expected_slides:
+        raise StorageError(
+            "저장 검증 실패: "
+            f"lessonId={lesson_id}, expectedSlides={expected_slides}, "
+            f"chapterStudioSlides={studio_count}, publicSlides={public_count}"
+        )
+
+
+def _as_int(value: object) -> int:
+    if isinstance(value, int):
+        return value
+    if value is None:
+        return 0
+    return int(value)
 
 
 def _indexed_optional_records(state: ChapterStudioState, key: str) -> dict[int, StateRecord]:
