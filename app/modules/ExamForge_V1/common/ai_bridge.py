@@ -28,7 +28,10 @@ from app.modules.ExamForge_V1.common.config import (
     active_planner_model,
     active_text_model,
     active_verifier_model,
+    openai_api_key,
+    openai_fallback_enabled,
 )
+from app.modules.ExamForge_V1.common.errors import ConnectorError
 
 _LOG = logging.getLogger(__name__)
 
@@ -153,13 +156,63 @@ def connector_supports_batch(connector: AIConnector) -> bool:
     return supported is True
 
 
+class _OpenAIFailoverConnector:
+    """Gemini 텍스트 실패 시 OpenAI 로 넘기는 ExamForge 폴백 래퍼.
+
+    매 호출마다 primary(Gemini)를 먼저 시도하고 ConnectorError 계열이면
+    fallback(OpenAI)으로 한 번 재시도한다. budget 카운터는 각 커넥터가
+    내부에서 check/increment 하므로 그대로 전달만 한다.
+    """
+
+    name: str = "gemini_openai_fallback"
+
+    def __init__(
+        self,
+        primary: AIConnector,
+        fallback_factory: Callable[[], AIConnector],
+    ) -> None:
+        self._primary = primary
+        self._fallback_factory = fallback_factory
+        self._fallback: AIConnector | None = None
+
+    async def generate(
+        self,
+        req: ChapterAIRequest,
+        budget: LLMBudgetCounter | None = None,
+    ) -> ChapterAIResponse:
+        try:
+            return await self._primary.generate(req, budget)
+        except ConnectorError:
+            return await self._fallback_connector().generate(req, budget)
+
+    def _fallback_connector(self) -> AIConnector:
+        if self._fallback is None:
+            self._fallback = self._fallback_factory()
+        return self._fallback
+
+    def supports(self, feature: str) -> bool:
+        if feature == "fallback":
+            return True
+        return self._primary.supports(feature)
+
+
 def _build_gemini_genai_connector() -> AIConnector:
-    """google-genai SDK 커넥터는 선택 시점에만 로드한다."""
+    """google-genai SDK 커넥터는 선택 시점에만 로드한다.
+
+    OPENAI_API_KEY 가 있고 OPENAI_FALLBACK_ENABLED!=false 면 OpenAI 폴백 래퍼로 감싼다.
+    """
     from app.modules.ExamForge_V1.common._connector_gemini_genai import (
         GeminiGenAIConnector,
     )
 
-    return GeminiGenAIConnector()
+    gemini = GeminiGenAIConnector()
+    if not openai_fallback_enabled() or openai_api_key() is None:
+        return gemini
+    try:
+        from app.modules.ExamForge_V1.common._connector_openai import OpenAIConnector
+    except ImportError:
+        return gemini
+    return _OpenAIFailoverConnector(gemini, OpenAIConnector)
 
 
 def get_text_connector() -> AIConnector:

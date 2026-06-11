@@ -112,6 +112,24 @@ def gemini_text_model() -> str:
     return _optional_value("GEMINI_TEXT_MODEL") or "gemini-3.5-flash"
 
 
+def openai_api_key() -> str | None:
+    """OpenAI API 키를 반환한다. 없으면 None(폴백 비활성)."""
+    return _optional_value("OPENAI_API_KEY")
+
+
+def openai_text_model() -> str:
+    """OpenAI 텍스트 폴백 커넥터의 모델 ID를 반환한다(기본 gpt-5.4-nano)."""
+    return _optional_value("OPENAI_TEXT_MODEL") or "gpt-5.4-nano"
+
+
+def openai_fallback_enabled() -> bool:
+    """OpenAI 폴백 자동 래핑 허용 여부를 반환한다(기본 true).
+
+    OPENAI_FALLBACK_ENABLED=false 면 OPENAI_API_KEY 가 있어도 래핑하지 않는다.
+    """
+    return _bool_value("OPENAI_FALLBACK_ENABLED", True)
+
+
 def modal_token_id() -> str | None:
     return _optional_value("MODAL_TOKEN_ID")
 

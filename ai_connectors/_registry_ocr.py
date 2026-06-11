@@ -84,6 +84,30 @@ def _resolve_ocr_name(model_name: str | None) -> str:
     return "gemini-ocr"
 
 
+def _wrap_with_openai_failover(connector: OCRConnector) -> OCRConnector:
+    """선택된 커넥터가 Gemini OCR 이고 OpenAI 폴백이 활성이면 폴백 래퍼로 감싼다.
+
+    활성 조건: 커넥터가 gemini-ocr + OPENAI_API_KEY 존재 + OPENAI_FALLBACK_ENABLED!=false.
+    OpenAI SDK·키 미설치 환경에서도 ImportError 를 흡수해 원본을 돌려준다.
+    """
+    from common.text_config import openai_api_key, openai_fallback_enabled
+
+    if getattr(connector, "name", "") != "gemini-ocr":
+        return connector
+    if not openai_fallback_enabled() or openai_api_key() is None:
+        return connector
+    try:
+        from ._failover import FailoverOCRConnector
+        from .ocr.openai_ocr_connector import OpenAIOCRConnector
+    except ImportError as exc:
+        _LOG.warning(
+            "OpenAI OCR 폴백 래핑 건너뜀 (ImportError: %s). `uv add openai` 실행 필요",
+            exc,
+        )
+        return connector
+    return FailoverOCRConnector(connector, lambda: OpenAIOCRConnector())
+
+
 def get_ocr_connector(model_name: str | None = None) -> OCRConnector:
     """.env 의 AI_MODEL_OCR(또는 AI_OCR) / 명시된 model_name 으로 OCR 커넥터 반환."""
     name = _resolve_ocr_name(model_name)
@@ -93,4 +117,4 @@ def get_ocr_connector(model_name: str | None = None) -> OCRConnector:
             f"Registered: {list(OCR_CONNECTORS.keys())}. "
             f"AI_MODEL_OCR(또는 AI_OCR) 환경변수와 venv 활성화 여부를 확인하세요.",
         )
-    return OCR_CONNECTORS[name]()
+    return _wrap_with_openai_failover(OCR_CONNECTORS[name]())

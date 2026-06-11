@@ -70,11 +70,34 @@ def _build_gemini_tts_connector() -> TTSConnector:
 
 
 def _build_gemini_genai_connector() -> AIConnector:
-    """google-genai SDK 커넥터는 선택 시점에만 로드한다."""
+    """google-genai SDK 커넥터는 선택 시점에만 로드한다.
+
+    OPENAI_API_KEY 가 있고 OPENAI_FALLBACK_ENABLED!=false 면 OpenAI 폴백 래퍼로 감싼다.
+    기존 Qwen→Claude 폴백과는 별개로, Gemini 가 활성 텍스트일 때만 적용된다.
+    """
     from app.modules.ChapterStudio_V1.ai_connectors.gemini_genai_connector import (
         GeminiGenAIConnector,
     )
-    return GeminiGenAIConnector()
+    from app.modules.ChapterStudio_V1.common.config import (
+        openai_api_key,
+        openai_fallback_enabled,
+    )
+
+    gemini = GeminiGenAIConnector()
+    if not openai_fallback_enabled() or openai_api_key() is None:
+        return gemini
+    try:
+        from app.modules.ChapterStudio_V1.ai_connectors.openai_connector import (
+            OpenAIConnector,
+        )
+    except ImportError:
+        return gemini
+    return FailoverAIConnector(
+        primary_factory=lambda: gemini,
+        fallback_factory=OpenAIConnector,
+        name="gemini_openai_fallback",
+        failure_threshold=text_fallback_after_failures(),
+    )
 
 
 # 폴백 래퍼는 팩토리 함수를 등록한다
