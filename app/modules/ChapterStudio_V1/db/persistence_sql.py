@@ -110,6 +110,15 @@ def public_delete_slide_sql() -> str:
     return "DELETE FROM public.slide WHERE chapter_id = $1"
 
 
+def public_delete_assignment_sql() -> str:
+    """재생성 시 같은 chapter의 과제를 비워 멱등 재삽입을 보장한다.
+
+    public.assignment는 id만 PK라 매 생성마다 새 asg id가 만들어진다.
+    chapter당 과제 1개 규칙을 유지하려면 slide와 동일하게 chapter_id 기준으로 선삭제한다.
+    """
+    return "DELETE FROM public.assignment WHERE chapter_id = $1"
+
+
 def public_slide_sql() -> str:
     """Spring Slide 엔티티가 읽는 public.slide 저장 쿼리다."""
     return (
@@ -151,6 +160,30 @@ def public_note_sql() -> str:
         "ON CONFLICT (id) DO UPDATE SET "
         "title = EXCLUDED.title, "
         "content = EXCLUDED.content, "
+        "updated_at = NOW()"
+    )
+
+
+def public_assignment_sql() -> str:
+    """Spring Assignment 엔티티가 읽는 public.assignment 저장 쿼리다.
+
+    chapter_id 선삭제가 재생성 멱등성을 책임지고, ON CONFLICT (id)는 PK 충돌 안전망이다.
+    status='active'/total_questions는 NOT NULL이라 항상 값을 채운다.
+    """
+    return (
+        "INSERT INTO public.assignment "
+        "(id, user_id, course_id, chapter_id, status, title, description, "
+        "total_questions, questions, created_at, updated_at) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW()) "
+        "ON CONFLICT (id) DO UPDATE SET "
+        "user_id = EXCLUDED.user_id, "
+        "course_id = EXCLUDED.course_id, "
+        "chapter_id = EXCLUDED.chapter_id, "
+        "status = EXCLUDED.status, "
+        "title = EXCLUDED.title, "
+        "description = EXCLUDED.description, "
+        "total_questions = EXCLUDED.total_questions, "
+        "questions = EXCLUDED.questions, "
         "updated_at = NOW()"
     )
 
