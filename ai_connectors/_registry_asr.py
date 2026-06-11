@@ -59,6 +59,30 @@ except ImportError as _fallback_import_err:
     )
 
 
+def _wrap_with_openai_failover(connector: ASRConnector) -> ASRConnector:
+    """선택된 커넥터가 Gemini ASR 이고 OpenAI 폴백이 활성이면 폴백 래퍼로 감싼다.
+
+    활성 조건: 커넥터가 gemini-asr + OPENAI_API_KEY 존재 + OPENAI_FALLBACK_ENABLED!=false.
+    OpenAI SDK·키 미설치 환경에서도 ImportError 를 흡수해 원본을 돌려준다.
+    """
+    from common.text_config import openai_api_key, openai_fallback_enabled
+
+    if getattr(connector, "name", "") != "gemini-asr":
+        return connector
+    if not openai_fallback_enabled() or openai_api_key() is None:
+        return connector
+    try:
+        from ._failover import FailoverASRConnector
+        from .asr.openai_asr_connector import OpenAIASRConnector
+    except ImportError as exc:
+        _LOG.warning(
+            "OpenAI ASR 폴백 래핑 건너뜀 (ImportError: %s). `uv add openai` 실행 필요",
+            exc,
+        )
+        return connector
+    return FailoverASRConnector(connector, lambda: OpenAIASRConnector())
+
+
 def get_asr_connector(model_name: str | None = None) -> ASRConnector:
     """.env 의 AI_MODEL_ASR 또는 명시된 model_name 으로 ASR 커넥터 반환."""
     name = model_name or os.getenv("AI_MODEL_ASR", "gemini-asr")
@@ -66,4 +90,4 @@ def get_asr_connector(model_name: str | None = None) -> ASRConnector:
         raise ModelNotFoundError(
             f"Unknown ASR model: {name}. Registered: {list(ASR_CONNECTORS.keys())}"
         )
-    return ASR_CONNECTORS[name]()
+    return _wrap_with_openai_failover(ASR_CONNECTORS[name]())

@@ -80,3 +80,42 @@ def claude_sonnet_max_concurrency() -> int:
     return value
 
 
+# --- OpenAI 폴백 설정 (Gemini 장애 시 자동 전환) ---
+
+
+def openai_api_key() -> str | None:
+    """OpenAI API 키를 반환한다. 없으면 None.
+
+    이 값의 존재 여부가 폴백 자동 활성화의 1차 스위치다.
+    Google 식 대체 키(GEMINI_API_KEY 공유) 같은 폴백은 두지 않는다.
+    """
+    return os.getenv("OPENAI_API_KEY") or None
+
+
+def openai_text_model() -> str:
+    """OpenAI 텍스트 폴백 커넥터가 사용할 모델 ID를 반환한다(기본 gpt-5.4-nano)."""
+    return os.getenv("OPENAI_TEXT_MODEL", "gpt-5.4-nano").strip() or "gpt-5.4-nano"
+
+
+def openai_fallback_enabled() -> bool:
+    """OpenAI 폴백 자동 래핑 허용 여부를 반환한다(기본 true).
+
+    OPENAI_FALLBACK_ENABLED=false 면 OPENAI_API_KEY 가 있어도 래핑하지 않는다.
+    레지스트리가 Gemini 커넥터를 OpenAI 폴백으로 감쌀지 결정하는 kill-switch 다.
+    """
+    raw = os.getenv("OPENAI_FALLBACK_ENABLED", "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def text_fallback_after_failures() -> int:
+    """텍스트 폴백 전환 임계치(연속 실패 횟수)를 반환한다(기본 3)."""
+    raw = os.getenv("TEXT_FALLBACK_AFTER_FAILURES", "3").strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError("TEXT_FALLBACK_AFTER_FAILURES는 정수여야 한다.") from exc
+    if value < 1 or value > 10:
+        raise RuntimeError("TEXT_FALLBACK_AFTER_FAILURES는 1~10이어야 한다.")
+    return value
+
+
