@@ -19,6 +19,7 @@ from openai import BadRequestError as _OpenAIBadRequestError
 from openai import InternalServerError as _OpenAIInternalServerError
 from openai import RateLimitError as _OpenAIRateLimitError
 
+from ai_connectors._openai_common import clamp_openai_max_tokens
 from ai_connectors.errors import (
     AuthError,
     ConnectorError,
@@ -65,7 +66,8 @@ class OpenAIConnector:
                 model=self._model,
                 messages=_build_messages(req),
                 temperature=req.temperature,
-                max_tokens=req.max_tokens,
+                # Gemini 용 큰 max_tokens 가 OpenAI 모델 한도를 넘지 않도록 클램프한다.
+                max_tokens=clamp_openai_max_tokens(req.max_tokens, self._model),
             )
         except _OpenAIAuthError as exc:
             raise AuthError(str(exc)) from exc

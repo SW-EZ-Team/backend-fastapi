@@ -14,6 +14,7 @@ import pytest
 
 from ai_connectors import _registry_text as root_registry
 from ai_connectors._failover_text import FailoverAIConnector
+from ai_connectors._openai_common import clamp_openai_max_tokens
 from ai_connectors.text import gemini_connector as root_gemini
 from ai_connectors.text import openai_connector as root_openai
 from ai_connectors.text.openai_connector import OpenAIConnector
@@ -191,3 +192,54 @@ async def test_openai_connector_omits_system_message_when_empty(
 
     call = connector._client.calls[0]
     assert call.messages == [{"role": "user", "content": "사용자"}]
+
+
+# --- max_tokens 모델 한도 클램프 검증 ---
+
+
+def test_clamp_openai_max_tokens_caps_oversized_value() -> None:
+    """Gemini 용 큰 값(32000)은 gpt-4o 상한(16384)으로 잘린다."""
+    assert clamp_openai_max_tokens(32000, "gpt-4o") == 16384
+
+
+def test_clamp_openai_max_tokens_keeps_value_under_cap() -> None:
+    """상한 이하 값은 그대로 유지한다."""
+    assert clamp_openai_max_tokens(8000, "gpt-4o") == 8000
+
+
+def test_clamp_openai_max_tokens_uses_cap_when_none() -> None:
+    """None 이면 모델 상한값을 그대로 사용한다."""
+    assert clamp_openai_max_tokens(None, "gpt-4o") == 16384
+
+
+def test_clamp_openai_max_tokens_uses_cap_when_non_positive() -> None:
+    """0 이하 값도 모델 상한값으로 대체한다."""
+    assert clamp_openai_max_tokens(0, "gpt-4o") == 16384
+
+
+def test_clamp_openai_max_tokens_unknown_model_uses_safe_default() -> None:
+    """미등록 모델은 안전 기본값(16384)으로 제한한다."""
+    assert clamp_openai_max_tokens(32000, "gpt-unknown") == 16384
+
+
+def test_clamp_openai_max_tokens_allows_higher_gpt5_cap() -> None:
+    """gpt-5.x 는 더 큰 상한을 가져 32000 을 막지 않는다."""
+    assert clamp_openai_max_tokens(32000, "gpt-5.5") == 32000
+
+
+@pytest.mark.asyncio
+async def test_openai_connector_clamps_oversized_max_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gemini 크기(32000) max_tokens 가 gpt-4o 상한(16384)으로 클램프되어 전달된다."""
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+    monkeypatch.setenv("OPENAI_TEXT_MODEL", "gpt-4o")
+    monkeypatch.setattr(root_openai, "AsyncOpenAI", _FakeOpenAIClient)
+
+    connector = OpenAIConnector()
+    await connector.generate(
+        ChapterAIRequest(system="시스템", user="사용자", max_tokens=32000, temperature=0.2)
+    )
+
+    call = connector._client.calls[0]
+    assert call.max_tokens == 16384
