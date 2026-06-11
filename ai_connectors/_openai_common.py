@@ -29,6 +29,34 @@ def openai_api_key() -> str:
     return key
 
 
+# OpenAI 모델별 최대 completion 토큰 상한. Gemini 폴백은 Gemini 출력 크기에 맞춘 큰
+# max_tokens(예: 32000)를 그대로 넘기는데, gpt-4o 는 16384 가 상한이라 그대로 전달하면
+# `400 invalid_value: max_tokens is too large` 가 난다. 모델 한도로 클램프해 방지한다.
+# gpt-4o/4o-mini 상한 16384 는 운영 에러 메시지로 확인됨.
+# TODO: gpt-5.x 정확한 completion 토큰 상한이 확정되면 아래 값을 공식 한도로 갱신한다
+#       (현재 65536 은 보수적 추정치이며, 불확실하면 _OPENAI_DEFAULT_MAX_COMPLETION 가 안전판이다).
+_OPENAI_MAX_COMPLETION_TOKENS = {
+    "gpt-4o": 16384,
+    "gpt-4o-mini": 16384,
+    "gpt-5.5": 65536,
+    "gpt-5.4-nano": 65536,
+    "gpt-5.4-mini": 65536,
+}
+_OPENAI_DEFAULT_MAX_COMPLETION = 16384  # 모르는 모델은 안전하게 16384 로 제한
+
+
+def clamp_openai_max_tokens(requested: int | None, model: str) -> int:
+    """요청 max_tokens 를 모델별 completion 토큰 상한으로 클램프한다.
+
+    Gemini 용으로 크게 잡힌 값이 OpenAI 모델 한도를 넘지 않도록 보정한다.
+    requested 가 None 이거나 0 이하면 모델 상한값을 그대로 사용한다.
+    """
+    cap = _OPENAI_MAX_COMPLETION_TOKENS.get(model, _OPENAI_DEFAULT_MAX_COMPLETION)
+    if requested is None or requested <= 0:
+        return cap
+    return min(requested, cap)
+
+
 def load_openai_module() -> object:
     """openai SDK 를 호출 시점에 import 한다."""
     try:

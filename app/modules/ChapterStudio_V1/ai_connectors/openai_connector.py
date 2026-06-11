@@ -19,6 +19,9 @@ from openai import BadRequestError as _OpenAIBadRequestError
 from openai import InternalServerError as _OpenAIInternalServerError
 from openai import RateLimitError as _OpenAIRateLimitError
 
+# 모델별 completion 토큰 상한 클램프는 루트 공통 헬퍼를 재사용한다
+# (app 모듈에서 ai_connectors._gemini_common 등을 import 하는 기존 패턴과 동일).
+from ai_connectors._openai_common import clamp_openai_max_tokens
 from app.modules.ChapterStudio_V1.ai_connectors.errors import (
     AuthError,
     ConnectorError,
@@ -63,7 +66,8 @@ class OpenAIConnector:
                 model=self._model,
                 messages=_build_messages(req),
                 temperature=req.temperature,
-                max_tokens=req.max_tokens,
+                # Gemini 용 큰 max_tokens 가 OpenAI 모델 한도를 넘지 않도록 클램프한다.
+                max_tokens=clamp_openai_max_tokens(req.max_tokens, self._model),
             )
         except _OpenAIAuthError as exc:
             raise AuthError(str(exc)) from exc
