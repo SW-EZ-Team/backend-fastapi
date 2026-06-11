@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from contextlib import AbstractAsyncContextManager
 from typing import Protocol
 
@@ -38,6 +39,8 @@ from app.modules.ChapterStudio_V1.db.public_persistence import persist_public_co
 from app.modules.ChapterStudio_V1.db.title_fallback import slide_title_from_context
 from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState, StateRecord
 
+_LOG = logging.getLogger(__name__)
+
 
 class PersistenceConnection(Protocol):
     def transaction(self) -> AbstractAsyncContextManager[object]:
@@ -55,15 +58,44 @@ async def persist_chapter_state(
 ) -> None:
     """생성 결과를 lesson_id 기준으로 재시도 가능하게 저장한다."""
     schema = database_schema()
-    async with conn.transaction():
-        await _delete_existing(conn, context.lesson_id, chapter_id, schema)
-        await _insert_slides(conn, context, chapter_id, state, schema)
-        await _insert_quizzes(conn, context, chapter_id, state, schema)
-        await _insert_note(conn, context, chapter_id, state, schema)
-        await _insert_assignment(conn, context, chapter_id, state, schema)
-        await _insert_voice_scripts(conn, context, chapter_id, state, schema)
-        await persist_public_content(conn, context, state)
-        await _mark_done(conn, context, chapter_id, state, schema)
+    lesson_id = context.lesson_id
+    # 진단용 카운트: 어느 INSERT가 마지막으로 시도된 단계인지 로그로 추적하기 위함이다.
+    slide_count = len(_records(state, "slides"))
+    quiz_count = len(_records(state, "quiz_set"))
+    voice_count = len(_voice_rows(state))
+    step = "시작"
+    try:
+        async with conn.transaction():
+            step = "1/7 기존 삭제"
+            _LOG.info("[persist] 1/7 기존 삭제 시작 lessonId=%s", lesson_id)
+            await _delete_existing(conn, lesson_id, chapter_id, schema)
+            step = "2/7 슬라이드 INSERT"
+            _LOG.info("[persist] 2/7 슬라이드 INSERT (%d개) lessonId=%s", slide_count, lesson_id)
+            await _insert_slides(conn, context, chapter_id, state, schema)
+            step = "3/7 퀴즈 INSERT"
+            _LOG.info("[persist] 3/7 퀴즈 INSERT (%d개) lessonId=%s", quiz_count, lesson_id)
+            await _insert_quizzes(conn, context, chapter_id, state, schema)
+            step = "4/7 노트 INSERT"
+            _LOG.info("[persist] 4/7 노트 INSERT lessonId=%s", lesson_id)
+            await _insert_note(conn, context, chapter_id, state, schema)
+            step = "5/7 과제 INSERT"
+            _LOG.info("[persist] 5/7 과제 INSERT lessonId=%s", lesson_id)
+            await _insert_assignment(conn, context, chapter_id, state, schema)
+            step = "6/7 음성대본 INSERT"
+            _LOG.info("[persist] 6/7 음성대본 INSERT (%d개) lessonId=%s", voice_count, lesson_id)
+            await _insert_voice_scripts(conn, context, chapter_id, state, schema)
+            step = "7/7 public 컨텐츠 저장"
+            _LOG.info("[persist] 7/7 public 컨텐츠 저장 lessonId=%s", lesson_id)
+            await persist_public_content(conn, context, state)
+            step = "7/7 완료 상태 기록"
+            _LOG.info("[persist] 7/7 완료 상태 기록 lessonId=%s", lesson_id)
+            await _mark_done(conn, context, chapter_id, state, schema)
+        _LOG.info("[persist] 저장 완료 lessonId=%s", lesson_id)
+    except Exception:
+        # 트랜잭션은 롤백되어 0행이 되므로, 어느 단계까지 진행됐는지를 로그로 남겨 원인을 좁힌다.
+        # 롤백 동작은 그대로 보존하기 위해 삼키지 않고 재전파한다.
+        _LOG.exception("[persist] 트랜잭션 실패 — 마지막 단계=%s lessonId=%s", step, lesson_id)
+        raise
 
 
 async def _delete_existing(conn: PersistenceConnection, lesson_id: str, chapter_id: str, schema: str) -> None:

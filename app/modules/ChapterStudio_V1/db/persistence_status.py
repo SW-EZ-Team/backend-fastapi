@@ -6,12 +6,30 @@ from typing import Protocol
 
 from app.modules.ChapterStudio_V1.app.generation_context import GenerationContext
 from app.modules.ChapterStudio_V1.common.config import database_schema
-from app.modules.ChapterStudio_V1.db.persistence_sql import audio_pending_status_sql, failure_status_sql
+from app.modules.ChapterStudio_V1.db.persistence_sql import (
+    audio_pending_status_sql,
+    failure_status_sql,
+    running_status_sql,
+)
 
 
 class StatusConnection(Protocol):
     async def execute(self, query: str, *args: object) -> object:
         """상태 갱신 쿼리를 실행한다."""
+
+
+async def mark_chapter_running(
+    conn: StatusConnection,
+    context: GenerationContext,
+    chapter_id: str,
+) -> None:
+    """생성 시작 시점에 진행중(running) 상태 행을 남겨 중간 실패도 추적 가능하게 한다."""
+    await conn.execute(
+        running_status_sql(database_schema()),
+        context.lesson_id,
+        context.tutoring_id,
+        chapter_id,
+    )
 
 
 async def mark_chapter_failed(

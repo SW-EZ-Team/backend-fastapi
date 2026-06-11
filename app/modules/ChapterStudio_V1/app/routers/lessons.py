@@ -6,13 +6,46 @@ GET /tutoring/{id}/lessons/{chapterId}/slides 등으로 폴링한다.
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel, Field
 
 from app.modules.ChapterStudio_V1.app.lesson_audio_backfill import backfill_lesson_audio
 from app.modules.ChapterStudio_V1.app.lessons_generate import generate_lesson_for_chapter, generate_lessons_for_course
 
+_LOG = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/lessons", tags=["lessons"])
+
+
+async def _run_course_generation_logged(course_id: str) -> None:
+    """course 전체 생성을 BackgroundTask로 돌리되, 미처리 예외를 풀 스택과 함께 남긴다.
+
+    FastAPI BackgroundTask는 예외를 조용히 삼키므로, 여기서 감싸 로그에 남긴 뒤
+    동작 보존을 위해 다시 전파한다(조용한 실패 가시화 목적).
+    """
+    try:
+        await generate_lessons_for_course(course_id)
+    except Exception:
+        _LOG.exception("[lessons] background 강의 일괄 생성 미처리 예외 — courseId=%s", course_id)
+        raise
+
+
+async def _run_lesson_generation_logged(course_id: str, lesson_id: str, **kwargs: object) -> None:
+    """단건 강의 생성을 BackgroundTask로 돌리되, 미처리 예외를 풀 스택과 함께 남긴다.
+
+    BackgroundTask가 삼키는 예외를 먼저 로깅하고 다시 전파한다(동작 보존).
+    """
+    try:
+        await generate_lesson_for_chapter(course_id, lesson_id, **kwargs)
+    except Exception:
+        _LOG.exception(
+            "[lessons] background 강의 생성 미처리 예외 — courseId=%s lessonId=%s",
+            course_id,
+            lesson_id,
+        )
+        raise
 
 
 class LessonsGenerateRequest(BaseModel):
@@ -51,7 +84,7 @@ async def generate_lessons(
     req: LessonsGenerateRequest, background_tasks: BackgroundTasks
 ) -> dict[str, object]:
     """강의 생성을 비동기로 시작하고 202를 즉시 반환한다."""
-    background_tasks.add_task(generate_lessons_for_course, req.courseId)
+    background_tasks.add_task(_run_course_generation_logged, req.courseId)
     return {"accepted": True, "courseId": req.courseId}
 
 
@@ -61,7 +94,7 @@ async def generate_one_lesson(
 ) -> dict[str, object]:
     """강의 1개를 비동기로 생성하고 202를 즉시 반환한다."""
     background_tasks.add_task(
-        generate_lesson_for_chapter,
+        _run_lesson_generation_logged,
         req.courseId,
         req.lessonId,
         audience_level=req.audienceLevel,
