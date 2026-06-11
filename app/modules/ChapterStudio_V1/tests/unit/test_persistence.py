@@ -6,6 +6,7 @@ import re
 import pytest
 
 from app.modules.ChapterStudio_V1.app.generation_context import GenerationContext
+from app.modules.ChapterStudio_V1.common.errors import StorageError
 from app.modules.ChapterStudio_V1.db.persistence import persist_chapter_state
 from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState
 
@@ -32,6 +33,7 @@ class FakeConnection:
     def __init__(self) -> None:
         self.events: list[str] = []
         self.calls: list[tuple[str, tuple[object, ...]]] = []
+        self.fetch_values: list[object] = [1, 1]
 
     def transaction(self) -> FakeTransaction:
         return FakeTransaction(self)
@@ -41,6 +43,12 @@ class FakeConnection:
         assert len(args) == expected, query
         self.calls.append((query, args))
         return "OK"
+
+    async def fetchval(self, query: str, *args: object) -> object:
+        expected = max((int(match) for match in _PLACEHOLDER.findall(query)), default=0)
+        assert len(args) == expected, query
+        self.calls.append((query, args))
+        return self.fetch_values.pop(0)
 
 
 @pytest.mark.anyio
@@ -79,7 +87,7 @@ async def test_persist_chapter_state_writes_status_summary() -> None:
 
     await persist_chapter_state(conn, _context(), "chapter_lesson-1", _state())
 
-    status_args = conn.calls[-1][1]
+    status_args = _args_for(conn, "INSERT INTO chapter_studio.lesson_generation_status")
     assert status_args[:4] == ("lesson-1", "tutoring-1", "chapter_lesson-1", "test-model")
     assert json.loads(str(status_args[4])) == {"slides": 1, "quiz_set": 1, "voice_scripts": 1}
 
@@ -143,6 +151,20 @@ async def test_persist_chapter_state_writes_public_spring_tables() -> None:
         "리스트 컴프리헨션 핵심 노트",
         "핵심 노트",
     )
+
+
+@pytest.mark.anyio
+async def test_persist_chapter_state_fails_before_done_when_committed_slides_are_missing() -> None:
+    conn = FakeConnection()
+    conn.fetch_values = [0, 1]
+
+    with pytest.raises(StorageError, match="저장 검증 실패"):
+        await persist_chapter_state(conn, _context(), "lesson-1", _state())
+
+    queries = [query for query, _args in conn.calls]
+    assert _has_query(queries, "INSERT INTO chapter_studio.slide")
+    assert _has_query(queries, "SELECT COUNT(*) FROM chapter_studio.slide")
+    assert not _has_query(queries, "INSERT INTO chapter_studio.lesson_generation_status")
 
 
 def _context() -> GenerationContext:
