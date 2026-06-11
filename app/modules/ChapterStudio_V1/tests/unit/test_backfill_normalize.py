@@ -54,6 +54,24 @@ def test_normalize_converts_steps_dict_to_list() -> None:
     assert normalized["assignment"]["steps"] == ["first: 자료를 읽는다", "second: 근거를 정리한다"]
 
 
+def test_normalize_wraps_rubric_string_to_list() -> None:
+    data = _payload_dict(10)
+    data["assignment"]["rubric"] = "정확성과 완성도를 기준으로 평가합니다."
+
+    normalized = normalize_lesson_dict(data)
+
+    assert normalized["assignment"]["rubric"] == ["정확성과 완성도를 기준으로 평가합니다."]
+
+
+def test_normalize_splits_numbered_rubric_string() -> None:
+    data = _payload_dict(10)
+    data["assignment"]["rubric"] = "1. 정확성 2. 근거 3. 완성도"
+
+    normalized = normalize_lesson_dict(data)
+
+    assert normalized["assignment"]["rubric"] == ["정확성", "근거", "완성도"]
+
+
 def test_normalize_is_noop_for_list_input() -> None:
     # codex처럼 이미 list면 객체 동일성까지 보존한다(불필요한 사본 생성 없음).
     data = _payload_dict(10)
@@ -69,6 +87,16 @@ def test_parse_payload_recovers_from_rubric_dict() -> None:
     payload = parse_payload(json.dumps(data, ensure_ascii=False), 10)
 
     assert payload.assignment.rubric == ["correctness: 정확성", "clarity: 명료성"]
+
+
+def test_parse_payload_recovers_from_rubric_string() -> None:
+    # 실측 버그: rubric이 문자열로 와도 정규화가 흡수해 엄격 파싱을 통과시킨다.
+    data = _payload_dict(10)
+    data["assignment"]["rubric"] = "평가 기준: 철학적 차이를 명확히 설명했는지 확인합니다."
+
+    payload = parse_payload(json.dumps(data, ensure_ascii=False), 10)
+
+    assert payload.assignment.rubric == ["평가 기준: 철학적 차이를 명확히 설명했는지 확인합니다."]
 
 
 # ── 2. 부족 배열 backfill ────────────────────────────────────────────
