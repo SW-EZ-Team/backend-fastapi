@@ -1,11 +1,15 @@
 """텍스트 생성 폴백 커넥터.
 
 주 커넥터가 연속 failure_threshold 회 실패하면 대체 커넥터로 회로를 전환한다.
-전환 후에는 재시작 전까지 대체 커넥터만 사용해 추가 재시도 비용을 막는다.
+전환 후에도 TEXT_FALLBACK_RECOVERY_SEC(기본 60초, 0 이하면 비활성=영구 전환)가
+지나면 주 커넥터를 1회 다시 시도해 성공 시 회로를 닫는다.
 """
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
+import time
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
@@ -16,12 +20,32 @@ from ai_connectors.text_schemas import ChapterAIRequest, ChapterAIResponse
 
 _T = TypeVar("_T")
 
+_LOG = logging.getLogger(__name__)
+
+# 주 커넥터 복귀 시도 간격 기본값(초) — 0 이하면 복귀 비활성(영구 폴백)
+_DEFAULT_RECOVERY_SEC = 60.0
+
+
+def _recovery_interval_sec() -> float:
+    """TEXT_FALLBACK_RECOVERY_SEC 환경변수를 읽는다(호출 시마다 — 테스트 monkeypatch 가능)."""
+    raw = os.getenv("TEXT_FALLBACK_RECOVERY_SEC")
+    if raw is None or not raw.strip():
+        return _DEFAULT_RECOVERY_SEC
+    try:
+        return float(raw.strip())
+    except ValueError:
+        return _DEFAULT_RECOVERY_SEC
+
 
 class FailoverAIConnector:
     """주 커넥터가 연속 실패하면 대체 커넥터로 회로를 넘긴다.
 
     failure_threshold 에 도달하는 순간 _fallback_active 가 True 로 전환되고,
-    이후 모든 요청은 폴백 커넥터로만 라우팅된다.
+    이후 요청은 폴백 커넥터로 라우팅된다. 단 TEXT_FALLBACK_RECOVERY_SEC(기본
+    60초, 0 이하면 비활성=기존 영구 전환 동작)가 지나면 다음 요청에서 주
+    커넥터를 1회 다시 시도하고, 성공하면 회로를 닫아 주 커넥터로 복귀한다.
+    실패하면 다음 복귀 시도를 같은 간격만큼 뒤로 미루고 폴백으로 진행한다
+    (ai_connectors/_failover_text.py 와 동일한 복귀 의미론).
     """
 
     def __init__(
@@ -46,6 +70,8 @@ class FailoverAIConnector:
         self._failure_count = 0
         self._fallback_active = False
         self._last_failure = ""
+        # 주 커넥터 복귀 시도가 허용되는 monotonic 시각 — 폴백 전환/복귀 실패 시 갱신
+        self._primary_retry_at: float | None = None
 
     @property
     def fallback_active(self) -> bool:
@@ -70,6 +96,13 @@ class FailoverAIConnector:
     async def generate(self, req: ChapterAIRequest) -> ChapterAIResponse:
         """폴백 활성 시 즉시 대체 커넥터로 위임하고, 아니면 주 커넥터를 시도한다."""
         if self._fallback_active:
+            # 복귀 간격이 지났으면 주 커넥터를 1회 다시 시도한다(성공 시 회로 닫힘)
+            if self._primary_probe_due():
+                recovered = await self._probe_primary(
+                    lambda: self._with_optional_timeout(self._primary_connector().generate(req))
+                )
+                if recovered is not None:
+                    return recovered
             return await self._fallback_connector().generate(req)
 
         last_error: ConnectorError | None = None
@@ -96,6 +129,15 @@ class FailoverAIConnector:
         if not reqs:
             return []
         if self._fallback_active:
+            # 복귀 간격이 지났으면 주 커넥터를 1회 다시 시도한다(성공 시 회로 닫힘)
+            if self._primary_probe_due():
+                recovered = await self._probe_primary(
+                    lambda: self._with_optional_timeout(
+                        self._primary_connector().generate_batch(reqs)
+                    )
+                )
+                if recovered is not None:
+                    return recovered
             return await self._fallback_connector().generate_batch(reqs)
 
         last_error: ConnectorError | None = None
@@ -160,3 +202,44 @@ class FailoverAIConnector:
         self._last_failure = str(exc)
         if self._failure_count >= self._failure_threshold:
             self._fallback_active = True
+            self._schedule_primary_probe()
+
+    # ── 주 커넥터 복귀(recovery) ──────────────────────────────────────
+
+    def _schedule_primary_probe(self) -> None:
+        """다음 주 커넥터 복귀 시도 시각을 예약한다. 간격이 0 이하면 비활성(영구 폴백)."""
+        interval = _recovery_interval_sec()
+        self._primary_retry_at = (
+            time.monotonic() + interval if interval > 0 else None
+        )
+
+    def _primary_probe_due(self) -> bool:
+        """주 커넥터 복귀 시도가 가능한 시점인지 확인한다."""
+        return (
+            self._primary_retry_at is not None
+            and time.monotonic() >= self._primary_retry_at
+        )
+
+    async def _probe_primary(self, call: Callable[[], Awaitable[_T]]) -> _T | None:
+        """폴백 활성 상태에서 주 커넥터를 1회 시도한다.
+
+        성공하면 회로를 닫고(주 커넥터 복귀) 결과를 반환한다.
+        실패하면 다음 복귀 시도를 뒤로 미루고 None을 반환해 폴백으로 진행시킨다.
+        """
+        try:
+            result = await call()
+        except ConnectorError as exc:
+            self._last_failure = str(exc)
+            self._schedule_primary_probe()
+            _LOG.warning(
+                "%s: 주 커넥터 복귀 시도 실패 — 폴백 유지, 다음 시도 예약: %s",
+                self.name,
+                exc,
+            )
+            return None
+        self._fallback_active = False
+        self._failure_count = 0
+        self._last_failure = ""
+        self._primary_retry_at = None
+        _LOG.info("%s: 주 커넥터(%s) 복귀 성공 — 회로 닫힘", self.name, self.primary_name)
+        return result

@@ -9,6 +9,10 @@ from app.modules.ChapterStudio_V1.app.generation_context import GenerationContex
 from app.modules.ChapterStudio_V1.common.errors import StorageError
 from app.modules.ChapterStudio_V1.db.persistence import persist_chapter_state
 from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState
+from app.modules.ChapterStudio_V1.postprocess.iframe_sandboxer import wrap_iframe
+
+# 저장 계약(iframe 가드)에 맞는 정상 슬라이드 html — sandbox+srcdoc을 갖춘 wrap_iframe 출력이다.
+_SLIDE_IFRAME_HTML = wrap_iframe("<section>1</section>")
 
 _PLACEHOLDER = re.compile(r"\$(\d+)")
 
@@ -135,7 +139,7 @@ async def test_persist_chapter_state_writes_public_spring_tables() -> None:
         "lesson-1",
         0,
         "핵심 흐름",
-        "<iframe srcdoc='<section>1</section>'></iframe>",
+        _SLIDE_IFRAME_HTML,
     )
     assert slide_args[5:] == (None, 3.5)
     assert re.fullmatch(r"qz_[0-9A-Z]{26}", str(quiz_args[0]))
@@ -188,7 +192,7 @@ def _state() -> ChapterStudioState:
             {
                 "slide_idx": 0,
                 "category": "text",
-                "html_content": "<iframe srcdoc='<section>1</section>'></iframe>",
+                "html_content": _SLIDE_IFRAME_HTML,
             }
         ],
         "quiz_set": [

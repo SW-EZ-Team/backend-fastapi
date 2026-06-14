@@ -29,6 +29,48 @@ _BLANK_TEMPLATES = {"ko_fill_blank", "us_fill_blank"}
 _ORDER_TEMPLATES = {"ko_ordering", "us_ordering"}
 _MATCH_TEMPLATES = {"ko_matching", "us_matching"}
 
+# 오답 시 학생에게 다음 행동을 안내하는 공통 문구(해설 섹션으로 유도)
+_REVIEW_HINT = "아래 해설에서 이유를 확인해 보세요."
+
+
+def _answer_display(text: str, limit: int = 80) -> str:
+    """정답 표시 문자열을 정리하고 너무 길면 잘라 피드백에 끼워 넣는다."""
+    snippet = (text or "").strip()
+    if len(snippet) <= limit:
+        return snippet
+    return snippet[:limit].rstrip() + "…"
+
+
+def _correct_option_text(question: GradeQuestion) -> str:
+    """정답 보기의 번호·문장을 표시용 문자열로 만든다(없으면 correct_answer 폴백)."""
+    for option in question.options or []:
+        if option.is_correct:
+            text = _answer_display(option.text)
+            label = (option.label or "").strip()
+            if text and label:
+                return f"{label}. {text}"
+            return text or label
+    return _answer_display(question.correct_answer)
+
+
+def _objective_feedback(
+    score: float,
+    max_score: float,
+    answer_text: str,
+) -> str:
+    """객관 문항용 실질 피드백을 만든다 — 정/오/부분 판정 + 정답 + 오답 시 안내.
+
+    프론트의 짧은 라벨('참거짓 판정 일치' 등) 대신 학생이 바로 이해할 수 있는
+    한두 문장 피드백을 제공한다. 개념 설명(해설)과 중복되지 않도록 판정·정답만 담는다.
+    """
+    answer = (answer_text or "").strip()
+    answer_clause = f" 정답은 '{answer}' 입니다." if answer else ""
+    if score >= max_score:
+        return f"정확히 맞혔어요!{answer_clause}".strip()
+    if score > 0:
+        return f"부분 정답이에요.{answer_clause} {_REVIEW_HINT}".strip()
+    return f"오답이에요.{answer_clause} {_REVIEW_HINT}".strip()
+
 
 def grade_objective_question(
     question: GradeQuestion,
@@ -51,9 +93,15 @@ def grade_objective_question(
     return grade_exact_question(question, answer)
 
 
-def grade_unanswered_question(question: Question) -> QuestionGradeResult:
+def grade_unanswered_question(question: GradeQuestion) -> QuestionGradeResult:
     """미제출 문항을 0점으로 채점한다."""
-    return _result(question, 0.0, "답안 미제출", [])
+    answer_text = (
+        _correct_option_text(question) if question.options
+        else _answer_display(question.correct_answer)
+    )
+    answer_clause = f" 정답은 '{answer_text}' 입니다." if answer_text else ""
+    feedback = f"답안을 제출하지 않았어요.{answer_clause} {_REVIEW_HINT}".strip()
+    return _result(question, 0.0, feedback, [])
 
 
 def grade_exact_question(question: Question, answer: JsonValue) -> QuestionGradeResult:
@@ -62,7 +110,8 @@ def grade_exact_question(question: Question, answer: JsonValue) -> QuestionGrade
     accepted = accepted_variants(question.correct_answer)
     score = _points(question) if candidate in accepted else 0.0
     reason = "허용 답안과 일치" if score else "허용 답안과 불일치"
-    return _result(question, score, reason, [_criterion("정답 일치", score, question, reason)])
+    feedback = _objective_feedback(score, _points(question), _answer_display(question.correct_answer))
+    return _result(question, score, feedback, [_criterion("정답 일치", score, question, reason)])
 
 
 def grade_choice_question(question: Question, answer: JsonValue) -> QuestionGradeResult:
@@ -75,7 +124,8 @@ def grade_choice_question(question: Question, answer: JsonValue) -> QuestionGrad
             accepted.add(compact_text(option.text))
     score = _points(question) if candidate in accepted else 0.0
     reason = "정답 보기 선택" if score else "오답 보기 선택"
-    return _result(question, score, reason, [_criterion("보기 선택", score, question, reason)])
+    feedback = _objective_feedback(score, _points(question), _correct_option_text(question))
+    return _result(question, score, feedback, [_criterion("보기 선택", score, question, reason)])
 
 
 def grade_true_false_question(question: Question, answer: JsonValue) -> QuestionGradeResult:
@@ -85,7 +135,14 @@ def grade_true_false_question(question: Question, answer: JsonValue) -> Question
     accepted.discard("")
     score = _points(question) if candidate and candidate in accepted else 0.0
     reason = "참거짓 판정 일치" if score else "참거짓 판정 불일치"
-    return _result(question, score, reason, [_criterion("참거짓", score, question, reason)])
+    correct_token = next(iter(accepted), "")
+    correct_label = (
+        "참(O)" if correct_token == "true"
+        else "거짓(X)" if correct_token == "false"
+        else _answer_display(question.correct_answer)
+    )
+    feedback = _objective_feedback(score, _points(question), correct_label)
+    return _result(question, score, feedback, [_criterion("참거짓", score, question, reason)])
 
 
 def grade_blank_question(question: Question, answer: JsonValue) -> QuestionGradeResult:
@@ -97,14 +154,25 @@ def grade_blank_question(question: Question, answer: JsonValue) -> QuestionGrade
     unit = _points(question) / len(expected)
     criteria: list[RubricCriterionResult] = []
     score = 0.0
+    correct_count = 0
     for index, correct in enumerate(expected):
         candidate = compact_text(submitted[index]) if index < len(submitted) else ""
         ok = candidate in accepted_variants(correct)
         item_score = unit if ok else 0.0
         score += item_score
+        if ok:
+            correct_count += 1
         reason = "일치" if ok else "불일치"
         criteria.append(_criterion(f"빈칸 {index + 1}", item_score, question, reason, unit))
-    return _result(question, score, "빈칸 위치별 채점", criteria)
+    answers_join = ", ".join(_answer_display(str(item), 40) for item in expected)
+    total = len(expected)
+    if correct_count >= total:
+        feedback = f"빈칸을 모두 맞혔어요! 정답은 {answers_join} 입니다."
+    elif correct_count > 0:
+        feedback = f"빈칸 {total}개 중 {correct_count}개를 맞혔어요. 정답은 {answers_join} 입니다. {_REVIEW_HINT}"
+    else:
+        feedback = f"오답이에요. 정답은 {answers_join} 입니다. {_REVIEW_HINT}"
+    return _result(question, score, feedback, criteria)
 
 
 def grade_ordering_question(question: Question, answer: JsonValue) -> QuestionGradeResult:
@@ -115,14 +183,25 @@ def grade_ordering_question(question: Question, answer: JsonValue) -> QuestionGr
     submitted = sequence_values(answer)
     unit = _points(question) / len(expected)
     score = 0.0
+    correct_count = 0
     criteria: list[RubricCriterionResult] = []
     for index, correct in enumerate(expected):
         ok = index < len(submitted) and compact_text(submitted[index]) == compact_text(correct)
         item_score = unit if ok else 0.0
         score += item_score
+        if ok:
+            correct_count += 1
         reason = "순서 일치" if ok else "순서 불일치"
         criteria.append(_criterion(f"순서 {index + 1}", item_score, question, reason, unit))
-    return _result(question, score, "순서 위치별 채점", criteria)
+    order_join = " → ".join(_answer_display(str(item), 30) for item in expected)
+    total = len(expected)
+    if correct_count >= total:
+        feedback = f"순서를 모두 맞혔어요! 정답 순서는 {order_join} 입니다."
+    elif correct_count > 0:
+        feedback = f"{total}개 중 {correct_count}개를 올바른 위치에 놓았어요. 정답 순서는 {order_join} 입니다. {_REVIEW_HINT}"
+    else:
+        feedback = f"오답이에요. 정답 순서는 {order_join} 입니다. {_REVIEW_HINT}"
+    return _result(question, score, feedback, criteria)
 
 
 def grade_matching_question(question: Question, answer: JsonValue) -> QuestionGradeResult:
@@ -133,15 +212,29 @@ def grade_matching_question(question: Question, answer: JsonValue) -> QuestionGr
     submitted = mapping_values(answer)
     unit = _points(question) / len(expected)
     score = 0.0
+    correct_count = 0
     criteria: list[RubricCriterionResult] = []
     for left, right in expected.items():
         candidate = compact_text(submitted.get(normalize_text(left), ""))
         ok = candidate == compact_text(right)
         item_score = unit if ok else 0.0
         score += item_score
+        if ok:
+            correct_count += 1
         reason = "연결 일치" if ok else "연결 불일치"
         criteria.append(_criterion(left, item_score, question, reason, unit))
-    return _result(question, score, "연결 항목별 채점", criteria)
+    pairs_join = ", ".join(
+        f"{_answer_display(str(left), 24)}↔{_answer_display(str(right), 24)}"
+        for left, right in expected.items()
+    )
+    total = len(expected)
+    if correct_count >= total:
+        feedback = f"연결을 모두 맞혔어요! 정답 연결은 {pairs_join} 입니다."
+    elif correct_count > 0:
+        feedback = f"{total}개 연결 중 {correct_count}개를 맞혔어요. 정답 연결은 {pairs_join} 입니다. {_REVIEW_HINT}"
+    else:
+        feedback = f"오답이에요. 정답 연결은 {pairs_join} 입니다. {_REVIEW_HINT}"
+    return _result(question, score, feedback, criteria)
 
 
 def _bool_token(value: str) -> str:

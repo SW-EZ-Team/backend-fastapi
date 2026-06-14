@@ -9,6 +9,7 @@ IN은 `ChapterRequest`와 노드별 State 조각이며 OUT은 `ChapterStudioStat
 ## 노드 순서
 `prepare_context → generate_lesson → content_verify → postprocess_slides`.
 - `generate_lesson`: 강의 JSON 생성 + 형식 self-check/repair(분량·구조) 후 payload를 `lesson_payload`에 stash한다.
+  - self-check(`quality.py`)는 메타 퀴즈(강의 구조 자체를 묻는 문항)를 `quiz_meta_filter.py`로 결정론 판별하고, repair가 해당 퀴즈를 내용 문항으로 전체 재작성한다(재작성도 메타면 원본 유지 — 생성은 절대 죽지 않는다).
 - `content_verify`: 사실·논리 오류를 LLM 1회 검증→교정→1회 재검증한다(graceful). 다운스트림 records(slides·quiz_set·voice_scripts 등)를 단 한 번 emit한다.
 
 ## 환경변수

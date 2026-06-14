@@ -22,8 +22,8 @@ def test_root_env_example_declares_chapterstudio_runtime_contract() -> None:
     env = _backend_env()
 
     assert _value_for(env, "DATABASE_SCHEMA") == "chapter_studio"
-    assert _value_for(env, "ACTIVE_PLANNER_MODEL") == "opus46"
-    assert _value_for(env, "ACTIVE_TTS_MODEL") == "tts_v1"
+    assert _value_for(env, "ACTIVE_PLANNER_MODEL") == "gemini_flash"
+    assert _value_for(env, "ACTIVE_TTS_MODEL") == "gemini_tts"
     assert _value_for(env, "EXAMFORGE_VERIFICATION_ADVISORY") == "false"
     assert "TTS_ENDPOINT=" in env
 

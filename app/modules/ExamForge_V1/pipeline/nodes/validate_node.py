@@ -16,6 +16,10 @@ from app.modules.ExamForge_V1.quality.explanation_checker import (
     check_explanation_quality,
     is_explanation_complete,
 )
+from app.modules.ExamForge_V1.quality.meta_question_filter import is_meta_question
+from app.modules.ExamForge_V1.quality.difficulty_scorer import check_difficulty_manifestation
+from app.modules.ExamForge_V1.quality.relevance_gate import check_questions_relevance
+from app.modules.ExamForge_V1.quality.scenario_gate import check_scenario_quality
 from app.modules.ExamForge_V1.common.logger import get_logger
 from app.modules.ExamForge_V1.pipeline.nodes.programming_context import has_code_snippets
 from app.modules.ExamForge_V1.pipeline.nodes.programming_context import looks_like_programming_source
@@ -80,6 +84,11 @@ async def validate_node(state: ExamForgeState) -> dict:
         global_issues.append(f"미커버 주제: {', '.join(uncovered[:5])}")
     global_issues.extend(_verification_advisory_issues(questions, verification_advisory))
     _apply_programming_code_gate(state, questions, failed_ids, global_issues)
+    # 출처 관련성 게이트: 출처 어휘와 겹치지 않는 일반 상식 문항을 재시도 대상으로 표시
+    _apply_relevance_gate(state, questions, failed_ids, global_issues)
+    # 시나리오 중복·개념 과대표현 게이트: 같은 수치 예시 재활용·동일 개념 과점유 문항을
+    # 재시도(교체) 대상으로 표시한다. 구조 신호만 사용(subject-agnostic).
+    _apply_scenario_gate(questions, failed_ids, global_issues)
 
     # plan-first E 요구사항: 정답 위치 분포가 계획(answer_position_plan)과 일치하는지 검증.
     # 불일치는 global_issues에만 두지 않고 별도 플래그로 보고서에 올려 라우팅에 반영한다.
@@ -177,6 +186,9 @@ def _check_single_structure(q: dict, template_id: str) -> list[str]:
     """
     if not q.get("stem", "").strip():
         return ["문제 줄기(stem)가 비어 있음"]
+    # 시험 메타 문항(문항 수·배점·응시 방법 등) 결정론 차단 — repair 경로로 재생성된다
+    if is_meta_question(q.get("stem", "")):
+        return ["시험 메타 문항(시험 구성 자체를 묻는 문항) — 과목 내용 문항으로 재생성 필요"]
     # 객관식 문항에 한해 해설 완결성 게이트 적용 — truncation 조용한 통과 방지
     options = q.get("options") or []
     explanation = str(q.get("explanation", "")).strip()
@@ -189,7 +201,12 @@ def _check_single_structure(q: dict, template_id: str) -> list[str]:
         template = get_template(template_id)
         from app.modules.ExamForge_V1.schemas.question import Question
         question_obj = Question(**q)
-        return template.validate_structure(question_obj) + check_explanation_quality(q)
+        # 난이도 발현 게이트: 상위 블룸(4~5) 문항이 정의 회상형으로 퇴화하면 결함 처리
+        return (
+            template.validate_structure(question_obj)
+            + check_explanation_quality(q)
+            + check_difficulty_manifestation(q)
+        )
     except (ExamForgeError, PydanticValidationError, ValueError, TypeError) as e:
         return [f"구조 검증 오류: {str(e)[:100]}"]
 
@@ -312,6 +329,59 @@ def _apply_programming_code_gate(
     global_issues.append("프로그래밍 과목인데 code_snippet 문항이 없음")
     for q in questions:
         draft_id = q.get("draft_id", q.get("question_id", ""))
+        if draft_id and draft_id not in failed_ids:
+            failed_ids.append(draft_id)
+
+
+def _apply_relevance_gate(
+    state: ExamForgeState,
+    questions: list[dict],
+    failed_ids: list[str],
+    global_issues: list[str],
+) -> None:
+    """출처 어휘와 겹치지 않는 일반 상식 의심 문항을 재시도 대상으로 표시한다.
+
+    출처 어휘가 빈약하면(스텁 source_text) 게이트가 자체 생략되므로
+    폴백 경로(과목명만으로 생성)에서는 동작하지 않는다 — 오탐 방지.
+    """
+    source_text = state.get("source_text", "")
+    topics = state.get("topics", [])
+    try:
+        flagged = check_questions_relevance(questions, source_text, topics)
+    except Exception as exc:
+        logger.warning("관련성 게이트 검사 실패 — 건너뜀: %s", exc)
+        return
+    if not flagged:
+        return
+    global_issues.append(f"출처 무관 의심 문항 {len(flagged)}건 — 출처 발췌 기반 재출제 필요")
+    for draft_id in flagged:
+        if draft_id and draft_id not in failed_ids:
+            failed_ids.append(draft_id)
+
+
+def _apply_scenario_gate(
+    questions: list[dict],
+    failed_ids: list[str],
+    global_issues: list[str],
+) -> None:
+    """시나리오 중복·개념 과대표현 문항을 교체(재시도) 대상으로 표시한다.
+
+    구조 신호(숫자 시퀀스·정규화 토큰·concept_key)만으로 판단하므로 과목 불문이다.
+    교체는 기존 repair/재생성 경로가 수행하고, 좁은 소스로 교체가 불가하면
+    route_after_validation 의 기존 재시도 캡이 1~2회 시도 후 graceful 통과시킨다.
+    deduplicator/relevance_gate 와는 failed_ids 합류 시 중복 추가를 막아 충돌이 없다.
+    """
+    try:
+        flagged = check_scenario_quality(questions)
+    except Exception as exc:
+        logger.warning("시나리오/과대표현 게이트 검사 실패 — 건너뜀: %s", exc)
+        return
+    if not flagged:
+        return
+    global_issues.append(
+        f"시나리오 중복·개념 과대표현 의심 문항 {len(flagged)}건 — 다른 시나리오·개념으로 교체 필요"
+    )
+    for draft_id in flagged:
         if draft_id and draft_id not in failed_ids:
             failed_ids.append(draft_id)
 

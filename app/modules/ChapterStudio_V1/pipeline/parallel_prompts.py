@@ -107,14 +107,18 @@ def build_slides_request(
     template_key: str,
     personalization: PersonalizationArgs,
     slide_plan: list[dict[str, object]] | None = None,
+    reference_block: str = "",
 ) -> ChapterAIRequest:
     """슬라이드 배열만 생성하는 요청을 만든다(schema_kind=slides).
 
     slide_plan이 주어지면 plan이 쓰는 visual.type 집합을 extra.plan_visual_types로 전달해
     Modal guided 스키마가 enum을 그 집합으로 좁히게 한다(P1 — schema narrowing).
     per-slot 단일값 강제는 parse_slides backstop이 담당하며, 여기서는 집합만 좁힌다.
+    reference_block(참고도서 발췌)이 있으면 프롬프트에 근거 자료로 함께 전달한다.
     """
-    system, user = slides_prompts(brief, outline, slide_count, template_key, **_prompt_kwargs(personalization))
+    system, user = slides_prompts(
+        brief, outline, slide_count, template_key, reference_block=reference_block, **_prompt_kwargs(personalization)
+    )
     req = _request(system, user, _SLIDES_MAX_TOKENS, 0.35, slide_count, "slides", template_key)
     plan_types = _plan_visual_types_csv(slide_plan)
     if plan_types:
@@ -140,26 +144,33 @@ def _plan_visual_types_csv(slide_plan: list[dict[str, object]] | None) -> str:
 
 
 def build_quizzes_request(
-    brief: str, outline: str, slide_count: int, template_key: str, personalization: PersonalizationArgs
+    brief: str, outline: str, slide_count: int, template_key: str, personalization: PersonalizationArgs,
+    reference_block: str = "",
 ) -> ChapterAIRequest:
     """퀴즈 배열만 생성하는 요청을 만든다(schema_kind=quizzes)."""
-    system, user = quizzes_prompts(brief, outline, slide_count, **_prompt_kwargs(personalization))
+    system, user = quizzes_prompts(
+        brief, outline, slide_count, reference_block=reference_block, **_prompt_kwargs(personalization)
+    )
     return _request(system, user, _QUIZZES_MAX_TOKENS, 0.3, slide_count, "quizzes", template_key)
 
 
 def build_note_request(
-    brief: str, outline: str, slide_count: int, template_key: str, personalization: PersonalizationArgs
+    brief: str, outline: str, slide_count: int, template_key: str, personalization: PersonalizationArgs,
+    reference_block: str = "",
 ) -> ChapterAIRequest:
     """핵심 노트(note_blocks)만 생성하는 요청을 만든다(schema_kind=note)."""
-    system, user = note_prompts(brief, outline, **_prompt_kwargs(personalization))
+    system, user = note_prompts(brief, outline, reference_block=reference_block, **_prompt_kwargs(personalization))
     return _request(system, user, _NOTE_MAX_TOKENS, 0.3, slide_count, "note", template_key)
 
 
 def build_assignment_request(
-    brief: str, outline: str, slide_count: int, template_key: str, personalization: PersonalizationArgs
+    brief: str, outline: str, slide_count: int, template_key: str, personalization: PersonalizationArgs,
+    reference_block: str = "",
 ) -> ChapterAIRequest:
     """과제(assignment)만 생성하는 요청을 만든다(schema_kind=assignment)."""
-    system, user = assignment_prompts(brief, outline, **_prompt_kwargs(personalization))
+    system, user = assignment_prompts(
+        brief, outline, reference_block=reference_block, **_prompt_kwargs(personalization)
+    )
     return _request(system, user, _ASSIGNMENT_MAX_TOKENS, 0.3, slide_count, "assignment", template_key)
 
 
@@ -172,6 +183,7 @@ def build_voice_request(
     slide_idx: int,
     slide_count: int,
     personalization: PersonalizationArgs,
+    reference_block: str = "",
 ) -> ChapterAIRequest:
     """슬라이드 1개의 음성대본만 생성하는 요청을 만든다(schema_kind=voice_script)."""
     system, user = voice_prompt(
@@ -181,6 +193,7 @@ def build_voice_request(
         slide_summary,
         slide_idx,
         previous_title=previous_title,
+        reference_block=reference_block,
         **_prompt_kwargs(personalization),
     )
     return ChapterAIRequest(

@@ -9,6 +9,8 @@ from app.modules.ChapterStudio_V1.common.config import database_schema
 from app.modules.ChapterStudio_V1.db.persistence_sql import (
     audio_pending_status_sql,
     failure_status_sql,
+    generation_status_select_sql,
+    progress_status_sql,
     running_status_sql,
 )
 
@@ -16,6 +18,29 @@ from app.modules.ChapterStudio_V1.db.persistence_sql import (
 class StatusConnection(Protocol):
     async def execute(self, query: str, *args: object) -> object:
         """상태 갱신 쿼리를 실행한다."""
+
+
+class StatusFetchConnection(Protocol):
+    async def fetchrow(self, query: str, *args: object) -> Mapping[str, object] | None:
+        """상태 단건 조회 쿼리를 실행한다."""
+
+
+async def fetch_chapter_generation_status(
+    conn: StatusFetchConnection,
+    lesson_id: str,
+) -> dict[str, object] | None:
+    """진행률 폴링용 lesson_generation_status 단건을 조회한다. 행이 없으면 None을 반환한다."""
+    row = await conn.fetchrow(generation_status_select_sql(database_schema()), lesson_id)
+    if row is None:
+        return None
+    return {
+        "status": row["status"],
+        "current_node": row["current_node"],
+        "completed_nodes": row["completed_nodes"],
+        "total_nodes": row["total_nodes"],
+        "progress_percent": row["progress_percent"],
+        "error_message": row["error_message"],
+    }
 
 
 async def mark_chapter_running(
@@ -28,6 +53,29 @@ async def mark_chapter_running(
         running_status_sql(database_schema()),
         context.lesson_id,
         context.tutoring_id,
+        chapter_id,
+    )
+
+
+async def mark_chapter_progress(
+    conn: StatusConnection,
+    context: GenerationContext,
+    chapter_id: str,
+    *,
+    current_node: str,
+    completed_nodes: int,
+    total_nodes: int,
+    progress_percent: int,
+) -> None:
+    """그래프 노드 완료마다 진행률 행을 갱신해 0%→100% 점프 문제를 없앤다."""
+    await conn.execute(
+        progress_status_sql(database_schema()),
+        context.lesson_id,
+        context.tutoring_id,
+        current_node,
+        completed_nodes,
+        total_nodes,
+        progress_percent,
         chapter_id,
     )
 

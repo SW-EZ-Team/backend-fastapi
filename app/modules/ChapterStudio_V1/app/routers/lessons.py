@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 
 from app.modules.ChapterStudio_V1.app.lesson_audio_backfill import backfill_lesson_audio
 from app.modules.ChapterStudio_V1.app.lessons_generate import generate_lesson_for_chapter, generate_lessons_for_course
+from app.modules.ChapterStudio_V1.db.persistence_status import fetch_chapter_generation_status
+from common.db import get_connection
 
 _LOG = logging.getLogger(__name__)
 
@@ -111,6 +113,46 @@ async def generate_one_lesson(
         voice_sample_url=req.voiceSampleUrl,
     )
     return {"accepted": True, "courseId": req.courseId, "lessonId": req.lessonId}
+
+
+class LessonGenerationStatusResponse(BaseModel):
+    """강의 생성 진행 상태 응답 — Spring 프록시가 그대로 프론트에 전달한다.
+
+    status: unknown(행 없음) / pending / running / done / failed
+    currentNode: 마지막으로 완료된 그래프 노드명 (running_status는 generate_chapter_state)
+    progressPercent: 0~100 노드 단위 진행률
+    """
+
+    lessonId: str
+    status: str
+    currentNode: str | None = None
+    completedNodes: int = 0
+    totalNodes: int = 0
+    progressPercent: int = 0
+    errorMessage: str | None = None
+
+
+@router.get("/{lessonId}/generation-status", response_model=LessonGenerationStatusResponse)
+async def get_lesson_generation_status(lessonId: str) -> LessonGenerationStatusResponse:
+    """강의 생성 노드 단위 진행 상태를 반환한다.
+
+    Spring GET /tutoring/{courseId}/lessons/{chapterId}/generation-status 가 폴링하며,
+    소유권 검증은 Spring이 담당한다. 상태 행이 아직 없으면 status=unknown 으로 응답해
+    호출 측이 404 분기 없이 기존 챕터 단위 표시로 자연 폴백하게 한다.
+    """
+    async with get_connection() as conn:
+        row = await fetch_chapter_generation_status(conn, lessonId)
+    if row is None:
+        return LessonGenerationStatusResponse(lessonId=lessonId, status="unknown")
+    return LessonGenerationStatusResponse(
+        lessonId=lessonId,
+        status=str(row["status"]),
+        currentNode=row["current_node"],  # type: ignore[arg-type]
+        completedNodes=int(row["completed_nodes"] or 0),  # type: ignore[arg-type]
+        totalNodes=int(row["total_nodes"] or 0),  # type: ignore[arg-type]
+        progressPercent=int(row["progress_percent"] or 0),  # type: ignore[arg-type]
+        errorMessage=row["error_message"],  # type: ignore[arg-type]
+    )
 
 
 @router.post("/{lessonId}/audio-backfill", status_code=202)

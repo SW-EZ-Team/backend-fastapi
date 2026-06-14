@@ -120,8 +120,17 @@ async def generate_distractors_node(state: ExamForgeState) -> dict:
             q_copy = q.copy()
             try:
                 data = parse_llm_json(resp.text)
-                q_copy["options"] = data.get("options", q_copy.get("options"))
-                q_copy["distractor_rationale"] = data.get("distractor_rationale")
+                # LLM이 객체 대신 배열/스칼라를 주면 .get()이 AttributeError로 죽는다.
+                # (except 튜플 미포착 → gather 폴백으로 빠지지만 의도된 '원본 유지'
+                #  경로가 아니므로 명시적으로 dict일 때만 반영하고 아니면 원본을 보존한다.)
+                if isinstance(data, dict):
+                    q_copy["options"] = data.get("options", q_copy.get("options"))
+                    q_copy["distractor_rationale"] = data.get("distractor_rationale")
+                else:
+                    logger.warning(
+                        "오답 개선 응답이 dict가 아님(%s) — 원본 선택지 유지",
+                        type(data).__name__,
+                    )
             except (ValueError, KeyError, TypeError) as e:
                 logger.warning("오답 개선 파싱 실패: %s", e)
             return q_copy

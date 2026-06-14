@@ -48,6 +48,9 @@ _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 _SPRING_COMMIT_RETRY_ATTEMPTS = 5
 _SPRING_COMMIT_RETRY_DELAY_SEC = 1.0
 _COURSE_FAILED_STATUS = "CURRICULUM_FAILED"
+# PDF 발췌 블록 상한 — 커리큘럼 프롬프트가 발췌로 비대해지지 않게 제한한다.
+_PDF_EXCERPT_MAX_HITS = 5
+_PDF_EXCERPT_SNIPPET_CHARS = 240
 
 
 # ---------------------------------------------------------------------------
@@ -148,8 +151,12 @@ async def _plan_with_blueprint(
         lesson_count=lesson_count,
     )
 
+    # PDF 소스 course면 OCR 인제스트된 발췌를 커리큘럼 프롬프트에 근거로 주입한다.
+    # 검색 실패는 빈 블록으로 폴백해 topic 모드와 동일한 흐름을 유지한다.
+    pdf_block = await _pdf_excerpt_block(course, topic)
+
     connector = get_planner_connector()
-    prompt = _build_slot_loop_prompt(topic, subject_name, blueprint)
+    prompt = _build_slot_loop_prompt(topic, subject_name, blueprint, pdf_block)
     req = ChapterAIRequest(
         # gemini_flash thinking 토큰(~21000)이 max_output_tokens 예산을 먼저 잠식하므로
         # 8000은 전체 슬롯 커리큘럼 JSON이 절단되기 쉽다. thinking 헤드룸 포함 32000으로 올린다.
@@ -165,7 +172,7 @@ async def _plan_with_blueprint(
     # N 미달 시 부족 슬롯만 재요청 (1회 한도)
     if len(slot_responses) < lesson_count:
         slot_responses = await _repair_missing_slots(
-            connector, topic, subject_name, blueprint, slot_responses
+            connector, topic, subject_name, blueprint, slot_responses, pdf_block
         )
 
     # 재요청 후에도 N 미달이면 명시 실패
@@ -183,6 +190,7 @@ def _build_slot_loop_prompt(
     topic: str,
     subject: str,
     blueprint: list[ChapterSlot],
+    pdf_block: str = "",
 ) -> str:
     """각 슬롯의 명세를 나열하고 텍스트 채우기를 지시하는 프롬프트를 생성한다.
 
@@ -190,6 +198,7 @@ def _build_slot_loop_prompt(
     - 슬롯마다 order/stage/topic_scope/role이 고정되어 있음을 명시
     - 채울 항목: title, summary, learning_goal, key_topics만
     - 구조 변경 금지 명령
+    - pdf_block이 있으면 업로드 PDF 발췌를 근거로 제시(없으면 블록 자체를 생략)
     """
     n = len(blueprint)
     slot_lines = "\n".join(
@@ -197,10 +206,19 @@ def _build_slot_loop_prompt(
         f'"topic_scope":"{s.topic_scope}","role":"{s.role}"}}'
         for s in blueprint
     )
+    pdf_section = ""
+    if pdf_block.strip():
+        pdf_section = (
+            "참고도서 발췌(업로드 PDF의 OCR 결과, page 번호 유지):\n"
+            f"{pdf_block.strip()}\n"
+            "각 슬롯의 title·summary·learning_goal·key_topics는 위 발췌 내용에 근거해 구성한다. "
+            "발췌에 없는 내용을 추가할 때는 일반 원리 수준만 허용한다.\n\n"
+        )
     return (
         "/no_think\n"
         f"과외 커리큘럼 텍스트 채우기 작업이다.\n"
         f"주제: {topic}\n과목: {subject}\n전체 강의 수: {n}개 (고정, 변경 불가)\n\n"
+        f"{pdf_section}"
         f"아래 {n}개 슬롯의 order·stage·topic_scope·role은 이미 결정되어 있다.\n"
         "각 슬롯에 대해 title·summary·learning_goal·key_topics(3~5개)만 한국어로 채워라.\n"
         "슬롯 수·순서·stage·topic_scope는 절대 변경하지 마라.\n\n"
@@ -212,6 +230,52 @@ def _build_slot_loop_prompt(
         "key_topics 3~5개. title 120자 이내. summary 300자 이내. "
         "learning_goal 200자 이내. 모든 텍스트는 한국어."
     )
+
+
+async def _pdf_excerpt_block(course: dict, topic: str) -> str:
+    """업로드 PDF(OCR 인제스트 완료)의 발췌 블록을 만든다 — 실패 시 빈 문자열.
+
+    OCR 인제스트가 Qdrant에 저장한 청크를 강의 주제로 검색해 'p.번호: 발췌' 줄 목록을
+    만든다. 컬렉션명 유도는 pdf_context_injector와 동일한 단일 규칙을 재사용한다.
+    Qdrant 미연결·컬렉션 없음 등 인프라 예외는 커리큘럼 생성 실패로 번지지 않게
+    경고만 남기고 topic 모드와 동일한 빈 블록으로 폴백한다.
+    """
+    source_ref = course.get("source_pdf_url")
+    if not isinstance(source_ref, str) or not source_ref.strip():
+        return ""
+    try:
+        from app.modules.ChapterStudio_V1.app.pdf_context_injector import collection_name_from_source_ref
+        from app.modules.OCR_v1.search import hybrid_search
+
+        collection = collection_name_from_source_ref(source_ref)
+        hits = await hybrid_search(topic, collection, top_k=_PDF_EXCERPT_MAX_HITS)
+    except Exception as exc:
+        _LOG.warning(
+            "[curriculum] PDF 발췌 검색 실패(무시) — courseId=%s, error=%s",
+            course.get("id"),
+            exc,
+        )
+        return ""
+    lines: list[str] = []
+    for hit in hits[:_PDF_EXCERPT_MAX_HITS]:
+        if not isinstance(hit, dict):
+            continue
+        text = str(hit.get("text", "")).strip()
+        if not text:
+            continue
+        payload = hit.get("payload")
+        page = payload.get("page_num", 1) if isinstance(payload, dict) else 1
+        snippet = re.sub(r"\s+", " ", text)[:_PDF_EXCERPT_SNIPPET_CHARS]
+        lines.append(f"- p.{page}: {snippet}")
+    if not lines:
+        # 0 hit는 컬렉션명 불일치 또는 OCR 미완료 가능성이 있으므로 warning으로 남긴다
+        _LOG.warning(
+            "[curriculum] PDF 발췌 0건 — courseId=%s, source_ref=%s",
+            course.get("id"),
+            source_ref,
+        )
+        return ""
+    return "\n".join(lines)
 
 
 def _codex_schema_extra() -> dict[str, str]:
@@ -333,10 +397,12 @@ async def _repair_missing_slots(
     subject: str,
     blueprint: list[ChapterSlot],
     received: list[_SlotResponse],
+    pdf_block: str = "",
 ) -> list[_SlotResponse]:
     """N 미달 시 부족한 슬롯만 재요청한다 (최대 1회).
 
     부족 슬롯의 블루프린트 명세만 재전달해 최소 AI 호출로 복구를 시도한다.
+    PDF 발췌 블록이 있으면 재요청 프롬프트에도 동일하게 전달한다.
     """
     received_orders = {sr.order for sr in received}
     missing_slots = [s for s in blueprint if s.order not in received_orders]
@@ -349,7 +415,7 @@ async def _repair_missing_slots(
         [s.order for s in missing_slots],
     )
 
-    repair_prompt = _build_slot_loop_prompt(topic, subject, missing_slots)
+    repair_prompt = _build_slot_loop_prompt(topic, subject, missing_slots, pdf_block)
     req = ChapterAIRequest(
         # gemini_flash thinking 토큰(~21000)이 예산을 먼저 잠식하므로 4000은 부족 슬롯 보충 JSON이
         # 절단되기 쉽다. 출력은 부분 슬롯이라 작지만 thinking 헤드룸을 확보해 24000으로 올린다.

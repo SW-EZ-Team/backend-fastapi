@@ -4,7 +4,7 @@
 Qwen이 생성한 슬라이드 HTML+CSS를 DB 저장 직전 안전한 렌더 산출물로 변환함.
 
 ## IN·OUT
-IN은 `index`, `category`, `html`, `css`를 가진 슬라이드 dict임. OUT은 `index`, `category`, `html`, `css`, `iframe_html`, `warnings` 6키를 가진 후처리 결과임. `iframe_html`은 내부 검증용 sandbox iframe 태그이며, 프론트·DB payload로 나가기 전 `app/frontend_payload.py`에서 `srcDoc` 문서 HTML로 정규화함.
+IN은 `index`, `category`, `html`, `css`를 가진 슬라이드 dict임. 선택 키로 `expected_visual_type`·`visual_data`(plan-first로 확정된 visual 계약)를 받으며, 최종 HTML에 해당 visual_type의 marker class가 없으면 `visual_quality.enforce_expected_visual`이 결정적 렌더러로 재렌더해 템플릿 디자인을 강제함. OUT은 `index`, `category`, `html`, `css`, `iframe_html`, `warnings` 6키를 가진 후처리 결과임. `iframe_html`은 내부 검증용 sandbox iframe 태그이며, 프론트·DB payload로 나가기 전 `app/frontend_payload.py`에서 `srcDoc` 문서 HTML로 정규화함.
 
 ## 환경변수
 해당 없음.
@@ -21,6 +21,9 @@ result = await postprocess_slide(0, "code", raw_html, raw_css)
 
 ## 에러 정책
 외부 렌더러 실패는 원본 보존 fallback과 warning으로 남김. 보안 처리는 `nh3_sanitizer.py`, `iframe_sandboxer.py`, `app/frontend_payload.py`에서 강제하며 iframe sandbox token은 `allow-scripts` 하나만 허용함.
+
+## 저장 직전 iframe 가드 (`iframe_guard.py`)
+`db/persistence.persist_chapter_state`가 저장 직전에 `ensure_slides_iframe`을 호출함. html_content가 wrap_iframe 계약(`<iframe` 시작 + `sandbox="allow-scripts"` + `srcdoc=`)을 어기면 ① 해당 슬라이드만 후처리 1회 재실행, ② 그래도 실패하면 `wrap_iframe` 강제 적용. 어떤 경로로도 raw HTML 슬라이드가 DB(public.slide 포함)에 저장되지 않음을 보장함.
 
 ## 처리 순서
 `shiki.py` → `mermaid_cli.py` → `katex.py` → `matplotlib_chart.py` → `nh3_sanitizer.py` → `iframe_sandboxer.py` 순서로 처리함. category가 맞지 않는 단계는 입력 HTML을 그대로 통과시킴.

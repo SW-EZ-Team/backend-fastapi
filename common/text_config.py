@@ -80,6 +80,25 @@ def claude_sonnet_max_concurrency() -> int:
     return value
 
 
+def gemini_text_max_concurrency() -> int:
+    """전역(채팅·강의) Gemini 텍스트 커넥터의 *실제 동시 SDK 호출* 상한을 반환한다.
+
+    [백로그 #1] 전역 커넥터는 blocking google-genai 호출을 크기 제한된 전용
+    ThreadPoolExecutor 로만 실행한다. 이 값이 그 워커 수다. wait_for 타임아웃으로
+    awaiting 코루틴이 풀려도 blocking 호출은 워커를 계속 점유하므로, 누수된
+    호출까지 포함해 동시 SDK 호출이 이 값을 넘지 못한다.
+
+    기본 1 — 기존 전역 레인은 GEMINI_REQUEST_INTERVAL_MS 간격으로 사실상 직렬화돼
+    있었으므로, 동작 불변을 위해 보수적으로 1로 둔다. 0 이하/파싱 실패는 1로 보정.
+    """
+    raw = os.getenv("GEMINI_TEXT_MAX_CONCURRENCY", "1").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return 1
+    return max(1, min(8, value))
+
+
 # --- OpenAI 폴백 설정 (Gemini 장애 시 자동 전환) ---
 
 

@@ -8,7 +8,7 @@ S3 API 호환 객체 저장소에 대용량 파일을 업로드하는 라이브�
 |---|---|
 | 입력 | `data: bytes`, `key: str`, `content_type: str` |
 | 출력 | 브라우저가 바로 GET 할 수 있는 공개 URL 문자열 |
-| 공개 API | `from app.modules.ObjectStorage_V1 import put_object, s3_enabled` |
+| 공개 API | `from app.modules.ObjectStorage_V1 import put_object, s3_enabled, to_internal_url` |
 
 ```python
 url = await put_object(
@@ -31,6 +31,8 @@ url = await put_object(
 | `S3_PUBLIC_URL_BASE` | 빈 값 | 브라우저 공개 접근 기준 URL |
 
 로컬 compose 기본값은 `S3_ENDPOINT_URL=http://minio:9000`, `S3_PUBLIC_URL_BASE=http://localhost:9000/sw-ez-media`임. 컨테이너 내부 업로드는 `minio` 서비스명을 쓰고, 브라우저 응답 URL은 `localhost`를 써야 하기 때문임.
+
+`to_internal_url(url)`은 그 반대 방향임 — DB 등에 저장된 브라우저용 공개 URL(`S3_PUBLIC_URL_BASE` 시작)을 컨테이너 내부에서 다운로드 가능한 endpoint URL로 되돌림. 공개 베이스로 시작하지 않거나 설정이 비어 있으면 원본을 그대로 반환함 (AWS 운영 환경 no-op). TTS 보이스클론의 참조음성 다운로드 경로가 사용함.
 
 ## 폴백 정책
 

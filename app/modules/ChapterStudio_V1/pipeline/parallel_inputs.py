@@ -140,6 +140,16 @@ def build_brief(state: ChapterStudioState) -> str:
     return _state_text(state, "enriched_brief")
 
 
+def build_reference_block(state: ChapterStudioState) -> str:
+    """참고도서(PDF OCR) 발췌 블록을 state에서 꺼낸다.
+
+    converters.generation_input_to_initial_state가 reference_context_prompt 키에
+    채워 둔 문자열(단일콜 prompt.py와 동일 소스)을 그대로 쓴다. topic 모드처럼
+    참고도서가 없으면 빈 문자열을 반환해 프롬프트에서 블록이 생략되게 한다.
+    """
+    return _optional_state_text(state, "reference_context_prompt")
+
+
 def build_outline_text(state: ChapterStudioState, slide_count: int) -> str:
     """확정 슬라이드 플랜(slide_outline)을 슬롯 단위 오더로 펼친다.
 
@@ -283,6 +293,7 @@ __all__ = [
     "build_brief",
     "build_outline_text",
     "build_personalization_args",
+    "build_reference_block",
     "build_voice_blueprint",
     "build_voice_targets",
     "_row_visual_type",

@@ -37,11 +37,12 @@ async def analyze_mock_exam(req: MockExamAnalyzeRequest) -> MockExamAnalyzeRespo
     codex 실패 시에도 200 + 폴백 문구를 반환해 Spring 흐름을 끊지 않는다.
     """
     try:
-        analysis = await generate_analysis(req)
+        analysis, weak_topics = await generate_analysis(req)
     except AnalysisGenerationError as exc:
         # 이미 generate_analysis에서 로깅됨 — 라우터에서도 폴백 사용 사실을 남긴다
         logger.warning(
             "[mock-exam-analyze] 폴백 총평 반환 — examId=%s: %s", req.examId, exc
         )
         analysis = _FALLBACK_ANALYSIS
-    return MockExamAnalyzeResponse(analysis=analysis)
+        weak_topics = []
+    return MockExamAnalyzeResponse(analysis=analysis, weakTopics=weak_topics)

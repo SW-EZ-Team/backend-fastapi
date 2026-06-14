@@ -153,13 +153,13 @@ format_response  ← strip_thinking → 환각 가드 → 슬라이드 참조 �
 - `generate_answer`: `get_text_connector()`로 받은 커넥터를 통해 텍스트 모델 호출. 오류 발생 시 `error_message`에 기록
 - `format_response`: 다음 세 단계를 순서대로 수행한다
   1. `common.llm_output.strip_thinking` — `<think>...</think>` reasoning 블록 제거. Qwen3.6·codex 등 모델 스왑 시에도 채팅 답변에 추론 과정이 노출되지 않도록 막는다
-  2. `app.scope_guard.apply_hallucination_guard` — 강의 키워드와 전혀 겹치지 않고 거절문도 아닌 답변을 표준 거절문으로 폴백. 약한 모델이 강의 밖 일반지식을 끌어오는 것을 차단한다
+  2. `app.scope_guard.apply_hallucination_guard` — 강의 키워드와 겹치지 않는 답변은 그대로 유지하되 끝에 범위 밖 안내문(`SCOPE_NOTICE`) 한 줄을 덧붙인다. 답변 자체를 거절문으로 교체하지 않는다(거절 금지 정책 — 슬라이드는 참고 자료)
   3. `app.scope_guard.extract_referenced_slides` — `[슬라이드 N]` 패턴을 0-based 인덱스로 변환. 슬라이드 총 개수(`slide_count`)를 상한으로 검증해 없는 슬라이드 인용을 제거한다
 
 ### 견고성 장치
 
 - **시스템 프롬프트 강화**: 비교·혼동 질문에 짧은 대조 예시 1개를 들도록 지시하고, 답변 문장 끝에 `[슬라이드 N]` 출처 인용을 항상 붙이도록 강제한다. few-shot 앵커 3개(단순 개념/비교/범위 밖)를 프롬프트에 포함한다
-- **환각 가드 (`app/scope_guard.py`)**: 강의 키워드 어간 집합과 답변 어간 집합의 교집합이 비면 거절문으로 폴백한다. 슬라이드 인용이 있거나 이미 거절문 계열이면 가드를 면제해 오탐을 줄인다
+- **범위 가드 (`app/scope_guard.py`)**: 강의 키워드 어간 집합과 답변 어간 집합의 교집합이 비면 답변 끝에 `SCOPE_NOTICE`("이 내용은 이번 강의 범위 밖이에요.")를 덧붙인다. 슬라이드 인용이 있거나 이미 안내문이 포함된 답변이면 면제해 중복을 막는다. 진짜 질문에 대한 거절은 하지 않는다
 - **슬라이드 상한 검증**: `slide_count`를 기준으로 존재하지 않는 슬라이드 참조를 제거한다. 환각 참조가 Spring/프론트로 흘러가 엉뚱한 자료를 띄우는 것을 막는다
 
 오류 발생 시 `error_message`가 상태에 기록되고 `format_response`가 안내 문구로 대체한다.
@@ -197,7 +197,7 @@ print(response.referenced_slides)
 | 빈 질문 / 컨텍스트 없음 | 422 | `validate_input` 노드가 오류 상태 설정, 라우터가 422 반환 |
 | 커넥터 오류 (인증 실패·레이트 리밋 등) | 500 | `AIConnectorError` → `format_response`가 사용자 친화 안내문으로 대체 |
 | 파이프라인 타임아웃 | 500 | 상위 서킷 브레이커 또는 커넥터 타임아웃 설정으로 제한 |
-| 환각 의심 답변 | 200 | 표준 거절문(`OUT_OF_SCOPE_REPLY`)으로 폴백, `referenced_slides: []` |
+| 강의 범위 밖 답변 | 200 | 답변 유지 + 끝에 범위 밖 안내문(`SCOPE_NOTICE`) 추가, `referenced_slides: []` |
 | 슬라이드 참조 없음 | 200 | `referenced_slides: []`로 정상 반환 |
 
 모든 오류는 사용자에게 "죄송해요, 답변을 생성하는 중에 오류가 발생했어요. 잠시 후 다시 시도해 주세요." 형태의 한국어 안내로 대체된다.

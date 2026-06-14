@@ -14,10 +14,23 @@ from app.modules.ExamForge_V1.common._ai_schemas import (
     current_budget,
 )
 from app.modules.ExamForge_V1.common.config import anthropic_api_key
+from app.modules.ExamForge_V1.common.errors import ConnectorError
 
 # 재시도 설정
 _MAX_RETRIES = 3
 _RETRY_DELAYS = [2, 5, 10]
+
+# Anthropic 400 사용한도 소진 마커 — 일시적 400(잘못된 요청)과 구분한다.
+# 실측: "You have reached your specified API usage limits. ... regain access on 2026-07-01"
+# 이런 400은 같은 키라 재시도/재호출해도 복구일 전까지 전부 실패하므로,
+# 비재시도 ConnectorError 로 올려 상위 폴백 래퍼가 다음 프로바이더로 즉시 넘기게 하고,
+# 프로바이더 헬스 캐시에 소진을 passive 기록한다.
+_ANTHROPIC_USAGE_LIMIT_MARKERS = (
+    "usage limit",
+    "usage limits",
+    "regain access",
+    "reached your specified api usage",
+)
 
 
 class AnthropicConnector:
@@ -58,6 +71,14 @@ class AnthropicConnector:
                     last_error = e
                     if attempt < _MAX_RETRIES - 1:
                         await asyncio.sleep(_RETRY_DELAYS[attempt])
+                elif _is_usage_limit_error(e):
+                    # 사용한도 소진 400 — 재시도/재호출 무의미. passive 기록 후
+                    # 비재시도 ConnectorError 로 올려 상위 폴백이 즉시 다음 단계로 넘긴다.
+                    message = str(e)
+                    _record_provider_exhausted(self.name, message)
+                    raise ConnectorError(
+                        f"{self.name} 사용한도 소진 — 즉시 폴백: {message}"
+                    ) from e
                 else:
                     raise
             except asyncio.TimeoutError as e:
@@ -91,6 +112,31 @@ class AnthropicConnector:
     def supports(self, feature: str) -> bool:
         """지원 기능 확인."""
         return feature in {"long_context", "json_mode"}
+
+
+def _is_usage_limit_error(exc: object) -> bool:
+    """Anthropic 4xx 가 '사용한도 소진'(복구일 전까지 영구 실패)인지 메시지로 판별한다.
+
+    일반 400(잘못된 요청)과 구분하기 위해 명시 마커가 있을 때만 True 다 —
+    마커가 없으면 기존처럼 그대로 raise 되어 동작이 보존된다.
+    """
+    low = str(exc).lower()
+    return any(marker in low for marker in _ANTHROPIC_USAGE_LIMIT_MARKERS)
+
+
+def _record_provider_exhausted(provider: str, message: str) -> None:
+    """프로바이더 헬스 캐시에 소진을 passive 기록한다(라이브 프로빙 아님).
+
+    헬스 모듈 임포트/기록 실패가 생성 경로를 깨뜨리지 않도록 폭넓게 흡수한다.
+    "regain access on <date>" 가 있으면 그 복구 시각까지 차단하고, 없으면 기본 TTL.
+    """
+    try:
+        from app.modules.ExamForge_V1.common import _provider_health as health
+
+        until = health.parse_regain_until(message)
+        health.mark_exhausted(provider, reason=message[:200], until_monotonic=until)
+    except Exception:  # noqa: BLE001 — 헬스 기록 실패가 생성 경로를 깨면 안 된다
+        pass
 
 
 def _extract_text(message: object) -> str:

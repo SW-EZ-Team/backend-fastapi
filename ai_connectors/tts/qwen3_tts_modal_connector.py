@@ -2,7 +2,8 @@
 
 단건 합성(synthesize), 배치 합성(synthesize_batch),
 긴 텍스트 자동 분할+병합, 지수 백오프 재시도를 지원한다.
-Modal HTTP multipart 대신 배포 클래스의 remote.aio()를 직접 호출한다.
+기본은 배포 클래스의 remote.aio() 네이티브 호출이며,
+QWEN3_TTS_MODAL_URL 이 설정되면 Modal 웹 엔드포인트(HTTP multipart) 경로를 쓴다.
 """
 from __future__ import annotations
 
@@ -12,7 +13,9 @@ import os
 import time
 from collections.abc import Sequence
 from typing import Protocol
+from urllib.parse import unquote
 
+import httpx
 import modal
 
 from common.logging import get_logger
@@ -67,8 +70,10 @@ class Qwen3TTSModalConnector:
         timeout_sec: float | None = None,
         app_name: str | None = None,
     ) -> None:
-        if endpoint:
-            _LOG.warning("기존 HTTP URL 경로는 네이티브 호출에서 사용하지 않습니다.")
+        # 명시 endpoint 인자 > QWEN3_TTS_MODAL_URL 환경변수. 값이 있으면 HTTP 경로 활성.
+        self._http_url = (endpoint or os.getenv("QWEN3_TTS_MODAL_URL", "")).strip()
+        if self._http_url:
+            _LOG.info("Qwen3-TTS Modal HTTP 엔드포인트 경로 사용: %s", self._http_url)
         self._app_name = _resolve_app_name(app_name)
         self._timeout_sec = _resolve_timeout_sec(timeout_sec)
         self._segment_concurrency = _resolve_segment_concurrency()
@@ -197,7 +202,13 @@ class Qwen3TTSModalConnector:
         return self._server
 
     async def _call_endpoint(self, request: TTSRequest) -> TTSResponse:
-        """단건 Modal 네이티브 호출을 실행하고 TTSResponse 로 변환한다."""
+        """단건 Modal 호출을 실행하고 TTSResponse 로 변환한다.
+
+        QWEN3_TTS_MODAL_URL 이 설정되면 HTTP multipart 경로,
+        아니면 기존 네이티브(remote.aio) 경로를 사용한다.
+        """
+        if self._http_url:
+            return await self._call_http_endpoint(request)
         started_at = time.perf_counter()
         ref_audio_b64 = base64.b64encode(request.ref_audio_bytes).decode("ascii")
         try:
@@ -217,12 +228,17 @@ class Qwen3TTSModalConnector:
             raise ModelNotFoundError("Modal TTS 클래스 또는 앱을 찾을 수 없습니다.") from exc
         except modal.exception.AuthError as exc:
             raise AuthError("Modal TTS 인증에 실패했습니다. Modal 토큰을 확인하세요.") from exc
+        except modal.exception.ConnectionError as exc:
+            # 연결 불가(엔드포인트 도달 실패)는 백오프 재시도해도 결과가 같다.
+            # 재시도 제외 대상(ModelNotFoundError)으로 정규화해 즉시 폴백한다(미리보기 지연 방지).
+            raise ModelNotFoundError(
+                f"Modal TTS 서버에 연결할 수 없습니다(즉시 폴백): {exc}"
+            ) from exc
         except (
-            modal.exception.ConnectionError,
             modal.exception.FunctionTimeoutError,
             modal.exception.TimeoutError,
         ) as exc:
-            raise ConnectorTimeoutError(f"Modal TTS 연결/실행 시간이 초과되었습니다: {exc}") from exc
+            raise ConnectorTimeoutError(f"Modal TTS 실행 시간이 초과되었습니다: {exc}") from exc
         except modal.exception.Error as exc:
             raise InferenceError(f"Modal TTS 네이티브 호출 실패: {exc}") from exc
         latency_ms = (time.perf_counter() - started_at) * 1000.0
@@ -230,6 +246,112 @@ class Qwen3TTSModalConnector:
             return build_tts_response_from_modal_result(result, request, self.name, latency_ms)
         except (KeyError, TypeError, ValueError) as exc:
             raise InferenceError(f"Modal TTS 응답 처리 실패: {exc}") from exc
+
+    async def _call_http_endpoint(self, request: TTSRequest) -> TTSResponse:
+        """Modal 웹 엔드포인트(synthesize)에 multipart POST 하고 WAV 응답을 변환한다.
+
+        배포된 엔드포인트는 multipart form(text/ref_audio/ref_text/language/speed)을
+        받아 audio/wav 바디 + x-* 메타데이터 헤더로 응답한다(modal_tts_app.synthesize).
+        303 리다이렉트는 follow_redirects=True 로 흡수한다.
+        """
+        started_at = time.perf_counter()
+        headers: dict[str, str] = {}
+        token = os.getenv("QWEN3_TTS_MODAL_TOKEN", "").strip()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        data: dict[str, str] = {
+            "text": request.text,
+            "language": request.language,
+            "speed": str(request.speed),
+        }
+        if request.ref_text:
+            data["ref_text"] = request.ref_text
+        files = {"ref_audio": ("ref.wav", request.ref_audio_bytes, "audio/wav")}
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._timeout_sec, follow_redirects=True
+            ) as client:
+                response = await client.post(
+                    self._http_url, data=data, files=files, headers=headers
+                )
+        except httpx.TimeoutException as exc:
+            # ConnectTimeout 도 TimeoutException 하위라 여기로 들어온다 — 일시 지연으로 보고 재시도 유지.
+            raise ConnectorTimeoutError(
+                f"Modal TTS HTTP 호출 시간이 초과되었습니다: {exc}"
+            ) from exc
+        except httpx.ConnectError as exc:
+            # 연결 거부·DNS 실패(타임아웃 제외) — 백오프 재시도해도 결과가 같다.
+            # 재시도 제외 대상(ModelNotFoundError)으로 정규화해 즉시 폴백한다(미리보기 지연 방지).
+            raise ModelNotFoundError(
+                f"Modal TTS 서버에 연결할 수 없습니다(즉시 폴백): {exc}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise InferenceError(f"Modal TTS HTTP 호출 실패: {exc}") from exc
+        self._raise_for_http_status(response)
+        latency_ms = (time.perf_counter() - started_at) * 1000.0
+        return _build_tts_response_from_http(response, request, self.name, latency_ms)
+
+    def _raise_for_http_status(self, response: httpx.Response) -> None:
+        """비 2xx HTTP 상태를 공통 커넥터 예외로 정규화한다."""
+        if response.is_success:
+            return
+        detail = response.text[:200]
+        status = response.status_code
+        if status in {401, 403}:
+            raise AuthError(f"Modal TTS HTTP 인증 실패({status}): {detail}")
+        if status == 404:
+            raise ModelNotFoundError(f"Modal TTS 엔드포인트를 찾을 수 없습니다(404): {detail}")
+        if status in {408, 504}:
+            raise ConnectorTimeoutError(f"Modal TTS HTTP 타임아웃({status}): {detail}")
+        raise InferenceError(f"Modal TTS HTTP 오류({status}): {detail}")
+
+
+def _build_tts_response_from_http(
+    response: httpx.Response,
+    request: TTSRequest,
+    model_name: str,
+    fallback_latency_ms: float,
+) -> TTSResponse:
+    """웹 엔드포인트의 WAV 바디 + x-* 헤더를 TTSResponse 로 변환한다."""
+    audio_bytes = response.content
+    if not audio_bytes:
+        raise InferenceError("Modal TTS HTTP 응답 본문이 비어 있습니다.")
+    headers = response.headers
+    ref_text_used = unquote(headers.get("x-ref-text-used", ""))
+    return TTSResponse(
+        audio_bytes=audio_bytes,
+        sample_rate=_header_int(headers, "x-sample-rate", 24000),
+        content_type="audio/wav",
+        duration_sec=_header_float(headers, "x-duration-sec", 0.0),
+        latency_ms=_header_float(headers, "x-latency-ms", fallback_latency_ms),
+        char_count=_header_int(headers, "x-char-count", len(request.text)),
+        model=model_name,
+        auto_transcribed=headers.get("x-auto-transcribed", "false").lower() == "true",
+        resolved_ref_text=ref_text_used,
+        ref_text_source=headers.get(
+            "x-ref-text-source", "client" if ref_text_used else "empty_fallback"
+        ),
+        retry_count=_header_int(headers, "x-retry-count", 0),
+        quality_cer=None,
+        quality_reason=headers.get("x-quality-reason", "not_reported"),
+        segment_count=_header_int(headers, "x-segment-count", 1),
+    )
+
+
+def _header_int(headers: httpx.Headers, name: str, default: int) -> int:
+    """헤더 정수 파싱 실패 시 기본값으로 복구한다."""
+    try:
+        return int(headers.get(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _header_float(headers: httpx.Headers, name: str, default: float) -> float:
+    """헤더 실수 파싱 실패 시 기본값으로 복구한다."""
+    try:
+        return float(headers.get(name, str(default)))
+    except ValueError:
+        return default
 
 
 def _resolve_app_name(app_name: str | None) -> str:

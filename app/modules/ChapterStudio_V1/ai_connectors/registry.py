@@ -72,32 +72,53 @@ def _build_gemini_tts_connector() -> TTSConnector:
 def _build_gemini_genai_connector() -> AIConnector:
     """google-genai SDK 커넥터는 선택 시점에만 로드한다.
 
-    OPENAI_API_KEY 가 있고 OPENAI_FALLBACK_ENABLED!=false 면 OpenAI 폴백 래퍼로 감싼다.
+    폴백 체인은 OpenAI → Claude Sonnet 순이다(키 있는 단계만 포함):
+    - OpenAI : OPENAI_API_KEY 존재 + OPENAI_FALLBACK_ENABLED!=false 일 때만.
+    - Claude : CLAUDE_SONNET_API_KEY 또는 ANTHROPIC_API_KEY 존재 시.
+    후보가 하나도 없으면 raw Gemini 커넥터를 그대로 반환한다(기존 동작 보존).
     기존 Qwen→Claude 폴백과는 별개로, Gemini 가 활성 텍스트일 때만 적용된다.
     """
     from app.modules.ChapterStudio_V1.ai_connectors.gemini_genai_connector import (
         GeminiGenAIConnector,
     )
+
+    gemini = GeminiGenAIConnector()
+    factories = _gemini_fallback_factories()
+    if not factories:
+        return gemini
+    return FailoverAIConnector(
+        primary_factory=lambda: gemini,
+        fallback_factories=factories,
+        name="gemini_openai_fallback",
+        failure_threshold=text_fallback_after_failures(),
+    )
+
+
+def _gemini_fallback_factories() -> list[ConnectorFactory]:
+    """Gemini 폴백 체인 팩토리 목록을 만든다 — OpenAI → Claude Sonnet 순.
+
+    SDK 미설치(ImportError)는 해당 단계만 건너뛴다. AuthError(무효 키)는
+    FailoverAIConnector 가 호출 시점에 해당 단계만 영구 제외한다.
+    """
     from app.modules.ChapterStudio_V1.common.config import (
+        claude_sonnet_api_key,
         openai_api_key,
         openai_fallback_enabled,
     )
 
-    gemini = GeminiGenAIConnector()
-    if not openai_fallback_enabled() or openai_api_key() is None:
-        return gemini
-    try:
-        from app.modules.ChapterStudio_V1.ai_connectors.openai_connector import (
-            OpenAIConnector,
-        )
-    except ImportError:
-        return gemini
-    return FailoverAIConnector(
-        primary_factory=lambda: gemini,
-        fallback_factory=OpenAIConnector,
-        name="gemini_openai_fallback",
-        failure_threshold=text_fallback_after_failures(),
-    )
+    factories: list[ConnectorFactory] = []
+    if openai_fallback_enabled() and openai_api_key() is not None:
+        try:
+            from app.modules.ChapterStudio_V1.ai_connectors.openai_connector import (
+                OpenAIConnector,
+            )
+
+            factories.append(OpenAIConnector)
+        except ImportError:
+            pass
+    if claude_sonnet_api_key() is not None:
+        factories.append(ClaudeSonnetConnector)
+    return factories
 
 
 # 폴백 래퍼는 팩토리 함수를 등록한다

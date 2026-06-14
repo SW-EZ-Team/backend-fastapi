@@ -2,11 +2,20 @@
 from __future__ import annotations
 
 import contextvars
+import math
 from typing import Protocol, runtime_checkable
+
+# 하드 상한 = 예산 풀(문항수 비례)의 이 배수 이상으로 둔다. 정상 시험(예산 풀 안에서
+# 도는 1패스+보충 재시도)은 절대 못 끊고, 진짜 폭주(풀을 크게 초과하는 호출)만 막는다.
+# (실측 회귀: 고정 60은 20문항 1패스 ≈81호출도 끊어 끝 문항 빈해설·검증누락 유발.)
+_RUNAWAY_FACTOR = 1.25
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.modules.ExamForge_V1.common.config import pipeline_llm_budget
+from app.modules.ExamForge_V1.common.config import (
+    mock_exam_max_llm_calls,
+    pipeline_llm_budget,
+)
 from app.modules.ExamForge_V1.common.errors import BudgetExceededError
 
 
@@ -56,12 +65,34 @@ class LLMBudgetCounter:
     빈 해설로 출고되는 결함이 있었다. 이를 막기 위해 예산의 일부(reserve)를 떼어
     일반 호출(check/increment)에는 'budget - reserve'만 허용하고, 해설 생성은
     reserve 풀까지 끌어쓸 수 있게(allow_reserve=True) 한다.
+
+    [시험당 하드 상한 — max_calls]
+    문항 수 비례 예산(budget)이 크게 산정돼도, 시험 1회 생성이 절대 넘어서는 안 되는
+    천장(max_calls, env MOCK_EXAM_MAX_LLM_CALLS)을 별도로 강제한다. reserve 호출이라도
+    이 천장은 넘지 못한다. 재시도 폭주로 인한 비용 2~3배 증폭을 시험 단위로 못박는다.
+    천장 초과 시 BudgetExceededError를 던져 기존 라우터 except가 graceful 종료하게 한다.
     """
 
-    def __init__(self, budget: int | None = None, reserve: int = 0) -> None:
+    def __init__(
+        self,
+        budget: int | None = None,
+        reserve: int = 0,
+        max_calls: int | None = None,
+    ) -> None:
         self._budget = budget if budget is not None else pipeline_llm_budget()
         # reserve는 전체 예산을 넘지 않도록 보정한다(음수·과대 방지).
         self._reserve = max(0, min(reserve, self._budget))
+        # 시험당 하드 상한(폭주 백스톱).
+        # - 명시값(max_calls 인자)이 오면 그대로 권위로 존중한다(테스트/운영자 강제용).
+        # - 미지정(기본): env floor 와 "예산 풀×_RUNAWAY_FACTOR" 중 큰 값 → 정상 예산
+        #   풀보다 낮게 clamp되지 않는다. (고정 60이 문항수 비례 예산 풀보다 낮아
+        #   정상 20문항 시험의 끝 문항 해설·검증을 끊던 회귀를 차단.)
+        if max_calls is not None:
+            self._max_calls = max(1, max_calls)
+        else:
+            self._max_calls = max(
+                1, mock_exam_max_llm_calls(), math.ceil(self._budget * _RUNAWAY_FACTOR)
+            )
         self._count = 0
 
     @property
@@ -79,13 +110,21 @@ class LLMBudgetCounter:
         """핵심 산출물(해설 생성) 전용으로 예약된 호출 수."""
         return self._reserve
 
+    @property
+    def max_calls(self) -> int:
+        """시험당 LLM 호출 하드 상한(절대 천장)."""
+        return self._max_calls
+
     def _limit(self, allow_reserve: bool) -> int:
         """현재 호출이 사용할 수 있는 상한을 반환한다.
 
         allow_reserve=False(일반 호출): budget - reserve 까지만 허용.
         allow_reserve=True(해설 생성): 전체 budget 까지 허용.
+        단 어떤 경우에도 시험당 하드 상한(max_calls)을 넘지 못하도록 clamp 한다.
         """
-        return self._budget if allow_reserve else self._budget - self._reserve
+        pool_limit = self._budget if allow_reserve else self._budget - self._reserve
+        # 하드 상한이 풀 한도보다 낮으면 하드 상한이 실효 한도가 된다(reserve 호출 포함).
+        return min(pool_limit, self._max_calls)
 
     @property
     def exceeded(self) -> bool:

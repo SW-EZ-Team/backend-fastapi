@@ -40,36 +40,67 @@ except ImportError as _gemini_import_err:
         _gemini_import_err,
     )
 
-def _wrap_with_openai_failover(connector: AIConnector) -> AIConnector:
-    """선택된 커넥터가 Gemini 이고 OpenAI 폴백이 활성이면 폴백 래퍼로 감싼다.
+def _build_fallback_factories() -> list[Callable[[], AIConnector]]:
+    """Gemini 폴백 체인 팩토리 목록을 만든다 — OpenAI → Claude Sonnet 순.
 
-    활성 조건: 커넥터가 gemini_flash + OPENAI_API_KEY 존재 + OPENAI_FALLBACK_ENABLED!=false.
-    그 외에는 원본 커넥터를 그대로 반환한다(기존 동작 보존).
-    OpenAI SDK·키 미설치 환경에서도 ImportError/AuthError 를 흡수해 원본을 돌려준다.
+    - OpenAI : OPENAI_API_KEY 존재 + OPENAI_FALLBACK_ENABLED!=false 일 때만 포함.
+    - Claude : CLAUDE_SONNET_API_KEY 또는 ANTHROPIC_API_KEY 존재 시 포함.
+    SDK 미설치(ImportError)는 해당 항목만 건너뛴다.
     """
     from common.text_config import (
+        claude_sonnet_api_key,
         openai_api_key,
         openai_fallback_enabled,
-        text_fallback_after_failures,
     )
+
+    factories: list[Callable[[], AIConnector]] = []
+    if openai_fallback_enabled() and openai_api_key() is not None:
+        try:
+            from .text.openai_connector import OpenAIConnector
+
+            factories.append(lambda: OpenAIConnector())
+        except ImportError as exc:
+            _LOG.warning(
+                "OpenAI 텍스트 폴백 제외 (ImportError: %s). `uv add openai` 실행 필요",
+                exc,
+            )
+    if claude_sonnet_api_key() is not None:
+        try:
+            from .text.claude_sonnet_connector import ClaudeSonnetConnector
+
+            factories.append(lambda: ClaudeSonnetConnector())
+        except ImportError as exc:
+            _LOG.warning(
+                "Claude 텍스트 폴백 제외 (ImportError: %s). "
+                "`uv pip install anthropic` 실행 필요",
+                exc,
+            )
+    return factories
+
+
+def _wrap_with_openai_failover(connector: AIConnector) -> AIConnector:
+    """선택된 커넥터가 Gemini 이면 OpenAI → Claude 폴백 체인 래퍼로 감싼다.
+
+    활성 조건: 커넥터가 gemini_flash + 폴백 후보(OpenAI/Claude 키)가 1개 이상.
+    그 외에는 원본 커넥터를 그대로 반환한다(기존 동작 보존).
+    폴백이 AuthError(무효 키)를 올리면 그 폴백만 영구 제외하고 다음으로 넘어간다.
+    """
+    from common.text_config import text_fallback_after_failures
 
     if getattr(connector, "name", "") != "gemini_flash":
         return connector
-    if not openai_fallback_enabled() or openai_api_key() is None:
+    factories = _build_fallback_factories()
+    if not factories:
         return connector
     try:
         from ._failover_text import FailoverAIConnector
-        from .text.openai_connector import OpenAIConnector
     except ImportError as exc:
-        _LOG.warning(
-            "OpenAI 텍스트 폴백 래핑 건너뜀 (ImportError: %s). `uv add openai` 실행 필요",
-            exc,
-        )
+        _LOG.warning("텍스트 폴백 래핑 건너뜀 (ImportError: %s)", exc)
         return connector
     return FailoverAIConnector(
         primary=connector,
-        fallback_factory=lambda: OpenAIConnector(),
-        name="gemini_openai_fallback",
+        fallback_factories=factories,
+        name="gemini_text_failover",
         failure_threshold=text_fallback_after_failures(),
     )
 

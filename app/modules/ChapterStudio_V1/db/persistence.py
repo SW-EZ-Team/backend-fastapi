@@ -39,6 +39,7 @@ from app.modules.ChapterStudio_V1.db.persistence_values import (
 from app.modules.ChapterStudio_V1.db.public_persistence import persist_public_content
 from app.modules.ChapterStudio_V1.db.title_fallback import slide_title_from_context
 from app.modules.ChapterStudio_V1.pipeline.state import ChapterStudioState, StateRecord
+from app.modules.ChapterStudio_V1.postprocess.iframe_guard import ensure_slides_iframe
 
 _LOG = logging.getLogger(__name__)
 
@@ -63,6 +64,9 @@ async def persist_chapter_state(
     """생성 결과를 lesson_id 기준으로 재시도 가능하게 저장한다."""
     schema = database_schema()
     lesson_id = context.lesson_id
+    # 저장 직전 iframe 계약 가드: raw HTML 슬라이드는 재후처리·강제 래핑으로 정규화한다.
+    # chapter_studio.slide와 public.slide 모두 같은 html_content를 쓰므로 여기서 한 번에 막는다.
+    state = {**state, "slides": await ensure_slides_iframe(_records(state, "slides"))}
     # 진단용 카운트: 어느 INSERT가 마지막으로 시도된 단계인지 로그로 추적하기 위함이다.
     slide_count = len(_records(state, "slides"))
     quiz_count = len(_records(state, "quiz_set"))

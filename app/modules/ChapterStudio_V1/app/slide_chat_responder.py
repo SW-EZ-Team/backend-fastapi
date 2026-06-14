@@ -38,7 +38,7 @@ def _answer(req: SlideChatRequest, ctx: SlideChatContext) -> str:
         f"사용자가 막힌 지점: {req.message}{selected}\n\n"
         f"핵심 답변: 이 슬라이드는 '{ctx.focus}'를 잡기 위한 장면입니다. "
         f"방금 음성대본에서는 '{_short(ctx.voice_script)}'라고 설명했으니, "
-        f"답은 슬라이드 밖 새 지식보다 그 설명을 다시 머리에 들어오게 정리하는 쪽이 맞습니다.\n\n"
+        f"먼저 그 설명을 다시 머리에 들어오게 정리하고, 자료 밖 내용이 필요하면 일반 지식으로 이어서 설명합니다.\n\n"
         f"머리에 넣을 문장: {ctx.note_bullets[0]}\n"
         f"취약점 연결: {ctx.weak_points}\n"
         f"바로 점검: {ctx.checkpoint}\n"

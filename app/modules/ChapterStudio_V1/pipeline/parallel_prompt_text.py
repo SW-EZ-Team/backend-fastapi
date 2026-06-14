@@ -63,6 +63,22 @@ def _is_cs_subject(brief: str) -> bool:
     return any(kw in lower for kw in _CS_WEAK_KEYWORDS)
 
 
+def _reference_section(reference_block: str) -> str:
+    """참고도서(PDF OCR) 발췌 블록을 user 프롬프트용으로 만든다.
+
+    단일콜 prompt.py와 동일하게 reference_context_prompt 문자열을 받아 각 컴포넌트
+    프롬프트에 근거 자료로 붙인다. 비어 있으면(topic 모드) 블록 자체를 깔끔히 생략한다.
+    """
+    cleaned = reference_block.strip()
+    if not cleaned:
+        return ""
+    return (
+        f"참고도서 컨텍스트:\n{cleaned}\n"
+        "위 원문 발췌에 근거해 내용을 구성하고, 발췌에 없는 내용을 추가할 때는 "
+        "일반 원리 수준만 허용한다.\n"
+    )
+
+
 def _coding_metaphor_rule(brief: str) -> str:
     """과목에 따라 코딩 메타포 허용·금지 규칙을 반환한다.
 
@@ -97,13 +113,13 @@ def _cs_slides_concrete_rule(brief: str) -> str:
     )
 
 
-def slides_prompts(brief: str, outline: str, slide_count: int, template_key: str, *, weak_points: str, audience_level: str, tone: int, pace: int, tutor_depth: int, socratic: int, learning_goal: str, use_formal_speech: bool = True, use_emoji: bool = False, tutor_name: str = "", tutor_tagline: str = "", is_default_tutor: bool = True, voice_sample_url: str = "") -> tuple[str, str]:
+def slides_prompts(brief: str, outline: str, slide_count: int, template_key: str, *, weak_points: str, audience_level: str, tone: int, pace: int, tutor_depth: int, socratic: int, learning_goal: str, use_formal_speech: bool = True, use_emoji: bool = False, tutor_name: str = "", tutor_tagline: str = "", is_default_tutor: bool = True, voice_sample_url: str = "", reference_block: str = "") -> tuple[str, str]:
     """슬라이드 배열만 생성하는 (system, user) 프롬프트를 만든다.
 
     plan-first 슬롯 오더: outline에는 슬롯별 visual_type이 단일값으로 이미 확정되어 있다.
     AI는 구조(type·개수·인덱스)가 아닌 데이터(title·narration·visual.data)만 채운다.
     """
-    personalization = _personalization(weak_points, audience_level, tone, pace, tutor_depth, socratic, learning_goal, "슬라이드는 개인화 계약에 맞춰 예시·용어·오개념 교정 단서를 화면에 짧게 배치한다.", use_formal_speech=use_formal_speech, use_emoji=use_emoji, tutor_name=tutor_name, tutor_tagline=tutor_tagline)
+    personalization = _personalization(weak_points, audience_level, tone, pace, tutor_depth, socratic, learning_goal, "슬라이드는 개인화 계약에 맞춰 예시·용어·오개념 교정 단서를 화면에 짧게 배치한다.", weak_rule="슬라이드는 약점 개념을 다루는 화면에서 해당 개념을 집중 보강하고, 교정 예시를 반복 노출한다.", use_formal_speech=use_formal_speech, use_emoji=use_emoji, tutor_name=tutor_name, tutor_tagline=tutor_tagline)
     system = (
         "너는 ChapterStudio_V1의 슬라이드 생성기다. "
         + _JSON_RULE
@@ -152,9 +168,13 @@ def slides_prompts(brief: str, outline: str, slide_count: int, template_key: str
         f"강의 요청: {brief}\n"
         f"선택 템플릿: {template_key}\n"
         f"확정 슬라이드 플랜(visual_type 고정·개수 고정·인덱스 고정 — 데이터만 채울 것):\n{outline}\n"
+        f"{_reference_section(reference_block)}"
         f"{personalization}\n"
         f"위 플랜의 각 슬롯을 slide_idx 순서대로 정확히 {slide_count}개 생성한다. "
         "각 슬롯의 visual.type은 플랜에 명시된 값 그대로 사용한다(변경 불가). "
+        "visual.data는 해당 type 스펙의 필수 필드를 전부 채운다 — 배정된 템플릿의 시각 구조"
+        "(수직선/단계 흐름/비교표/예제 카드 등)가 화면에 그대로 그려져야 하며, "
+        "필드를 비우거나 다른 구조로 대체하면 해당 슬라이드는 실패로 간주되어 재렌더된다. "
         "화면에는 충분한 narration과 구체적 visual data를 남긴다. "
         "text 슬라이드도 metric-card, comparison-table, example_box 중 하나의 visual marker를 반드시 남긴다. "
         "narration을 빈 문자열, 한 문장짜리 요약, '시각 자료' 같은 플레이스홀더로 쓰면 실패다. "
@@ -164,7 +184,7 @@ def slides_prompts(brief: str, outline: str, slide_count: int, template_key: str
     return system, user
 
 
-def quizzes_prompts(brief: str, outline: str, slide_count: int, *, weak_points: str, audience_level: str, tone: int, pace: int, tutor_depth: int, socratic: int, learning_goal: str, use_formal_speech: bool = True, use_emoji: bool = False, tutor_name: str = "", tutor_tagline: str = "", is_default_tutor: bool = True, voice_sample_url: str = "") -> tuple[str, str]:
+def quizzes_prompts(brief: str, outline: str, slide_count: int, *, weak_points: str, audience_level: str, tone: int, pace: int, tutor_depth: int, socratic: int, learning_goal: str, use_formal_speech: bool = True, use_emoji: bool = False, tutor_name: str = "", tutor_tagline: str = "", is_default_tutor: bool = True, voice_sample_url: str = "", reference_block: str = "") -> tuple[str, str]:
     """퀴즈 배열만 생성하는 (system, user) 프롬프트를 만든다."""
     personalization = _personalization(weak_points, audience_level, tone, pace, tutor_depth, socratic, learning_goal, weak_rule="퀴즈는 약점 개념을 직접 겨냥한 진단·교정형 문항을 우선한다.", use_formal_speech=use_formal_speech, use_emoji=use_emoji, tutor_name=tutor_name, tutor_tagline=tutor_tagline)
     cs_subject_rule = _quiz_cs_rule(brief)
@@ -203,6 +223,7 @@ def quizzes_prompts(brief: str, outline: str, slide_count: int, *, weak_points: 
     user = (
         f"강의 요청: {brief}\n"
         f"확정 슬라이드 역할(role은 슬라이드 구조 참고용이며 퀴즈 내용과 무관 — 주제 지식만 출제):\n{outline}\n"
+        f"{_reference_section(reference_block)}"
         f"{personalization}\n"
         f"각 slide_idx마다 그 슬라이드의 구체적 학습 내용(개념·연산·동작·사례)에서만 출제한 퀴즈 1개씩, 총 {slide_count}개를 만든다. "
         "role(도입/확장 질문/강의 끝 점검 등)은 슬라이드 구조 표시일 뿐이며 퀴즈에서 언급하거나 '학습자 반응'을 묻는 문항으로 쓰지 않는다."
@@ -228,9 +249,9 @@ def _quiz_cs_rule(brief: str) -> str:
     )
 
 
-def note_prompts(brief: str, outline: str, *, weak_points: str, audience_level: str, tone: int, pace: int, tutor_depth: int, socratic: int, learning_goal: str, use_formal_speech: bool = True, use_emoji: bool = False, tutor_name: str = "", tutor_tagline: str = "", is_default_tutor: bool = True, voice_sample_url: str = "") -> tuple[str, str]:
+def note_prompts(brief: str, outline: str, *, weak_points: str, audience_level: str, tone: int, pace: int, tutor_depth: int, socratic: int, learning_goal: str, use_formal_speech: bool = True, use_emoji: bool = False, tutor_name: str = "", tutor_tagline: str = "", is_default_tutor: bool = True, voice_sample_url: str = "", reference_block: str = "") -> tuple[str, str]:
     """핵심 노트(note_blocks)만 생성하는 (system, user) 프롬프트를 만든다."""
-    personalization = _personalization(weak_points, audience_level, tone, pace, tutor_depth, socratic, learning_goal, "노트는 개인화 계약에 맞춰 복습 우선순위와 bullet 예시를 조정한다.", use_formal_speech=use_formal_speech, use_emoji=use_emoji, tutor_name=tutor_name, tutor_tagline=tutor_tagline)
+    personalization = _personalization(weak_points, audience_level, tone, pace, tutor_depth, socratic, learning_goal, "노트는 개인화 계약에 맞춰 복습 우선순위와 bullet 예시를 조정한다.", weak_rule="노트는 약점 개념 bullet을 우선 배치해 복습 우선순위를 높인다.", use_formal_speech=use_formal_speech, use_emoji=use_emoji, tutor_name=tutor_name, tutor_tagline=tutor_tagline)
     system = (
         "너는 ChapterStudio_V1의 핵심 노트 생성기다. "
         + _JSON_RULE
@@ -243,13 +264,14 @@ def note_prompts(brief: str, outline: str, *, weak_points: str, audience_level: 
     user = (
         f"강의 요청: {brief}\n"
         f"확정 슬라이드 역할:\n{outline}\n"
+        f"{_reference_section(reference_block)}"
         f"{personalization}\n"
         "강의 전체를 복습할 수 있는 핵심 노트 4블록을 만든다."
     )
     return system, user
 
 
-def assignment_prompts(brief: str, outline: str, *, weak_points: str, audience_level: str, tone: int, pace: int, tutor_depth: int, socratic: int, learning_goal: str, use_formal_speech: bool = True, use_emoji: bool = False, tutor_name: str = "", tutor_tagline: str = "", is_default_tutor: bool = True, voice_sample_url: str = "") -> tuple[str, str]:
+def assignment_prompts(brief: str, outline: str, *, weak_points: str, audience_level: str, tone: int, pace: int, tutor_depth: int, socratic: int, learning_goal: str, use_formal_speech: bool = True, use_emoji: bool = False, tutor_name: str = "", tutor_tagline: str = "", is_default_tutor: bool = True, voice_sample_url: str = "", reference_block: str = "") -> tuple[str, str]:
     """과제(assignment)만 생성하는 (system, user) 프롬프트를 만든다."""
     personalization = _personalization(weak_points, audience_level, tone, pace, tutor_depth, socratic, learning_goal, weak_rule="과제는 약점 개념을 훈련하는 과제로 구성한다.", use_formal_speech=use_formal_speech, use_emoji=use_emoji, tutor_name=tutor_name, tutor_tagline=tutor_tagline)
     system = (
@@ -258,14 +280,31 @@ def assignment_prompts(brief: str, outline: str, *, weak_points: str, audience_l
         + "최상위 키는 assignment 하나만 쓴다. "
         "assignment는 title, assignment_format, expected_minutes(20~40 정수), steps, rubric을 모두 채운다. "
         "steps와 rubric은 반드시 문자열 배열(list)이며 dict나 객체로 쓰면 실패다. "
-        "steps는 3~5개, rubric은 3~5개의 완결 문장이다.\n"
+        "steps는 3~5개, rubric은 3~5개의 완결 문장이다. "
+        # 과제 유형: 강의 내용·약점에 맞춰 셋 중 하나를 고른다(스키마 변경 없음 — steps 문구로 표현)
+        "과제 유형은 강의 내용에 가장 적합한 것 하나를 고른다: "
+        "① 적용·실습형(배운 개념으로 구체 문제를 직접 풀거나 만들어 보기), "
+        "② 개념 설명형(핵심 개념을 자기 말로 예시와 함께 설명하기), "
+        "③ 오답 분석형(흔한 오개념·틀린 풀이를 제시하고 무엇이 왜 틀렸는지 교정하기). "
+        "약점 개념이 있으면 그 개념을 겨냥한 유형을 우선한다. "
+        # 구체성 계약: 강의에 나온 내용만으로 수행 가능해야 한다
+        "과제는 이 강의 슬라이드에 실제로 나온 개념·예시·연산만으로 수행 가능해야 하며, "
+        "강의에서 다루지 않은 도구·사전지식을 요구하면 실패다. "
+        "steps의 각 단계는 '무엇을 어떻게 하라'가 명확한 실행 지시문이어야 하고, "
+        "구체적 숫자·예시·조건을 포함한다('관련 내용을 정리해 보세요' 같은 모호한 지시 금지). "
+        "마지막 step에는 제출 형식을 명시한다(예: '풀이 과정과 답을 텍스트로 3문단 이내 작성해 제출'). "
+        "rubric의 각 항목은 채점자가 그대로 판정할 수 있는 측정 가능한 기준 문장으로 쓴다 "
+        "(예: '수직선 위 두 점의 위치를 근거로 대소를 비교했다'처럼 무엇이 충족인지 명확하게).\n"
         f"{personalization}"
     )
     user = (
         f"강의 요청: {brief}\n"
         f"확정 슬라이드 역할:\n{outline}\n"
+        f"{_reference_section(reference_block)}"
         f"{personalization}\n"
-        "강의 내용을 직접 적용해 볼 실습 과제 1개를 만든다."
+        "위 슬라이드 내용만으로 수행 가능한 과제 1개를 만든다. "
+        "학생이 무엇을 만들어 어떤 형식으로 제출해야 하는지, 무엇이 평가되는지 "
+        "steps와 rubric만 읽어도 알 수 있어야 한다."
     )
     return system, user
 
@@ -291,6 +330,7 @@ def voice_prompt(
     is_default_tutor: bool = True,
     voice_sample_url: str = "",
     previous_title: str = "",
+    reference_block: str = "",
 ) -> tuple[str, str]:
     """슬라이드 1개의 음성대본을 plan-first 슬롯 오더로 생성하는 (system, user) 프롬프트.
 
@@ -332,6 +372,7 @@ def voice_prompt(
         f"대상 슬라이드: slide_idx={slide_idx} / 제목={slide_title} / 초점={slide_focus}\n"
         f"화면 요약: {slide_summary}\n"
         f"{previous_line}"
+        f"{_reference_section(reference_block)}"
         f"{personalization}\n"
         f"아래 4개 섹션 슬롯을 순서대로 채워라(섹션 수·순서·role 변경 불가):\n"
         f"{slot_spec}\n"

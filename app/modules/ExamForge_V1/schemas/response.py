@@ -67,8 +67,14 @@ def _coerce_exam_plan(state: dict, question_count: int) -> dict:
         plan = dict(state["exam_plan"])
         outcome = state.get("pipeline_outcome", "")
         declared = int(plan.get("total_questions") or 0)
-        # 부분 완료 시 선언수를 실제수에 맞춤 (plan-first 위반이지만 출고 불일치보다 낫다)
-        if outcome == "passed_partial" and declared != question_count and question_count > 0:
+        # 부분 완료/자료 부족 시 선언수를 실제수에 맞춤 (plan-first 위반이지만 출고 불일치보다 낫다).
+        # passed_partial(floor 이상)과 needs_more_source(floor 미만, 자료 부족) 모두
+        # 출고 문항 수 < 계획 수이므로 Spring 채점 기준(exam_plan.total_questions)을 실제수로 맞춘다.
+        if (
+            outcome in ("passed_partial", "needs_more_source")
+            and declared != question_count
+            and question_count > 0
+        ):
             plan["total_questions"] = question_count
             plan["total_points"] = float(question_count)
         return plan

@@ -11,16 +11,20 @@ class ExamConfig(BaseModel):
     time_limit_minutes: int = Field(ge=10, le=300, default=60)
     locale: str = "ko"
     category: str = "korean"
-    question_types: list[str] = Field(default_factory=lambda: ["ko_multiple_choice_5"], min_length=1)
+    # 빈 리스트 = 유형 자동 분배(최종모의고사 기본). plan_exam_node가 기본 혼합 유형으로 분배한다.
+    # 호출자가 명시적으로 유형을 지정하면 그 목록을 그대로 사용한다.
+    question_types: list[str] = Field(default_factory=list)
+    # 기본 난이도 분포 — 블룸 3~5(적용·분석·평가) 비중을 높여 실전 난이도를 확보한다
     difficulty_distribution: dict[int, float] = {
-        1: 0.2,
-        2: 0.3,
-        3: 0.3,
-        4: 0.15,
-        5: 0.05,
+        2: 0.2,
+        3: 0.35,
+        4: 0.3,
+        5: 0.15,
     }
     passing_score: float = 60.0
     include_explanations: bool = True
+    # True면 최소 20문항 클램프를 우회한다 — 호출자가 의도적으로 작은 시험을 요청한 경우 전용
+    allow_small_exam: bool = False
 
     @field_validator("difficulty_distribution")
     @classmethod

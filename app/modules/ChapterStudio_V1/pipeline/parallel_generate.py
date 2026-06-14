@@ -44,6 +44,7 @@ from app.modules.ChapterStudio_V1.pipeline.parallel_inputs import (
     build_brief,
     build_outline_text,
     build_personalization_args,
+    build_reference_block,
     build_voice_targets,
 )
 from app.modules.ChapterStudio_V1.pipeline.payload import GeneratedLessonPayload, GeneratedSlide
@@ -64,8 +65,12 @@ async def generate_lesson_parallel(
     outline = build_outline_text(state, slide_count)
     template_key = _template_key(state)
     personalization = build_personalization_args(state)
+    # PDF 소스 강의의 참고도서 발췌 — 단일콜 경로(prompt.py)와 동일하게 병렬 경로에도 주입한다.
+    reference_block = build_reference_block(state)
 
-    bundle = await _gather_components(connector, state, brief, outline, template_key, slide_count, personalization)
+    bundle = await _gather_components(
+        connector, state, brief, outline, template_key, slide_count, personalization, reference_block
+    )
     return assemble_payload(bundle, slide_count)
 
 
@@ -77,6 +82,7 @@ async def _gather_components(
     template_key: str,
     slide_count: int,
     personalization: PersonalizationArgs,
+    reference_block: str = "",
 ) -> ComponentBundle:
     """코어 컴포넌트 생성 후 화면 내용 기반 voice를 생성한다."""
     # plan-first 강제: context_node가 채운 slide_outline(visual_type 포함)을 parse_slides의
@@ -87,21 +93,29 @@ async def _gather_components(
     slides_task = _component(
         connector,
         # plan을 build_slides_request에도 넘겨 Modal guided enum을 plan 집합으로 좁힌다(P1).
-        pp.build_slides_request(brief, outline, slide_count, template_key, personalization, slide_plan_rows),
+        pp.build_slides_request(
+            brief, outline, slide_count, template_key, personalization, slide_plan_rows, reference_block
+        ),
         slides_parse,
     )
     quizzes_task = _component(
-        connector, pp.build_quizzes_request(brief, outline, slide_count, template_key, personalization), pp.parse_quizzes
+        connector,
+        pp.build_quizzes_request(brief, outline, slide_count, template_key, personalization, reference_block),
+        pp.parse_quizzes,
     )
     note_task = _component(
-        connector, pp.build_note_request(brief, outline, slide_count, template_key, personalization), pp.parse_note
+        connector,
+        pp.build_note_request(brief, outline, slide_count, template_key, personalization, reference_block),
+        pp.parse_note,
     )
     assignment_task = _component(
-        connector, pp.build_assignment_request(brief, outline, slide_count, template_key, personalization), pp.parse_assignment
+        connector,
+        pp.build_assignment_request(brief, outline, slide_count, template_key, personalization, reference_block),
+        pp.parse_assignment,
     )
     slides, quizzes, note_blocks, assignment = await asyncio.gather(slides_task, quizzes_task, note_task, assignment_task)
     voice_targets = build_voice_targets(_state_with_slides(state, slides), slide_count)
-    voice_scripts = await _gather_voices(connector, brief, slide_count, voice_targets, personalization)
+    voice_scripts = await _gather_voices(connector, brief, slide_count, voice_targets, personalization, reference_block)
     return ComponentBundle(
         slides=slides,
         quizzes=quizzes,
@@ -117,6 +131,7 @@ async def _gather_voices(
     slide_count: int,
     voice_targets: list[VoiceTarget],
     personalization: PersonalizationArgs | None = None,
+    reference_block: str = "",
 ) -> list:
     """슬라이드별 voice_script를 동시 생성한다(인덱스별 graceful 재시도).
 
@@ -136,6 +151,7 @@ async def _gather_voices(
                 t.slide_idx,
                 slide_count,
                 prompt_personalization,
+                reference_block,
             ),
             partial(pp.parse_voice, slide_idx=t.slide_idx),
         )

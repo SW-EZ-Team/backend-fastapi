@@ -24,7 +24,7 @@ from app.modules.Chat_V1.app.schemas import (
     LectureContext,
     SlideContext,
 )
-from app.modules.Chat_V1.app.scope_guard import OUT_OF_SCOPE_REPLY, _REFUSAL_MARKERS
+from app.modules.Chat_V1.app.scope_guard import _REFUSAL_MARKERS
 from app.modules.Chat_V1.app.service import answer_question
 from app.modules.Chat_V1.app.slide_context_loader import load_slides
 

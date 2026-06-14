@@ -88,7 +88,15 @@ async def calibrate_difficulty_node(state: ExamForgeState) -> dict:
     calibration_error: str | None = None
     try:
         data = parse_llm_json(resp.text)
-        calibrations = data.get("calibrations", [])
+        # LLM이 calibrations 객체 대신 배열/스칼라/None을 줄 수 있다.
+        # dict가 아니면 .get()이 AttributeError로 죽고(except 미포착) 정상 생성된
+        # 시험 전체가 파이프라인 실패로 전환되므로, 비정상 타입은 보정 생략으로 흡수한다.
+        if not isinstance(data, dict):
+            raise ValueError(f"난이도 보정 응답이 dict가 아님: {type(data).__name__}")
+        raw_calibrations = data.get("calibrations", [])
+        # calibrations 항목 자체도 dict가 아닐 수 있으므로(예: 문자열 배열) dict만 추린다.
+        calibrations = [c for c in raw_calibrations if isinstance(c, dict)] \
+            if isinstance(raw_calibrations, list) else []
         cal_map = {c.get("question_id", ""): c for c in calibrations}
         calibrated: list[dict] = []
         for q in questions:

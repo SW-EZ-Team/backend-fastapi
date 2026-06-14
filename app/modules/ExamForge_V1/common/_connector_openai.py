@@ -80,6 +80,11 @@ class OpenAIConnector:
         except _OpenAIAuthError as exc:
             raise AuthError(str(exc)) from exc
         except _OpenAIRateLimitError as exc:
+            # insufficient_quota(결제 크레딧/한도 소진)는 분당 rate limit 과 달리
+            # 재시도해도 복구되지 않으므로 프로바이더 헬스에 passive 기록한다.
+            # 그래도 RateLimitError 로 올려 기존 폴백/재시도 동작은 보존한다.
+            if _is_billing_exhausted(str(exc)):
+                _record_provider_exhausted(self.name, str(exc))
             raise RateLimitError(str(exc)) from exc
         except (
             _OpenAIAPITimeoutError,
@@ -163,3 +168,37 @@ def _map_bad_request(exc: _OpenAIBadRequestError) -> ConnectorError:
     if "context" in lowered or "token" in lowered or "too long" in lowered:
         return ContextLengthExceeded(str(exc))
     return ConnectorError(str(exc))
+
+
+# OpenAI 영구성 소진 마커 — 분당 rate limit(일시)과 명확히 구분한다.
+# 단독 'billing' 부분일치는 일시 오류("billing 시스템 일시 불가" 등)까지 영구 소진으로
+# 오분류해(false-positive) 정상 복구 후에도 프로바이더를 차단할 수 있어 제외한다.
+# insufficient_quota 응답에 실제로 등장하는 구체 문구만 둔다(2026-06-13 감사).
+_OPENAI_BILLING_MARKERS = (
+    "insufficient_quota",
+    "insufficient quota",
+    "exceeded your current quota",
+    "check your plan and billing",
+    "billing_hard_limit_reached",
+    "billing_not_active",
+)
+
+
+def _is_billing_exhausted(message: str) -> bool:
+    """OpenAI 오류 메시지가 영구성 소진(insufficient_quota 등)인지 판별한다."""
+    low = message.lower()
+    return any(marker in low for marker in _OPENAI_BILLING_MARKERS)
+
+
+def _record_provider_exhausted(provider: str, message: str) -> None:
+    """프로바이더 헬스 캐시에 소진을 passive 기록한다(라이브 프로빙 아님).
+
+    헬스 모듈 임포트/기록 실패가 생성 경로를 깨뜨리지 않도록 폭넓게 흡수한다.
+    """
+    try:
+        from app.modules.ExamForge_V1.common import _provider_health as health
+
+        until = health.parse_regain_until(message)
+        health.mark_exhausted(provider, reason=message[:200], until_monotonic=until)
+    except Exception:  # noqa: BLE001 — 헬스 기록 실패가 생성 경로를 깨면 안 된다
+        pass
