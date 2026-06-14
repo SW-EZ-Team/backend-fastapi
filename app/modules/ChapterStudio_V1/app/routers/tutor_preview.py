@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field
 
 from app.modules.ChapterStudio_V1.ai_connectors.errors import ConnectorError
 from app.modules.ChapterStudio_V1.app.tutor_preview_generate import generate_tutor_preview
+from app.modules.ChapterStudio_V1.pipeline.tts_routing import TutorVoiceProfile
+from app.modules.ChapterStudio_V1.pipeline.voice_audio import synthesize_voice_audio
 
 _LOG = logging.getLogger(__name__)
 
@@ -23,9 +25,11 @@ router = APIRouter(prefix="/api/tutors", tags=["tutor-preview"])
 
 
 class PreviewTutorRequest(BaseModel):
-    """Spring PreviewTutorRequest 와 동일한 바디.
+    """Spring PreviewTutorFastApiRequest 와 동일한 바디.
 
     슬라이더는 0~100 정수(미설정 허용=None), 토글은 불리언, sampleQuestion 은 필수다.
+    voiceSampleUrl 은 Spring 이 서버 보관값에서 채워 보내는 선택 필드다 — 있으면
+    보이스클론(qwen3-tts-modal) 경로, 없으면 기본 TTS(gemini-tts) 경로로 합성한다.
     """
 
     toneSlider: int | None = Field(default=None, ge=0, le=100)
@@ -35,13 +39,51 @@ class PreviewTutorRequest(BaseModel):
     useEmoji: bool | None = None
     useFormalSpeech: bool | None = None
     sampleQuestion: str = Field(min_length=1)
+    voiceSampleUrl: str | None = None
 
 
 class PreviewTutorResponse(BaseModel):
-    """Spring PreviewTutorResponse 와 동일한 응답 — previewText + settingTags."""
+    """Spring PreviewTutorResponse 와 동일한 응답 — previewText + settingTags + audioUrl.
+
+    audioUrl 은 TTS 합성 성공 시 브라우저가 재생 가능한 오디오 URL, 실패 시 None 이다.
+    음성 합성 실패가 텍스트 미리보기까지 막지 않도록 best-effort 로 처리한다.
+    """
 
     previewText: str
     settingTags: list[str]
+    audioUrl: str | None = None
+
+
+async def _synthesize_preview_audio(
+    tutor_id: str,
+    preview_text: str,
+    voice_sample_url: str | None,
+    use_formal_speech: bool | None,
+) -> str | None:
+    """미리보기 멘트를 TTS 로 합성해 오디오 URL 을 반환한다. 실패 시 None (best-effort).
+
+    레슨 파이프라인과 동일한 라우팅을 재사용한다 — 프리셋/커스텀 샘플은 qwen3-tts-modal,
+    그 외(및 합성 실패 폴백)는 gemini-tts. 저장은 ObjectStorage_V1(S3/MinIO) 경유.
+    """
+    profile = TutorVoiceProfile(
+        tutor_id=tutor_id,
+        is_default_tutor=False,
+        voice_sample_url=(voice_sample_url or "").strip(),
+        use_formal_speech=True if use_formal_speech is None else bool(use_formal_speech),
+        tutor_tagline="",
+    )
+    try:
+        records = await synthesize_voice_audio(
+            [{"slide_idx": 0, "script_text": preview_text}],
+            tutor_profile=profile,
+        )
+        audio_url = records[0].get("audio_url") if records else None
+        if isinstance(audio_url, str) and audio_url:
+            return audio_url
+        _LOG.warning("[tutor_preview] TTS 결과에 audio_url 이 없음 — tutorId=%s", tutor_id)
+    except Exception as exc:  # noqa: BLE001 — 음성은 부가 기능이라 모든 실패를 삼키고 텍스트만 반환한다
+        _LOG.warning("[tutor_preview] 미리보기 TTS 합성 실패 — tutorId=%s, error=%s", tutor_id, exc)
+    return None
 
 
 @router.post("/{tutorId}/preview", response_model=PreviewTutorResponse)
@@ -51,7 +93,8 @@ async def preview_tutor(
 ) -> PreviewTutorResponse:
     """튜터 설정으로 미리보기 멘트를 동기 생성해 PreviewTutorResponse 로 반환한다.
 
-    생성 실패는 500으로 변환한다 — Spring 은 비2xx/빈 본문을 TUT_004 로 처리한다.
+    텍스트 생성 후 같은 멘트를 TTS 로 합성해 audioUrl 을 채운다(실패 시 None).
+    텍스트 생성 실패는 500으로 변환한다 — Spring 은 비2xx/빈 본문을 TUT_004 로 처리한다.
     """
     _LOG.debug("[tutor_preview] 미리보기 요청 — tutorId=%s", tutorId)
     try:
@@ -70,4 +113,14 @@ async def preview_tutor(
         _LOG.error("[tutor_preview] 미리보기 생성 실패 — tutorId=%s, error=%s", tutorId, exc)
         raise HTTPException(status_code=500, detail="튜터 미리보기 생성에 실패했다.") from exc
 
-    return PreviewTutorResponse(previewText=preview_text, settingTags=setting_tags)
+    # 음성 합성은 best-effort — 실패해도 텍스트 미리보기는 정상 응답한다.
+    audio_url = await _synthesize_preview_audio(
+        tutor_id=tutorId,
+        preview_text=preview_text,
+        voice_sample_url=req.voiceSampleUrl,
+        use_formal_speech=req.useFormalSpeech,
+    )
+
+    return PreviewTutorResponse(
+        previewText=preview_text, settingTags=setting_tags, audioUrl=audio_url
+    )

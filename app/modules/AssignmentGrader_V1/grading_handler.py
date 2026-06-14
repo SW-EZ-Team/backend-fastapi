@@ -18,6 +18,10 @@ from .text_grader import TextGradingError, grade_text_submission
 
 _LOG = logging.getLogger(__name__)
 
+# 콜백 재시도 정책 — 일시적 네트워크/Spring 재기동 구간에서 채점 결과 유실을 막는다.
+_CALLBACK_MAX_ATTEMPTS = 3
+_CALLBACK_BACKOFF_BASE_SEC = 1.0
+
 
 async def handle_text_grading_request(request: GradeRequest) -> None:
     """채점 전체 흐름을 비동기 컨텍스트에서 실행한다.
@@ -44,43 +48,64 @@ async def handle_text_grading_request(request: GradeRequest) -> None:
             submission_id,
             exc,
         )
-        _send_failed_callback(submission_id)
-        return
-
-    # 채점 성공 — Spring에 done 콜백을 전송한다
-    try:
-        await asyncio.to_thread(
-            send_ai_result_callback,
+        # 채점 실패도 Spring에 알려 submission이 영구 queued로 남지 않게 한다(재시도 포함)
+        await _send_callback_with_retry(
             submission_id,
-            result.score,
-            result.feedback,
-            result.ai_confidence,
-            "done",
-        )
-    except SpringCallbackError as exc:
-        _LOG.error(
-            "[GradingHandler] Spring 콜백 전송 실패 | submissionId=%s, error=%s",
-            submission_id,
-            exc,
-        )
-        # 콜백 전송 실패는 채점 결과 유실이므로 재시도 없이 로그만 남긴다
-        # (재시도 로직은 Spring 폴링 또는 운영 모니터링에서 처리한다)
-
-
-def _send_failed_callback(submission_id: str) -> None:
-    """채점 실패 시 Spring에 failed 콜백을 동기적으로 전송한다."""
-    try:
-        send_ai_result_callback(
-            submission_id=submission_id,
             score=0,
             feedback="AI 채점 중 오류가 발생했습니다. 관리자에게 문의하세요.",
             ai_confidence=0.0,
             status_transition="failed",
         )
-    except SpringCallbackError as exc:
-        # failed 콜백마저 실패하면 로그만 남기고 진행한다
-        _LOG.error(
-            "[GradingHandler] failed 콜백 전송 실패 | submissionId=%s, error=%s",
-            submission_id,
-            exc,
-        )
+        return
+
+    # 채점 성공 — Spring에 done 콜백을 전송한다(일시 실패 대비 지수 백오프 재시도)
+    await _send_callback_with_retry(
+        submission_id,
+        score=result.score,
+        feedback=result.feedback,
+        ai_confidence=result.ai_confidence,
+        status_transition="done",
+    )
+
+
+async def _send_callback_with_retry(
+    submission_id: str,
+    *,
+    score: int,
+    feedback: str,
+    ai_confidence: float,
+    status_transition: str,
+) -> bool:
+    """Spring 콜백을 최대 3회(1s→2s→4s 백오프) 재시도한다.
+
+    콜백 실패는 채점 결과 유실이므로 즉시 포기하지 않는다. 최종 실패 시에는
+    로그만 남긴다(submission 복구는 Spring 폴링/운영 모니터링 책임).
+    """
+    for attempt in range(1, _CALLBACK_MAX_ATTEMPTS + 1):
+        try:
+            await asyncio.to_thread(
+                send_ai_result_callback,
+                submission_id,
+                score,
+                feedback,
+                ai_confidence,
+                status_transition,
+            )
+            return True
+        except SpringCallbackError as exc:
+            _LOG.warning(
+                "[GradingHandler] Spring 콜백 실패 (%d/%d) | submissionId=%s, status=%s, error=%s",
+                attempt,
+                _CALLBACK_MAX_ATTEMPTS,
+                submission_id,
+                status_transition,
+                exc,
+            )
+            if attempt < _CALLBACK_MAX_ATTEMPTS:
+                await asyncio.sleep(_CALLBACK_BACKOFF_BASE_SEC * (2 ** (attempt - 1)))
+    _LOG.error(
+        "[GradingHandler] Spring 콜백 최종 실패 — 채점 결과 미전달 | submissionId=%s, status=%s",
+        submission_id,
+        status_transition,
+    )
+    return False

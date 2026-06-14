@@ -221,8 +221,12 @@ class TestFormatOutputMinThreshold:
     """format_output_node 최소 완료 비율 검사 테스트."""
 
     @pytest.mark.asyncio
-    async def test_exhausted_below_threshold_fails(self) -> None:
-        """요청 대비 완료율 50% 미만이면 failed_minimum_threshold 반환."""
+    async def test_below_floor_yields_needs_more_source(self) -> None:
+        """출고 floor 미만이면 진짜 FAILED 대신 needs_more_source(비-FAILED)로 분기한다.
+
+        graceful degradation: 5/50(유효목표 50, floor 25)처럼 고유 문항이 floor에
+        못 미쳐도, 확보된 고유 5문항은 출고하고 "자료 부족"으로 안내한다(0문항 FAILED 방지).
+        """
         from app.modules.ExamForge_V1.pipeline.nodes.format_output_node import format_output_node
 
         state: ExamForgeState = {
@@ -234,14 +238,18 @@ class TestFormatOutputMinThreshold:
                  "explanation": "설명"} for i in range(5)
             ],
             "exam_plan": {"topic_weights": {"A": 1.0}},
-            "exam_config": {"total_questions": 50},
+            "exam_config": {"total_questions": 50, "requested_question_count": 50},
             "retry_count": 3,
             "max_retries": 3,
             "failed_question_ids": ["q99"],
             "timings": {"start": 0},
         }
         result = await format_output_node(state)
-        assert result["pipeline_outcome"] == "failed_minimum_threshold"
+        assert result["pipeline_outcome"] == "needs_more_source"
+        # 비-FAILED — 확보된 고유 문항을 출고한다
+        assert not result["pipeline_outcome"].startswith("failed")
+        assert result["pipeline_status"] == "partial"
+        assert len(result["calibrated_questions"]) == 5
         assert result["error_message"] is not None
         assert "5" in result["error_message"]
 

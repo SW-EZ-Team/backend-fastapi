@@ -44,6 +44,38 @@ async def test_aggregate_weak_points_summarizes_top_topics() -> None:
 
 
 @pytest.mark.asyncio
+async def test_aggregate_weak_points_parses_camel_and_snake_weak_topics() -> None:
+    """mock_exam_submission.analysis의 weakTopics(camelCase)·weak_topics(snake_case)를 모두 읽는다."""
+    conn = FakeWeaknessConnection(
+        quiz_rows=[],
+        exam_rows=[
+            {"analysis": '{"weakTopics": ["이차방정식", "판별식"]}'},
+            {"analysis": '{"weak_topics": ["판별식", "근의 공식"]}'},
+        ],
+    )
+
+    summary = await aggregate_weak_points(conn, "course-1", "lesson-2")
+
+    assert "이차방정식" in summary
+    assert "판별식(2회)" in summary
+    assert "근의 공식" in summary
+
+
+@pytest.mark.asyncio
+async def test_aggregate_weak_points_falls_back_to_plain_text_analysis() -> None:
+    """analysis가 JSON이 아닌 평문이어도 토픽 분리로 폴백한다."""
+    conn = FakeWeaknessConnection(
+        quiz_rows=[],
+        exam_rows=[{"analysis": "함수의 극한, 연속성"}],
+    )
+
+    summary = await aggregate_weak_points(conn, "course-1", "lesson-2")
+
+    assert "함수의 극한" in summary
+    assert "연속성" in summary
+
+
+@pytest.mark.asyncio
 async def test_aggregate_weak_points_returns_empty_without_sources() -> None:
     conn = FakeWeaknessConnection(quiz_rows=[], exam_rows=[])
 

@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from html import unescape
 
 from app.modules.ChapterStudio_V1.pipeline.payload import GeneratedLessonPayload
+from app.modules.ChapterStudio_V1.pipeline.quiz_meta_filter import is_meta_quiz_question
 
 # 음성대본 품질 하한 — 약한 모델의 한두 문장 통과를 막는다(스키마 하한 40자보다 엄격).
 VOICE_MIN_CHARS = 700
@@ -44,7 +45,7 @@ _SENTENCE_BOUNDARY = re.compile(r"[.!?。…]+|\n")
 class Deficiency:
     """repair 단계가 소비할 단일 미달 항목.
 
-    field: voice / explanation / note / slide_html 중 하나(어떤 산출물인지).
+    field: voice / explanation / quiz_meta / note / slide_html 중 하나(어떤 산출물인지).
     slide_idx: 슬라이드/퀴즈/대본 인덱스(노트는 -1).
     reason: 사람이 읽을 수 있는 미달 사유(프롬프트에 그대로 넣는다).
     """
@@ -67,7 +68,11 @@ class QualityReport:
         return {d.slide_idx for d in self.deficiencies if d.field == "voice"}
 
     def supporting_needs_repair(self) -> bool:
-        return any(d.field in {"explanation", "note"} for d in self.deficiencies)
+        return any(d.field in {"explanation", "quiz_meta", "note"} for d in self.deficiencies)
+
+    def quiz_meta_targets(self) -> set[int]:
+        """메타 퀴즈로 판정돼 문항 전체 재작성이 필요한 slide_idx 집합."""
+        return {d.slide_idx for d in self.deficiencies if d.field == "quiz_meta"}
 
 
 def check_payload(payload: GeneratedLessonPayload) -> QualityReport:
@@ -83,6 +88,17 @@ def check_payload(payload: GeneratedLessonPayload) -> QualityReport:
 def _check_quizzes(payload: GeneratedLessonPayload) -> list[Deficiency]:
     items: list[Deficiency] = []
     for quiz in payload.quizzes:
+        # 메타 퀴즈(강의 구조 그 자체를 묻는 문항)는 문항 전체 재작성 대상이다.
+        # 프롬프트 금지 규칙의 간헐적 누수를 결정론적으로 잡는 2차 차단선(quiz_meta_filter).
+        if is_meta_quiz_question(quiz.question):
+            items.append(
+                Deficiency(
+                    "quiz_meta",
+                    quiz.slide_idx,
+                    "퀴즈가 강의 구조(슬라이드 수·순서·제목 등)를 묻는 메타 문항 — 슬라이드 내용 기반 문항으로 교체 필요.",
+                )
+            )
+            continue
         # answer_idx가 choices 범위를 벗어나면 정답 위치 자체가 깨진 것이다.
         if not 0 <= quiz.answer_idx < len(quiz.choices):
             items.append(Deficiency("explanation", quiz.slide_idx, "answer_idx가 choices 범위를 벗어났다."))

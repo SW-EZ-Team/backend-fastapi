@@ -129,6 +129,9 @@ async def test_backfill_lesson_audio_uses_tts_synth_concurrency(monkeypatch: pyt
         return [{"slide_idx": idx, "audio_url": f"mock://audio/{idx}", "duration_hint_sec": 2.5}]
 
     monkeypatch.setenv("TTS_SYNTH_CONCURRENCY", "2")
+    # .env의 TTS_WARMUP_ENABLED=false가 테스트로 새어 들어오면 warmup이 생략되므로
+    # 기본값(웜업 켜짐) 경로를 검증하도록 env를 격리한다.
+    monkeypatch.delenv("TTS_WARMUP_ENABLED", raising=False)
     monkeypatch.setattr(backfill, "get_connection", lambda: FakeConnectionManager(conn))
     monkeypatch.setattr(backfill, "load_generation_context", fake_load)
     monkeypatch.setattr(backfill, "warmup_tutor_voice_audio", fake_warmup)

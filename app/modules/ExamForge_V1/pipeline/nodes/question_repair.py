@@ -12,6 +12,9 @@ from collections.abc import Awaitable, Callable
 
 from app.modules.ExamForge_V1.common.ai_bridge import AIConnector
 from app.modules.ExamForge_V1.common.logger import get_logger
+from app.modules.ExamForge_V1.pipeline.nodes.regeneration_context import (
+    build_avoidance_clause,
+)
 
 logger = get_logger(__name__)
 
@@ -114,6 +117,9 @@ def build_repair_tasks(
                 "num_choices": slot.get("num_choices"),
                 "target_answer_position": slot.get("target_answer_position"),
             }
+            # 중복 회피 절 — 이미 채택된 stem·개념과 이번 슬롯의 coverage를 프롬프트에 전달해
+            # 단순 재호출이 같은 문항을 또 만드는 비수렴을 직접 차단한다.
+            task["_avoidance_clause"] = build_avoidance_clause(existing_drafts, task)
             tasks.append(task)
         return tasks
 
@@ -132,12 +138,15 @@ def build_repair_tasks(
         for difficulty in difficulties:
             topic = topic_names[topic_cursor % len(topic_names)]
             topic_cursor += 1
-            tasks.append({
+            task = {
                 "template_id": template_id,
                 "topic": topic,
                 "difficulty": difficulty,
                 "count": 1,
-            })
+            }
+            # 폴백 경로에도 동일하게 중복 회피 절을 실어 보충 생성의 중복을 줄인다.
+            task["_avoidance_clause"] = build_avoidance_clause(existing_drafts, task)
+            tasks.append(task)
     return tasks
 
 

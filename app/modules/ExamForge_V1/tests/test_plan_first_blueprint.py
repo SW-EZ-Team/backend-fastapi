@@ -16,7 +16,9 @@ from collections import Counter
 import pytest
 
 from app.modules.ExamForge_V1.pipeline.nodes.concept_blueprint import (
+    _assign_concepts_to_slots,
     _balanced_target_positions,
+    _concept_pool,
     _num_choices_for_template,
     build_question_blueprint,
     compute_answer_position_plan,
@@ -716,3 +718,223 @@ class TestValidateNodeCountGateIntegration:
         assert route == "retry", (
             f"9/10인데 {route}로 라우팅됨 — 모자란 시험이 출고될 뻔함 (P1-B 미수정)"
         )
+
+
+# ── G: 개념 다양성 우선 배정 (지엽 개념 반복 배정 결함 대응) ────────────────────
+
+class TestConceptDiversityAllocation:
+    """슬롯에 개념을 다양성 우선(coverage-first)으로 배정하는지 검증.
+
+    이전 결함: build_question_blueprint가 concepts[index % len(concepts)]로 단순
+    순회 배정 → 개념 < 슬롯이면 같은(지엽) 개념이 여러 슬롯을 반복 점유.
+    수정: 서로 다른 개념을 1회씩 먼저 소진 + 개념당 슬롯 상한(per_concept_cap).
+    모두 과목 불문(subject-agnostic) 구조적 신호로만 동작 — 특정 도메인 단어 하드코딩 0.
+    """
+
+    def test_more_concepts_than_slots_no_repeat(self) -> None:
+        """(a) 개념 10개·슬롯 6 → 6개 서로 다른 개념 배정(반복 0)."""
+        topics = [
+            {"name": f"주제{i}", "chapter": f"챕터{i}", "importance": (10 - i) * 0.1,
+             "key_topics": [f"개념{i}"]}
+            for i in range(10)
+        ]
+        allocs = _make_allocations("ko_multiple_choice_5", {3: 6})
+        bp = build_question_blueprint(topics, allocs, exam_id="div_a")
+        concepts = [s["concept"] for s in bp]
+        assert len(bp) == 6, "슬롯 수가 6이 아님"
+        assert len(set(concepts)) == 6, f"서로 다른 개념 6개가 아님 — 반복 발생: {concepts}"
+
+    def test_fewer_concepts_even_distribution(self) -> None:
+        """(b) 개념 3개·슬롯 10 → 개념당 슬롯 균등 분산(한 개념 과반 점유 안 함)."""
+        topics = [{
+            "name": "주제A", "chapter": "챕터A", "importance": 1.0,
+            "key_topics": ["개념X", "개념Y", "개념Z"],
+        }]
+        allocs = _make_allocations("ko_multiple_choice_5", {1: 2, 2: 2, 3: 2, 4: 2, 5: 2})
+        bp = build_question_blueprint(topics, allocs, exam_id="div_b")
+        assert len(bp) == 10
+        counts = Counter(s["concept"] for s in bp)
+        # 3개 개념 모두 쓰였는지
+        assert len(counts) == 3, f"개념 3개가 모두 쓰이지 않음: {dict(counts)}"
+        # 한 개념이 과반(>5)을 점유하지 않는지 — cap = ceil(10/3) = 4
+        assert max(counts.values()) <= 4, f"한 개념이 cap(4) 초과 점유: {dict(counts)}"
+        assert max(counts.values()) <= 10 // 2, f"한 개념이 과반 점유: {dict(counts)}"
+        # concept_key 고유성(기존 불변식) 유지 — (d)
+        keys = [s["concept_key"] for s in bp]
+        assert len(keys) == len(set(keys)), f"concept_key 중복: {keys}"
+
+    def test_high_importance_concept_assigned_first(self) -> None:
+        """(c) importance 높은 개념이 슬롯 우선순위에서 앞선다."""
+        topics = [
+            {"name": "low", "chapter": "Clow", "importance": 0.1, "key_topics": ["저중요개념"]},
+            {"name": "high", "chapter": "Chigh", "importance": 0.9, "key_topics": ["고중요개념"]},
+        ]
+        # 슬롯 1개 → 가장 우선순위 높은 개념 1개만 배정돼야 한다
+        allocs = _make_allocations("ko_multiple_choice_5", {3: 1})
+        bp = build_question_blueprint(topics, allocs, exam_id="div_c")
+        assert bp[0]["concept"] == "고중요개념", (
+            f"importance 높은 개념이 먼저 배정되지 않음: {bp[0]['concept']}"
+        )
+        # 풀 정렬 자체도 고중요가 앞서야 한다
+        pool = _concept_pool(topics)
+        assert pool[0]["concept"] == "고중요개념"
+
+    def test_trailing_keyword_concept_deprioritized(self) -> None:
+        """(c-2) 말단 keywords에만 등장하는 지엽 개념은 우선순위가 낮다(완전 배제 아님)."""
+        topics = [{
+            "name": "T", "chapter": "C", "importance": 0.5,
+            "key_topics": ["핵심1", "핵심2"],   # 핵심 필드 + 앞쪽
+            "keywords": ["지엽말단"],            # 말단 필드 → 가장 낮은 가중치
+        }]
+        pool = _concept_pool(topics)
+        names = [p["concept"] for p in pool]
+        # 지엽 개념은 풀에 존재하되(배제 아님) 핵심 뒤에 위치한다
+        assert "지엽말단" in names, "지엽 개념이 완전 배제됨(좁은 소스 회귀 위험)"
+        assert names.index("지엽말단") == len(names) - 1, (
+            f"지엽 개념이 핵심보다 앞에 배치됨: {names}"
+        )
+
+    def test_concept_key_uniqueness_preserved(self) -> None:
+        """(d) 다양성 배정 후에도 distinct concept_key 고유성 불변식 유지."""
+        topics = _make_topics(3)
+        allocs = _make_allocations("ko_multiple_choice_5", {2: 4, 3: 4, 4: 4})
+        bp = build_question_blueprint(topics, allocs, exam_id="div_d")
+        keys = [s["concept_key"] for s in bp]
+        assert len(keys) == len(set(keys)), f"concept_key 중복: {keys}"
+
+    def test_assign_helper_coverage_first(self) -> None:
+        """_assign_concepts_to_slots: 개념 4·슬롯 4면 4개 모두 1회씩(반복 0)."""
+        concepts = [{"chapter": f"c{i}", "topic": f"t{i}", "concept": f"개념{i}"} for i in range(4)]
+        assigned = _assign_concepts_to_slots(concepts, 4)
+        names = [a["concept"] for a in assigned]
+        assert len(assigned) == 4
+        assert len(set(names)) == 4, f"4개 슬롯에 서로 다른 개념이 안 들어감: {names}"
+
+    def test_assign_helper_round_robin_before_reuse(self) -> None:
+        """_assign_concepts_to_slots: 개념 2·슬롯 4면 각 개념 정확히 2회(라운드로빈)."""
+        concepts = [{"chapter": "c", "topic": "t", "concept": f"개념{i}"} for i in range(2)]
+        assigned = _assign_concepts_to_slots(concepts, 4)
+        counts = Counter(a["concept"] for a in assigned)
+        assert counts == {"개념0": 2, "개념1": 2}, f"라운드로빈 균등 분산 실패: {dict(counts)}"
+
+    def test_assign_helper_empty_concepts(self) -> None:
+        """_assign_concepts_to_slots: 개념이 없으면 빈 리스트(예외 없음)."""
+        assert _assign_concepts_to_slots([], 5) == []
+
+    def test_narrow_source_single_concept_no_crash(self) -> None:
+        """좁은 소스(개념 1개·슬롯 5) graceful — 1개 개념이 cap 내에서 쓰인다."""
+        topics = [{"name": "주제A", "chapter": "챕터A", "importance": 1.0, "key_topics": ["유일개념"]}]
+        allocs = _make_allocations("ko_multiple_choice_5", {3: 5})
+        bp = build_question_blueprint(topics, allocs, exam_id="div_narrow")
+        assert len(bp) == 5
+        assert all(s["concept"] == "유일개념" for s in bp), "유일 개념이 일부 슬롯에 안 들어감"
+        # concept_key는 diff·reasoning 조합으로 여전히 유일해야 한다
+        keys = [s["concept_key"] for s in bp]
+        assert len(keys) == len(set(keys)), f"좁은 소스에서 concept_key 중복: {keys}"
+
+    def test_deterministic_concept_assignment(self) -> None:
+        """같은 입력이면 개념 배정도 결정적이다(정렬·배정 안정성)."""
+        topics = _make_topics(4)
+        allocs = _make_allocations("ko_multiple_choice_5", {3: 7})
+        bp1 = build_question_blueprint(topics, allocs, exam_id="div_det")
+        bp2 = build_question_blueprint(topics, allocs, exam_id="div_det")
+        assert [s["concept"] for s in bp1] == [s["concept"] for s in bp2]
+
+
+# ── H: 챕터별 슬롯 쿼터 ────────────────────────────────────────────────────────
+
+class TestChapterQuota:
+    """챕터 간 우선 분배 → 챕터 내 개념 다양성 배정을 검증한다."""
+
+    def _make_six_chapter_topics(self) -> list[dict]:
+        """6챕터·챕터당 개념 4개 이상 topic 목록."""
+        topics = []
+        for i in range(6):
+            topics.append({
+                "name": f"주제{i}",
+                "chapter": f"챕터{i}",
+                "importance": (6 - i) * 0.15,
+                "key_topics": [f"개념{i}_A", f"개념{i}_B", f"개념{i}_C", f"개념{i}_D"],
+            })
+        return topics
+
+    def test_six_chapters_twenty_slots_quota(self) -> None:
+        """(a) 6챕터·20슬롯 — 각 챕터 3~4개, 0인 챕터 없음, max <= 4."""
+        topics = self._make_six_chapter_topics()
+        allocs = _make_allocations("ko_multiple_choice_5", {3: 20})
+        bp = build_question_blueprint(topics, allocs, exam_id="ch_quota_a")
+        counts = Counter(s["chapter"] for s in bp)
+        assert len(counts) == 6, f"6챕터가 모두 배정되지 않음: {dict(counts)}"
+        assert min(counts.values()) >= 1, f"0인 챕터 존재: {dict(counts)}"
+        assert max(counts.values()) <= 4, f"한 챕터가 cap(4) 초과: {dict(counts)}"
+        assert all(v in {3, 4} for v in counts.values()), f"쿼터가 3/4가 아님: {dict(counts)}"
+        assert sum(counts.values()) == 20
+
+    def test_single_chapter_ten_slots_regression(self) -> None:
+        """(b) 단일 챕터·10슬롯 — 전부 같은 챕터(회귀)."""
+        topics = [{
+            "name": "주제A", "chapter": "챕터A", "importance": 1.0,
+            "key_topics": ["개념1", "개념2", "개념3", "개념4"],
+        }]
+        allocs = _make_allocations("ko_multiple_choice_5", {3: 10})
+        bp = build_question_blueprint(topics, allocs, exam_id="ch_quota_b")
+        assert len(bp) == 10
+        assert all(s["chapter"] == "챕터A" for s in bp)
+
+    def test_eight_chapters_five_slots_top_five(self) -> None:
+        """(c) 챕터 8개·슬롯 5 — importance 상위 5챕터에 1개씩."""
+        topics = []
+        for i in range(8):
+            topics.append({
+                "name": f"주제{i}",
+                "chapter": f"챕터{i}",
+                "importance": (8 - i) * 0.1,
+                "key_topics": [f"개념{i}"],
+            })
+        allocs = _make_allocations("ko_multiple_choice_5", {3: 5})
+        bp = build_question_blueprint(topics, allocs, exam_id="ch_quota_c")
+        counts = Counter(s["chapter"] for s in bp)
+        expected = {f"챕터{i}" for i in range(5)}
+        assert set(counts.keys()) == expected, (
+            f"상위 5챕터가 선택되지 않음: {set(counts.keys())} != {expected}"
+        )
+        assert all(v == 1 for v in counts.values()), f"각 챕터 1개씩이 아님: {dict(counts)}"
+        assert sum(counts.values()) == 5
+
+    def test_concept_key_uniqueness_with_chapter_quota(self) -> None:
+        """(d) 챕터 쿼터 배정 후에도 concept_key 고유성 유지."""
+        topics = self._make_six_chapter_topics()
+        allocs = _make_allocations("ko_multiple_choice_5", {3: 20})
+        bp = build_question_blueprint(topics, allocs, exam_id="ch_quota_d")
+        keys = [s["concept_key"] for s in bp]
+        assert len(keys) == len(set(keys)), f"concept_key 중복: {keys}"
+
+    def test_ensure_topic_chapters_from_headings(self) -> None:
+        """(e) chapter 없는 topics + ## 헤딩 source_text → chapter 채워짐."""
+        from app.modules.ExamForge_V1.pipeline.nodes.parse_source_node import (
+            _ensure_topic_chapters,
+        )
+
+        source_text = (
+            "## 알파\n알파 관련 내용\n"
+            "## 베타\n베타 관련 내용\n"
+        )
+        topics = [
+            {"name": "알파개념", "importance": 0.9, "sub_concepts": [], "keywords": []},
+            {"name": "베타개념", "importance": 0.8, "sub_concepts": [], "keywords": []},
+            {"name": "기존챕터", "chapter": "보존챕터", "importance": 0.7,
+             "sub_concepts": [], "keywords": []},
+        ]
+        result = _ensure_topic_chapters(topics, source_text)
+        assert result[0]["chapter"] == "알파"
+        assert result[1]["chapter"] == "베타"
+        assert result[2]["chapter"] == "보존챕터"
+        assert all(str(t.get("chapter", "")).strip() for t in result)
+
+    def test_chapter_quota_determinism(self) -> None:
+        """(f) 같은 입력이면 챕터 배정 순서도 결정적이다."""
+        topics = self._make_six_chapter_topics()
+        allocs = _make_allocations("ko_multiple_choice_5", {3: 20})
+        bp1 = build_question_blueprint(topics, allocs, exam_id="ch_quota_det")
+        bp2 = build_question_blueprint(topics, allocs, exam_id="ch_quota_det")
+        assert [s["chapter"] for s in bp1] == [s["chapter"] for s in bp2]

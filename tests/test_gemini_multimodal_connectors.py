@@ -215,6 +215,9 @@ def test_registry_returns_gemini_connectors_without_api_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    # .env(dotenv import 부수효과)의 OPENAI 키가 TTS 폴백 래핑을 유발하지 않게 제거
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_FALLBACK_ENABLED", raising=False)
     assert get_tts_connector("gemini-tts").name == "gemini-tts"
     assert get_asr_connector("gemini-asr").name == "gemini-asr"
     assert get_ocr_connector("gemini-ocr").name == "gemini-ocr"

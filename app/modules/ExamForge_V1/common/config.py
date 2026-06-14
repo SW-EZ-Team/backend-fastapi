@@ -72,6 +72,19 @@ def gemini_text_model() -> str:
     return _optional("GEMINI_TEXT_MODEL") or "gemini-3.5-flash"
 
 
+def examforge_gemini_concurrency() -> int:
+    """ExamForge 전용 Gemini 동시 호출 상한.
+
+    전역 GEMINI_TEXT_MAX_CONCURRENCY(=1, 채팅·강의 보호용)와 분리된 ExamForge
+    전용 세마포어 크기다. 모의고사 생성은 수십 개의 독립 Gemini 호출을 묶어
+    실행하므로 전역값보다 높게 둬 타임아웃을 피한다.
+
+    기본 3. EXAMFORGE_GEMINI_CONCURRENCY 환경변수로 오버라이드. 0 이하/파싱 실패는
+    데드락 방지를 위해 최소 1로 보정한다.
+    """
+    return max(1, _int_env("EXAMFORGE_GEMINI_CONCURRENCY", 3))
+
+
 def openai_api_key() -> str | None:
     """OpenAI API 키를 반환한다. 없으면 None(폴백 비활성)."""
     return _optional("OPENAI_API_KEY")
@@ -103,6 +116,15 @@ def active_planner_model() -> str:
 def active_verifier_model() -> str:
     """검증용 커넥터 이름. 미설정이면 활성 텍스트 모델을 그대로 쓴다."""
     return _optional("ACTIVE_VERIFIER_MODEL") or active_text_model()
+
+
+def active_grading_model() -> str:
+    """모의고사 채점/총평 전용 커넥터 이름.
+
+    채점·피드백은 품질 일관성을 위해 Claude Sonnet(claude_sonnet)을 기본으로 쓴다
+    (사용자 지시 2026-06-14). 텍스트 생성 경로(gemini_flash 등)와 분리해 채점 품질을
+    한 모델로 통제한다. .env 의 ACTIVE_GRADING_MODEL 한 값으로 교체 가능하다."""
+    return _optional("ACTIVE_GRADING_MODEL") or "claude_sonnet"
 
 
 # <think> reasoning을 본문 토큰으로 소비하는 모델 이름 패턴.
@@ -166,8 +188,36 @@ def verifier_max_tokens(base: int) -> int:
 
 
 def max_retries() -> int:
-    """파이프라인 최대 재시도 횟수."""
-    return _int_env("MAX_RETRIES", 3)
+    """파이프라인 최대 재시도(풀 재생성) 횟수.
+
+    비용 최우선 정책: 풀 재생성 1회당 LLM 호출이 문항 수×수 단계로 곱해져
+    재시도 루프가 생성당 비용을 2~3배로 부풀린다. 따라서 기본 1회로 낮춘다.
+    1회 재시도 후에는 확보된 문항으로 passed/passed_partial graceful 출고한다
+    (format_output_node의 retry_count >= max_retries 분기 재사용).
+
+    우선순위: MOCK_EXAM_MAX_RETRIES(신규, 비용 상한 전용) > MAX_RETRIES(기존 호환).
+    두 변수 모두 미설정이면 기본 1을 사용한다. 음수는 0으로 보정한다.
+    """
+    explicit = _optional("MOCK_EXAM_MAX_RETRIES")
+    if explicit is not None:
+        return max(0, _int_env("MOCK_EXAM_MAX_RETRIES", 1))
+    # MOCK_EXAM_MAX_RETRIES 미설정 시 기존 MAX_RETRIES를 존중하되 기본값도 1로 낮춘다.
+    return max(0, _int_env("MAX_RETRIES", 1))
+
+
+def mock_exam_max_llm_calls() -> int:
+    """모의고사 1회 생성당 허용하는 LLM 호출의 하드 상한(절대 천장).
+
+    LLMBudgetCounter는 문항 수 비례 예산(reserve 포함)으로 동작하지만, 그 값이
+    크게 산정돼도 이 하드 상한을 넘는 호출은 reserve 호출이라도 무조건 차단한다.
+    재시도 폭주·무한 루프로 인한 비용 폭발(DoS)을 시험 단위로 못박는다.
+
+    기본 60: 문항 20개 기준 1회 통과(생성·오답·해설·검증 ≈ 4단계 + 파싱 재시도)와
+    1회 보충 재시도를 흡수하면서, 2~3배 폭주는 차단하는 합리적 천장이다.
+    env MOCK_EXAM_MAX_LLM_CALLS로 조정 가능. 0 이하는 사실상 무제한 방지를 위해
+    최소 1로 보정한다.
+    """
+    return max(1, _int_env("MOCK_EXAM_MAX_LLM_CALLS", 60))
 
 
 def generation_concurrency() -> int:

@@ -76,3 +76,35 @@ def test_build_public_url_uses_aws_url_when_endpoint_missing() -> None:
     )
 
     assert storage.build_public_url(settings, "tts/a.wav") == "https://prod-media.s3.ap-northeast-2.amazonaws.com/tts/a.wav"
+
+
+def test_to_internal_url_rewrites_public_base_to_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """공개 URL 베이스로 시작하는 URL은 컨테이너 내부 endpoint URL로 변환한다."""
+    monkeypatch.setenv("S3_ENABLED", "true")
+    monkeypatch.setenv("S3_ENDPOINT_URL", "http://minio:9000")
+    monkeypatch.setenv("S3_BUCKET", "sw-ez-media")
+    monkeypatch.setenv("S3_PUBLIC_URL_BASE", "http://localhost:9000/sw-ez-media")
+
+    converted = storage.to_internal_url("http://localhost:9000/sw-ez-media/voice-samples/ref.wav")
+
+    assert converted == "http://minio:9000/sw-ez-media/voice-samples/ref.wav"
+
+
+def test_to_internal_url_keeps_external_urls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """공개 베이스와 무관한 외부 URL(AWS 등)은 그대로 반환한다."""
+    monkeypatch.setenv("S3_ENDPOINT_URL", "http://minio:9000")
+    monkeypatch.setenv("S3_PUBLIC_URL_BASE", "http://localhost:9000/sw-ez-media")
+
+    original = "https://prod-media.s3.ap-northeast-2.amazonaws.com/voice-samples/ref.wav"
+
+    assert storage.to_internal_url(original) == original
+
+
+def test_to_internal_url_noop_without_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """public_url_base 또는 endpoint_url 미설정이면 변환하지 않는다 (AWS 운영 환경)."""
+    monkeypatch.delenv("S3_ENDPOINT_URL", raising=False)
+    monkeypatch.delenv("S3_PUBLIC_URL_BASE", raising=False)
+
+    original = "http://localhost:9000/sw-ez-media/voice-samples/ref.wav"
+
+    assert storage.to_internal_url(original) == original

@@ -13,6 +13,7 @@ import logging
 import os
 from dataclasses import dataclass
 
+from ai_connectors import _gemini_throttle as _throttle
 from ai_connectors._gemini_common import build_genai_client, google_api_key
 from ai_connectors.errors import AIConnectorError
 
@@ -54,21 +55,39 @@ def _build_grading_prompt(
     return (
         "너는 대학 과제 채점 전문가다. 아래 텍스트 답안을 채점하고 JSON으로만 응답한다.\n\n"
         f"## 과제 정보\n- 제목: {assignment_title}\n"
-        f"- 채점 기준: {criteria}\n"
+        f"- 과제 설명·채점 기준: {criteria}\n"
         f"- 문항 목록:\n{questions_text}\n\n"
         "## 학생 답안\n"
         f"{answer_text}\n\n"
         "## 채점 규칙\n"
-        "1. 0~100 점수를 부여한다.\n"
-        "2. 피드백은 한국어로 구체적이고 건설적으로 작성한다.\n"
-        "3. ai_confidence는 채점 확신도(0.0~1.0)를 나타낸다.\n\n"
+        "1. 점수(0~100)는 반드시 다음 세 기준의 합으로 산출한다 — "
+        "정확성(과제 요구와 문항에 맞는 올바른 내용인가, 40점) / "
+        "완성도(요구 항목을 빠짐없이 다뤘고 분량·형식이 충분한가, 30점) / "
+        "논리(주장-근거-예시가 일관되게 연결되는가, 30점). "
+        "기준별 감점 사유를 피드백에 반영한다.\n"
+        "2. 피드백은 한국어 2~4문장 이상으로, 반드시 다음 세 가지를 모두 담는다: "
+        "잘한 점(답안에서 실제로 잘 쓴 부분을 구체적으로 인용), "
+        "부족한 점(어떤 문항·기준에서 무엇이 빠졌거나 틀렸는지), "
+        "개선 방법(다음에 어떻게 보완하면 되는지 실행 가능한 조언). "
+        "과제 문항 내용을 직접 언급하며 작성하고, '잘했어요/노력하세요' 같은 두루뭉술한 표현만으로 끝내지 않는다.\n"
+        "3. 답안이 과제 문항과 무관하거나 비어 있으면 정확성 0점 처리하고 그 이유를 피드백에 명시한다.\n"
+        "4. ai_confidence는 채점 확신도(0.0~1.0)를 나타낸다 — 답안이 모호하거나 "
+        "문항 정보가 부족할수록 낮춘다.\n\n"
         "반드시 아래 JSON 형식으로만 응답한다. 다른 텍스트는 포함하지 않는다.\n"
         '{"score":int,"feedback":"str","ai_confidence":float}'
     )
 
 
 def _parse_grading_json(raw: str) -> TextGradingResult:
-    """Gemini 출력에서 JSON을 추출하고 TextGradingResult로 변환한다."""
+    """Gemini 출력에서 JSON을 추출하고 TextGradingResult로 변환한다.
+
+    gemini-3.5-flash 등 reasoning 모델은 본문 앞에 <think> 블록·영문 서문을 흘리므로,
+    먼저 strip_thinking 으로 reasoning 을 제거한 뒤 중괄호 범위를 추출한다.
+    (2026-06-14 실측: 추론 토큰이 응답을 잠식해 JSON 중괄호 자체가 안 나오던 채점 실패 수정.)
+    """
+    from common.llm_output import strip_thinking
+
+    raw = strip_thinking(raw)
     # 중괄호 범위만 추출 — 마크다운 코드 블록 포함 가능성 대응
     start = raw.find("{")
     end = raw.rfind("}") + 1
@@ -123,6 +142,9 @@ def _call_gemini(prompt: str, timeout_seconds: int) -> str:
     """동기 google-genai 호출로 채점 응답 텍스트를 받는다."""
     # API 키 미설정은 즉시 명확한 오류로 전환한다(빈 채점 결과 방지)
     google_api_key()
+    # 프로세스 전역 Gemini 호출 간격 스로틀 — 시험 생성·강의 생성과 동시 실행 시
+    # 429/503 폭주를 막는다(동기 경로이므로 sync 변형 사용, to_thread 안에서 안전).
+    _throttle.wait_for_slot_sync()
     try:
         client, genai = build_genai_client()
         model = os.getenv("GEMINI_TEXT_MODEL", _DEFAULT_MODEL)
@@ -131,7 +153,10 @@ def _call_gemini(prompt: str, timeout_seconds: int) -> str:
             contents=prompt,
             config=genai.types.GenerateContentConfig(
                 temperature=0.0,
-                max_output_tokens=1024,
+                # reasoning 모델(gemini-3.5-flash)은 thinking 토큰을 먼저 소비하므로
+                # 1024는 채점 JSON이 출력되기 전에 소진됐다. thinking + 소형 JSON 모두
+                # 담기도록 넉넉히 둔다(목표 출력은 작아 실제 소모는 thinking 분량뿐).
+                max_output_tokens=8192,
                 http_options=genai.types.HttpOptions(timeout=timeout_seconds * 1000),
             ),
         )

@@ -18,8 +18,10 @@ from app.modules.ChapterStudio_V1.app.reference_books.schemas import ReferenceBo
 _LOG = logging.getLogger(__name__)
 
 
-def _collection_name_from_source_ref(source_ref: str) -> str:
+def collection_name_from_source_ref(source_ref: str) -> str:
     """source_ref(S3 URL 또는 bare 파일명)에서 OCR 인제스트와 동일한 Qdrant 컬렉션명을 만든다.
+
+    커리큘럼 생성(curriculum_generate)에서도 같은 유도식을 재사용하는 단일 진실 소스다.
 
     OCR 인제스트(connector.py:37)는 bare 파일명에 대해
     `filename.rsplit(".", 1)[0].replace(" ", "_")` 를 적용한다.
@@ -48,7 +50,7 @@ async def inject_reference_context_if_pdf(context: GenerationContext) -> Generat
     if not context.pdf_file_name:
         return context
 
-    collection = _collection_name_from_source_ref(context.pdf_file_name)
+    collection = collection_name_from_source_ref(context.pdf_file_name)
     query = f"{context.topic} {context.chapter_title} {context.chapter_brief}".strip()
     try:
         from app.modules.OCR_v1.search import hybrid_search

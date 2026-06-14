@@ -1,6 +1,7 @@
 """ChapterStudio LangGraph 파이프라인 조립."""
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from functools import lru_cache
 from typing import cast
 
@@ -42,12 +43,36 @@ def get_compiled_graph() -> CompiledStateGraph:
     return build_chapter_studio_graph()
 
 
-async def generate_chapter_state(generation_input: GenerationInput) -> ChapterStudioState:
-    """DB generation_context 입력을 그래프에 태워 최종 상태를 반환한다."""
-    return cast(
-        ChapterStudioState,
-        await get_compiled_graph().ainvoke(generation_input_to_initial_state(generation_input)),
-    )
+# 노드 완료 콜백 타입 — 노드 이름 하나를 받아 진행률 기록 등 부수효과를 수행한다.
+NodeCompleteCallback = Callable[[str], Awaitable[None]]
+
+
+async def generate_chapter_state(
+    generation_input: GenerationInput,
+    on_node_complete: NodeCompleteCallback | None = None,
+) -> ChapterStudioState:
+    """DB generation_context 입력을 그래프에 태워 최종 상태를 반환한다.
+
+    on_node_complete가 주어지면 astream으로 실행해 노드가 끝날 때마다 콜백을
+    호출한다(진행률 기록용). 콜백이 없으면 기존 ainvoke 경로를 그대로 쓴다.
+    """
+    initial_state = generation_input_to_initial_state(generation_input)
+    if on_node_complete is None:
+        return cast(ChapterStudioState, await get_compiled_graph().ainvoke(initial_state))
+    # updates 스트림으로 노드 완료 시점을 잡고, values 스트림의 마지막 항목이 최종 상태다.
+    final_state: ChapterStudioState | None = None
+    async for mode, chunk in get_compiled_graph().astream(
+        initial_state, stream_mode=["updates", "values"]
+    ):
+        if mode == "updates" and isinstance(chunk, dict):
+            for node_name in chunk:
+                if isinstance(node_name, str) and not node_name.startswith("__"):
+                    await on_node_complete(node_name)
+        elif mode == "values":
+            final_state = cast(ChapterStudioState, chunk)
+    if final_state is None:
+        raise RuntimeError("그래프 스트림이 최종 상태를 반환하지 않았다.")
+    return final_state
 
 
 async def generate_chapter_response(generation_input: GenerationInput, chapter_id: str) -> ChapterResponse:

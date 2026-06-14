@@ -7,7 +7,7 @@
   4. _extract_answer_by_regex 가 bare 텍스트 응답에서도 동작
   5. _empty_answer → _has_answer_payload(False) 를 validate_node가 실패로 분류
   6. passed_partial 상태일 때 _coerce_exam_plan이 total_questions를 실제 수로 조정
-  7. codex 커넥터 _build_command에 --output-schema 플래그가 포함됨
+  7. (삭제됨) codex 커넥터 _build_command 검증 — codex CLI 커넥터 제거(7abc300)로 함께 삭제
 """
 from __future__ import annotations
 
@@ -277,38 +277,9 @@ async def test_generate_answer_all_connector_errors_no_crash() -> None:
     assert answered[0]["correct_answer"] == ""
 
 
-def test_codex_connector_includes_output_schema_flag() -> None:
-    """_build_command가 output_schema_path 있을 때 --output-schema 플래그를 포함한다."""
-    with patch(
-        "app.modules.ExamForge_V1.common._connector_codex.shutil.which",
-        return_value="/usr/bin/codex",
-    ):
-        from app.modules.ExamForge_V1.common._connector_codex import (
-            CodexCliConnector,
-            _build_command,
-        )
-        from app.modules.ExamForge_V1.common._ai_schemas import ChapterAIRequest
-
-    req = ChapterAIRequest(
-        user="테스트 요청",
-        max_tokens=100,
-        temperature=0.1,
-        extra={"output_schema_path": "/tmp/schema.json"},
-    )
-    cmd = _build_command(req)
-    assert "--output-schema" in cmd
-    idx = cmd.index("--output-schema")
-    assert cmd[idx + 1] == "/tmp/schema.json"
-
-
-def test_codex_connector_no_schema_no_flag() -> None:
-    """output_schema_path 없을 때 --output-schema 플래그가 없다."""
-    from app.modules.ExamForge_V1.common._connector_codex import _build_command
-    from app.modules.ExamForge_V1.common._ai_schemas import ChapterAIRequest
-
-    req = ChapterAIRequest(user="테스트", max_tokens=100, temperature=0.1)
-    cmd = _build_command(req)
-    assert "--output-schema" not in cmd
+# (삭제됨) test_codex_connector_includes_output_schema_flag / test_codex_connector_no_schema_no_flag
+# — _connector_codex.py가 커밋 7abc300(codex CLI 커넥터 제거)에서 삭제되어 함께 제거함.
+# 아래 schema 파일 테스트는 codex_answer_gen.schema.json이 현존하므로 유지한다.
 
 
 def test_codex_answer_schema_file_exists() -> None:

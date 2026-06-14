@@ -112,7 +112,7 @@ async def test_generate_loaded_context_triggers_audio_backfill_after_persist(
     events: list[str] = []
     context = _context("lesson-1")
 
-    async def fake_generate(input_payload: object) -> dict[str, object]:
+    async def fake_generate(input_payload: object, on_node_complete: object = None) -> dict[str, object]:
         events.append("generate")
         return {"voice_scripts": []}
 
@@ -198,6 +198,56 @@ async def test_backfill_audio_when_needed_marks_exception_audio_pending(
     assert captured["context"] == context
     assert captured["result"] == {}
     assert isinstance(captured["error"], RuntimeError)
+
+
+@pytest.mark.asyncio
+async def test_generate_one_full_course_path_injects_weak_points(monkeypatch: pytest.MonkeyPatch) -> None:
+    """전체 코스 일괄 생성 경로(_generate_one)도 단건 경로처럼 약점을 주입한다."""
+    captured: dict[str, GenerationContext] = {}
+
+    async def fake_aggregate(conn: object, course_id: str, lesson_id: str) -> str:
+        return "신뢰구간, p-value"
+
+    async def fake_load(conn: object, lesson_id: str) -> GenerationContext:
+        return _context(lesson_id)
+
+    async def fake_generate(context: GenerationContext) -> bool:
+        captured["context"] = context
+        return True
+
+    monkeypatch.setattr(lessons_generate, "get_connection", lambda: FakeConnectionManager())
+    monkeypatch.setattr(lessons_generate, "aggregate_weak_points", fake_aggregate)
+    monkeypatch.setattr(lessons_generate, "load_generation_context", fake_load)
+    monkeypatch.setattr(lessons_generate, "_generate_loaded_context", fake_generate)
+
+    result = await lessons_generate._generate_one("course-1", "lesson-1")
+
+    assert result is True
+    assert captured["context"].weak_points == "신뢰구간, p-value"
+
+
+@pytest.mark.asyncio
+async def test_progress_recorder_maps_nodes_to_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    """노드 완료 콜백이 노드명→진행률 매핑대로 mark_chapter_progress를 호출한다."""
+    calls: list[dict[str, object]] = []
+    context = _context("lesson-1")
+
+    async def fake_mark(conn: object, ctx: GenerationContext, chapter_id: str, **kwargs: object) -> None:
+        calls.append({"chapter_id": chapter_id, **kwargs})
+
+    monkeypatch.setattr(lessons_generate, "get_connection", lambda: FakeConnectionManager())
+    monkeypatch.setattr(lessons_generate, "mark_chapter_progress", fake_mark)
+
+    record = lessons_generate._progress_recorder(context, "lesson-1")
+    await record("prepare_context")
+    await record("generate_lesson")
+    await record("postprocess_slides")
+    await record("unknown_node")  # 매핑에 없는 노드는 기록하지 않는다
+
+    assert [c["current_node"] for c in calls] == ["prepare_context", "generate_lesson", "postprocess_slides"]
+    assert [c["progress_percent"] for c in calls] == [10, 55, 95]
+    assert [c["completed_nodes"] for c in calls] == [1, 2, 5]
+    assert all(c["total_nodes"] == 5 for c in calls)
 
 
 def test_audio_backfill_route_returns_202(monkeypatch: pytest.MonkeyPatch) -> None:

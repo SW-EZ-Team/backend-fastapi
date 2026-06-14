@@ -15,7 +15,7 @@ from ai_connectors.text_schemas import ChapterAIRequest
 
 from app.modules.Chat_V1.app.schemas import ChatRequest, ChatResponse, SlideContext, VoiceChatRequest
 from app.modules.Chat_V1.app.scope_guard import (
-    OUT_OF_SCOPE_REPLY,
+    SCOPE_NOTICE,
     apply_hallucination_guard,
     build_lecture_keywords,
     extract_referenced_slides,
@@ -55,8 +55,9 @@ async def answer_question(request: ChatRequest) -> ChatResponse:
 def build_system_prompt(request: ChatRequest | VoiceChatRequest) -> str:
     """강의 컨텍스트를 포함한 시스템 프롬프트를 생성한다.
 
-    Claude에게 강의 내용 범위 안에서만 답변하고 슬라이드 번호를
-    명시하도록 지시한다. 범위 밖 질문은 정중히 안내한다.
+    강의 자료를 우선 근거로 답하고 슬라이드 번호를 인용하되, 자료에 없는
+    질문도 일반 지식으로 정확하게 답변한다(거절 금지). 범위 밖 답변에는
+    끝에 한 줄 안내문(SCOPE_NOTICE)만 덧붙인다.
     """
     ctx = request.lecture_context
     slides_text = _format_slides(ctx.slides)
@@ -76,14 +77,18 @@ def build_system_prompt(request: ChatRequest | VoiceChatRequest) -> str:
         "아래 강의 자료를 바탕으로 학생의 질문에 친절하게 답변해 주세요.\n\n"
         f"[강의 슬라이드]\n{slides_text}{extra}\n\n"
         "답변 규칙:\n"
-        "1. 반드시 위 강의 자료에 있는 내용만 근거로 답변해요.\n"
+        "1. 위 강의 자료에 있는 내용이면 강의 자료를 우선 근거로 답변해요. "
+        "강의 자료는 참고 자료예요 — 자료에 없는 질문이라도 절대 거절하지 말고 "
+        "정확한 일반 지식으로 친절하게 답변해요.\n"
         "2. 강의 자료를 근거로 답할 때는 반드시 '[슬라이드 N]' 형식으로 출처를 표기해요 "
-        "(인용이 자연스럽지 않아도 문장 끝에 붙여요).\n"
-        "3. 두 개념을 비교하거나 학생이 헷갈릴 만한 질문이면, 정의 뒤에 강의 자료 범위 안에서 "
+        "(인용이 자연스럽지 않아도 문장 끝에 붙여요). 강의 자료 밖 내용에는 "
+        "슬라이드 인용을 붙이지 않아요.\n"
+        "3. 두 개념을 비교하거나 학생이 헷갈릴 만한 질문이면, 정의 뒤에 "
         "짧은 대조 예시 1개를 들어 구분을 명확히 해요. 예시는 1~2줄, 장황하지 않게.\n"
-        "4. 단순 정의만 나열하지 말고, 핵심 + 짧은 예시(강의 자료 범위 안)로 과외쌤처럼 "
-        "설명해요. 단, 강의에 없는 내용을 만들어 내지 않아요.\n"
-        f"5. 강의 범위 밖의 질문이면 '{OUT_OF_SCOPE_REPLY}'라고 안내해요.\n"
+        "4. 단순 정의만 나열하지 말고, 핵심 + 짧은 예시로 과외쌤처럼 설명해요. "
+        "강의 자료를 인용할 때는 자료에 없는 내용을 자료 내용처럼 꾸며내지 않아요.\n"
+        f"5. 강의 자료에 없는 내용으로 답했다면, 답변 끝에 '{SCOPE_NOTICE}' 한 줄을 덧붙여요. "
+        "안내문만 보내고 답을 생략하는 것은 금지예요 — 항상 질문에 먼저 답해요.\n"
         "6. 해요체(~해요, ~예요)를 사용해요.\n"
         "7. 반드시 한국어 자연어 문장으로만 답해요. 내부 분석·사고 과정·체크리스트·"
         "영어 메모·'Yes/No' 식 판단 메모를 절대 답변에 노출하지 않아요. 학생에게 보여줄 "
@@ -95,7 +100,7 @@ def build_system_prompt(request: ChatRequest | VoiceChatRequest) -> str:
 # few-shot 예시 — 세 가지 답변 형식을 한 번에 보여준다.
 #   예시 A: 단순 개념 질문 → 핵심 + 예시 + 슬라이드 인용(항상 붙임)
 #   예시 B: 비교/혼동 가능 질문 → 정의 + 대조 예시 + 슬라이드 인용
-#   예시 C: 강의 범위 밖 질문 → 거절문
+#   예시 C: 강의 범위 밖 질문 → 일반 지식으로 답변 + 끝에 범위 밖 안내 한 줄(거절 금지)
 _FEW_SHOT_BLOCK: str = (
     "[예시]\n"
     "질문: 이 개념이 왜 중요한지 알려줘.\n"
@@ -105,8 +110,10 @@ _FEW_SHOT_BLOCK: str = (
     "답변: 둘이 헷갈리기 쉽죠! [슬라이드 1]에 따르면 A는 ○○이고, B는 △△예요. "
     "간단히 비교하면, A는 '입력을 받는 이름'이고 B는 '실제로 넣는 값'이에요. "
     "예: def f(x)에서 x가 A, f(3)의 3이 B예요.\n"
-    "질문: 오늘 환율 전망이 어때?\n"
-    f"답변: {OUT_OF_SCOPE_REPLY}"
+    "질문: 환율이 오르면 수입 물가는 왜 올라요?\n"
+    "답변: 환율이 오르면 같은 외화 금액을 사는 데 더 많은 원화가 필요해져요. "
+    "그래서 해외에서 들여오는 상품의 원화 표시 가격이 올라가고, 수입 물가가 상승해요. "
+    f"{SCOPE_NOTICE}"
 )
 
 

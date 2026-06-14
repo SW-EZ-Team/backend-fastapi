@@ -22,6 +22,7 @@ def _records(state: ChapterStudioState, key: str) -> StateRecords:
 
 
 def _slide_input(row: StateRecord) -> SlideInput:
+    visual_type, visual_data = _visual_contract(row)
     return {
         "index": _record_int(row, "slide_idx"),
         "category": _record_text(row, "category"),
@@ -30,7 +31,25 @@ def _slide_input(row: StateRecord) -> SlideInput:
         "title": _optional_text(row, "title"),
         "narration": _optional_text(row, "narration"),
         "focus": _optional_text(row, "focus"),
+        "expected_visual_type": visual_type,
+        "visual_data": visual_data,
     }
+
+
+def _visual_contract(row: StateRecord) -> tuple[str, dict[str, object]]:
+    """draft의 plan-first visual 계약(type·data)을 후처리 검증용으로 꺼낸다.
+
+    visual이 없는 레거시 draft는 빈 값을 반환해 템플릿 구조 검증을 건너뛴다.
+    """
+    visual = row.get("visual")
+    if not isinstance(visual, dict):
+        return "", {}
+    visual_type = visual.get("type")
+    data = visual.get("data")
+    return (
+        visual_type if isinstance(visual_type, str) else "",
+        data if isinstance(data, dict) else {},
+    )
 
 
 def _slide_record(item: dict[str, object]) -> StateRecord:

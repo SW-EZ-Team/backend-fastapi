@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.modules.ChapterStudio_V1.ai_connectors.schemas import ChapterAIResponse
+from app.modules.ChapterStudio_V1.app.gemini_chat_pipeline import SCOPE_NOTICE
 from app.modules.ChapterStudio_V1.app.slide_chat_responder import classify_question, stream_chat_response
 from app.modules.ChapterStudio_V1.app.slide_chat_types import SlideChatContext, SlideChatRequest
 
@@ -20,22 +21,64 @@ async def test_chat_stream_mentions_slide_context() -> None:
     assert "바로 점검" in text
 
 
-async def test_chat_stream_can_use_codex_oauth_engine(monkeypatch) -> None:
-    class FakeCodex:
+# (삭제됨) test_chat_stream_can_use_codex_oauth_engine — codex_chat_pipeline.py가
+# 커밋 7abc300(codex CLI 커넥터 제거)에서 삭제됨(gemini_chat_pipeline으로 대체).
+# 채팅 엔진 경로는 아래 gemini 계열 테스트들이 계속 가드한다.
+
+
+async def test_gemini_chat_answers_out_of_scope_without_refusal(monkeypatch) -> None:
+    # 자료 밖 질문이라도 모델 답변을 거절문으로 교체하지 않고 그대로 흘려보내는지 검증한다.
+    out_of_scope_answer = (
+        "환율이 오르면 같은 외화를 사는 데 더 많은 원화가 필요해서 수입 물가가 올라요. "
+        f"{SCOPE_NOTICE}"
+    )
+
+    class FakeGemini:
         async def generate(self, req):
             return ChapterAIResponse(
-                text=f"Codex 답변: {req.user[:10]}",
-                model="codex-test",
+                text=out_of_scope_answer,
+                model="gemini-test",
                 input_tokens=1,
                 output_tokens=1,
                 finish_reason="stop",
             )
 
-    monkeypatch.setattr("app.modules.ChapterStudio_V1.app.codex_chat_pipeline.CodexCLIConnector", FakeCodex)
-    req = _request("Codex로 답해줘", engine="codex_cli")
+    monkeypatch.setattr(
+        "app.modules.ChapterStudio_V1.app.gemini_chat_pipeline.get_text_connector",
+        lambda: FakeGemini(),
+    )
+    req = _request("환율이 오르면 수입 물가는 왜 올라요?", engine="gemini")
     text = "".join([chunk async for chunk in stream_chat_response(req, _context())])
 
-    assert text.startswith("Codex 답변")
+    # 답변 본문 + 범위 밖 안내문이 살아 있어야 하고, 거절문이 끼어들면 안 된다.
+    assert "수입 물가" in text
+    assert SCOPE_NOTICE in text
+    assert "답변할 수 없" not in text
+    assert "다루지 않" not in text
+
+
+async def test_gemini_chat_prompt_forbids_refusal(monkeypatch) -> None:
+    # 시스템/유저 프롬프트가 거절 금지 + 범위 밖 안내문 정책을 담고 있는지 검증한다.
+    captured: dict[str, str] = {}
+
+    class FakeGemini:
+        async def generate(self, req):
+            captured["system"] = req.system
+            captured["user"] = req.user
+            return ChapterAIResponse(
+                text="답변", model="gemini-test", input_tokens=1, output_tokens=1, finish_reason="stop"
+            )
+
+    monkeypatch.setattr(
+        "app.modules.ChapterStudio_V1.app.gemini_chat_pipeline.get_text_connector",
+        lambda: FakeGemini(),
+    )
+    req = _request("강의 밖 질문이에요", engine="gemini")
+    "".join([chunk async for chunk in stream_chat_response(req, _context())])
+
+    assert "거절" in captured["system"]
+    assert SCOPE_NOTICE in captured["system"]
+    assert SCOPE_NOTICE in captured["user"]
 
 
 def _request(message: str, engine: str = "mock") -> SlideChatRequest:

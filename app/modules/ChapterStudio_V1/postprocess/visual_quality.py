@@ -3,10 +3,14 @@ from __future__ import annotations
 import re
 from html import unescape
 
+from app.modules.ChapterStudio_V1.app.template_types import VISUAL_TYPE_ALIASES
 from app.modules.ChapterStudio_V1.postprocess.title_rules import (
     relabel_chapter_title as _relabel_title,
 )
-from app.modules.ChapterStudio_V1.postprocess.visual_renderers import render_fallback_visual
+from app.modules.ChapterStudio_V1.postprocess.visual_renderers import (
+    render_fallback_visual,
+    render_visual_slide,
+)
 
 _VISUAL_MARKERS = (
     "<svg",
@@ -174,6 +178,49 @@ def _specific_text(value: str) -> str:
     return "" if any(pattern.match(text) for pattern in _PLACEHOLDER_PATTERNS) else text
 
 
+# 플랜 visual_type → 렌더 결과에 반드시 존재해야 하는 marker class 매핑.
+# visual_renderers.py 각 렌더러의 래퍼 class와 1:1 대응한다(드리프트 시 테스트로 잡는다).
+EXPECTED_VISUAL_MARKERS: dict[str, str] = {
+    "number_line": "number-line-visual",
+    "comparison": "comparison-visual",
+    "comparison-table": "comparison-table",
+    "step_flow": "step-flow-visual",
+    "flow-strip": "flow-strip",
+    "fraction_bar": "fraction-bar-visual",
+    "concept_map": "concept-map-visual",
+    "example_box": "example-box-visual",
+    "metric-card": "metric-card",
+}
+
+
+def enforce_expected_visual(
+    html: str,
+    expected_type: str,
+    *,
+    title: str = "",
+    narration: str = "",
+    visual_data: dict[str, object] | None = None,
+) -> tuple[str, list[str]]:
+    """슬라이드가 배정된 템플릿 visual_type 구조를 실제로 담았는지 검증·복구한다.
+
+    plan-first로 확정된 visual_type의 marker class가 최종 HTML에 없으면(템플릿 디자인
+    무시) 결정적 렌더러로 같은 타입을 재렌더해 템플릿 구조를 강제한다.
+    expected_type이 비었거나 알 수 없는 타입이면 검증을 건너뛴다(보수적 통과).
+    """
+    if not expected_type:
+        return html, []
+    normalized = VISUAL_TYPE_ALIASES.get(expected_type, expected_type)
+    marker = EXPECTED_VISUAL_MARKERS.get(normalized)
+    if marker is None or marker.lower() in html.lower():
+        return html, []
+    data = visual_data if isinstance(visual_data, dict) else {}
+    fallback_title = _fallback_title(html, title)
+    fallback_narration = _fallback_narration(html, fallback_title, narration, "", "")
+    repaired = render_visual_slide(fallback_title, fallback_narration, normalized, data)
+    warning = f"visual-template: 기대 visual_type={normalized} 구조 누락 — 결정적 재렌더 적용"
+    return repaired, [warning]
+
+
 def relabel_chapter_title(title: str, must_have: list[str] | None = None) -> str:
     """챕터명+번호 형태 제목 재라벨 — title_rules의 단일 진실 소스에 위임한다.
 
@@ -184,4 +231,4 @@ def relabel_chapter_title(title: str, must_have: list[str] | None = None) -> str
     return _relabel_title(title, must_have)
 
 
-__all__ = ["ensure_visual_body", "relabel_chapter_title"]
+__all__ = ["EXPECTED_VISUAL_MARKERS", "enforce_expected_visual", "ensure_visual_body", "relabel_chapter_title"]

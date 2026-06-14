@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from app.modules.ExamForge_V1.common.ai_bridge import (
     AIConnector,
     ChapterAIRequest,
-    get_text_connector,
+    get_grading_connector,
 )
 from app.modules.ExamForge_V1.common.json_utils import parse_llm_json
 from app.modules.ExamForge_V1.grading.exceptions import RubricGradingError
@@ -59,11 +59,11 @@ async def grade_rubric_question(
 
 
 def _load_text_connector() -> AIConnector:
-    """production 설정에 등록된 텍스트 커넥터를 불러온다."""
+    """채점 전용 커넥터(기본 Claude Sonnet)를 불러온다."""
     try:
-        return get_text_connector()
+        return get_grading_connector()
     except Exception as exc:
-        raise RubricGradingError(f"텍스트 커넥터 초기화 실패: {exc}") from exc
+        raise RubricGradingError(f"채점 커넥터 초기화 실패: {exc}") from exc
 
 
 def _build_user_prompt(question: GradeQuestion, answer: JsonValue) -> str:

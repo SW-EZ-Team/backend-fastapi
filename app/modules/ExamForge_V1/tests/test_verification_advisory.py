@@ -23,17 +23,9 @@ def test_verification_advisory_env_flag_enables_mode() -> None:
         assert config.verification_advisory_enabled() is True
 
 
-def test_codex_cli_verifier_enables_advisory_mode() -> None:
-    """codex_cli 검증기는 env 플래그가 없어도 advisory로 취급한다."""
-    from app.modules.ExamForge_V1.common import config
-
-    def optional(key: str) -> str | None:
-        if key == "ACTIVE_VERIFIER_MODEL":
-            return "codex_cli"
-        return None
-
-    with patch.object(config, "_optional", side_effect=optional):
-        assert config.verification_advisory_enabled() is True
+# (삭제됨) test_codex_cli_verifier_enables_advisory_mode — 커밋 7abc300에서
+# verification_advisory_enabled()의 codex_cli 특례가 의도적으로 제거됨
+# (이제 EXAMFORGE_VERIFICATION_ADVISORY 명시 플래그만 advisory를 켠다).
 
 
 class _StubResponse:

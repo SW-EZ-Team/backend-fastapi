@@ -5,10 +5,11 @@
 순수 함수라 단위 테스트가 쉽고, service.py 의 오케스트레이션과 책임이 분리된다.
 
 공개 API:
-    - OUT_OF_SCOPE_REPLY          : 표준 거절문 상수(프롬프트·폴백이 공유)
+    - SCOPE_NOTICE                : 강의 범위 밖 답변 뒤에 붙이는 한 줄 안내문
+    - OUT_OF_SCOPE_REPLY          : (레거시) 과거 거절문 상수 — 과거 대화 필터링용으로만 유지
     - extract_referenced_slides   : '[슬라이드 N]' 인용을 0-based 인덱스로(상한 검증 포함)
     - build_lecture_keywords      : 강의 컨텍스트에서 매칭용 키워드 집합 생성
-    - apply_hallucination_guard   : 강의와 전혀 안 겹치는 답변을 거절문으로 폴백
+    - apply_hallucination_guard   : 강의와 안 겹치는 답변에 범위 밖 안내문을 덧붙임(거절 아님)
 """
 from __future__ import annotations
 
@@ -16,8 +17,12 @@ import re
 
 from app.modules.Chat_V1.app.schemas import ChatRequest, VoiceChatRequest
 
-# 강의 범위 밖 질문에 대한 표준 거절문 — 프롬프트 지시(build_system_prompt)와
-# 환각 가드 폴백이 같은 문장을 공유하도록 단일 상수로 둔다(계약 일관성).
+# 강의 범위 밖 질문에 대한 한 줄 안내문 — 슬라이드는 참고 자료이지 감옥이 아니다.
+# 일반 지식 답변을 막지 않고, 답변 끝에 이 안내문만 덧붙인다(거절 금지 정책).
+SCOPE_NOTICE: str = "이 내용은 이번 강의 범위 밖이에요."
+
+# (레거시) 과거 거절문 — 더 이상 새 답변에 쓰지 않는다. Spring recent_qa에 남아 있는
+# 과거 거절 답변을 컨텍스트에서 걸러내는 식별용으로만 유지한다.
 OUT_OF_SCOPE_REPLY: str = (
     "이 강의에서는 다루지 않는 내용이에요. 관련 슬라이드를 함께 확인해 보시겠어요?"
 )
@@ -127,23 +132,25 @@ def _looks_like_refusal(answer: str) -> bool:
 def apply_hallucination_guard(
     answer: str, lecture_keywords: list[str]
 ) -> tuple[str, bool]:
-    """강의 자료와 전혀 매칭되지 않는 답변을 거절문으로 폴백한다.
+    """강의 자료와 매칭되지 않는 답변에 범위 밖 안내문을 덧붙인다(답변 교체 금지).
 
-    약한 모델이 강의 밖 일반지식을 끌어오는 것을 막는 결정적 후처리다.
-    오탐(정상 답변 차단)을 줄이기 위해 다음 경우에는 가드를 적용하지 않는다:
+    슬라이드는 참고 자료다 — 강의 밖 질문도 일반 지식으로 정확히 답하되,
+    학생이 강의 범위를 인지하도록 답변 끝에 SCOPE_NOTICE 한 줄만 추가한다.
+    진짜 질문에 대한 거절문 교체는 하지 않는다(NEVER refuse 정책).
+
+    안내문을 덧붙이지 않는 경우(강의 근거 답변으로 간주):
       - 답변이 비었거나 너무 짧을 때(매칭 신뢰도 낮음)
-      - 답변이 이미 거절문 계열일 때
+      - 답변이 이미 거절문/안내문 계열일 때(중복 방지)
       - 강의 키워드가 없을 때(비교 기준 부재 — 보수적으로 통과)
       - 슬라이드 인용([슬라이드 N])이 하나라도 있을 때(강의 근거 표식)
-    위 면제에 해당하지 않으면서 강의 키워드가 답변에 하나도 등장하지 않으면
-    환각으로 보고 거절문으로 바꾼다.
+      - 답변 어간이 강의 키워드와 하나라도 겹칠 때
 
-    반환: (최종 답변, 폴백 적용 여부)
+    반환: (최종 답변, 안내문 추가 여부)
     """
     stripped = answer.strip()
     if len(stripped) < _GUARD_MIN_ANSWER_LEN:
         return answer, False
-    if _looks_like_refusal(stripped):
+    if _looks_like_refusal(stripped) or SCOPE_NOTICE in stripped:
         return answer, False
     if not lecture_keywords:
         return answer, False
@@ -156,5 +163,5 @@ def apply_hallucination_guard(
     answer_stems = _content_stems(stripped)
     if answer_stems & set(lecture_keywords):
         return answer, False
-    # 강의 키워드 어간이 단 하나도 안 겹침 → 강의 밖 일반지식으로 보고 거절문 폴백.
-    return OUT_OF_SCOPE_REPLY, True
+    # 강의 키워드 어간이 안 겹침 → 일반 지식 답변으로 보고 답변은 유지한 채 안내문만 덧붙인다.
+    return f"{stripped}\n\n{SCOPE_NOTICE}", True

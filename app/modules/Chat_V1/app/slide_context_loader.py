@@ -9,8 +9,8 @@ Chat_V1 LectureContext 구성에 필요한 SlideContext 목록을 반환한다.
 public.slide.content는 ChapterStudio가 저장한 raw iframe HTML이다.
 HTML을 그대로 proimpt에 넣으면 scope_guard의 build_lecture_keywords가
 "div", "section", "class" 같은 HTML 태그/속성 이름을 강의 키워드로 인식한다.
-그 결과 모델이 올바른 답변을 생성해도 apply_hallucination_guard가
-"강의 키워드 없음"으로 판정해 OUT_OF_SCOPE_REPLY로 폴백한다.
+그 결과 모델이 올바른 강의 근거 답변을 생성해도 apply_hallucination_guard가
+키워드 불일치로 오판해 범위 밖 안내문(SCOPE_NOTICE)을 잘못 덧붙인다.
 → _html_to_text()로 HTML에서 가시 텍스트만 추출한 뒤 슬라이드 컨텍스트를 구성한다.
 """
 from __future__ import annotations

@@ -7,6 +7,7 @@ from typing import ClassVar
 import pytest
 from google.genai import errors as genai_errors
 
+from ai_connectors import _gemini_throttle
 from ai_connectors import _registry_text as root_registry
 from ai_connectors.errors import AuthError as RootAuthError
 from ai_connectors.errors import RateLimitError as RootRateLimitError
@@ -80,6 +81,29 @@ def reset_fake_client() -> None:
     _FakeClient.last = None
     _FakeClient.response_text = "<think>추론</think>\n본문"
     _FakeClient.errors = []
+
+
+@pytest.fixture(autouse=True)
+def stabilization_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gemini 안정화 환경을 테스트 기본값으로 고정한다.
+
+    스로틀/백오프 대기를 0으로 만들고, 모델 폴백 체인을 단일 모델로 제한하며,
+    .env(dotenv import 부수효과)로 주입된 프로바이더 폴백 키가 레지스트리
+    래핑 동작을 바꾸지 않도록 제거한다.
+    """
+    monkeypatch.setenv("GEMINI_REQUEST_INTERVAL_MS", "0")
+    monkeypatch.setenv("GEMINI_TEXT_RETRY_ATTEMPTS", "3")
+    monkeypatch.setenv("GEMINI_TEXT_RETRY_INITIAL_MS", "0")
+    monkeypatch.setenv("GEMINI_TEXT_RETRY_MAX_MS", "0")
+    monkeypatch.setenv("GEMINI_TEXT_MODEL_FALLBACKS", "gemini-test")
+    for key in (
+        "OPENAI_API_KEY",
+        "OPENAI_FALLBACK_ENABLED",
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_SONNET_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    _gemini_throttle.reset_throttle()
 
 
 def _patch_client(monkeypatch: pytest.MonkeyPatch, module: object) -> None:
@@ -160,7 +184,6 @@ def test_module_gemini_connectors_accept_gemini_api_key_alias(
 async def test_root_gemini_normalizes_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GOOGLE_API_KEY", "root-key")
     monkeypatch.setenv("GEMINI_TEXT_MODEL", "gemini-test")
-    monkeypatch.setattr(root_gemini, "_RETRY_DELAYS", (0.0, 0.0))
     _patch_client(monkeypatch, root_gemini)
     _FakeClient.errors = [
         genai_errors.ClientError(429, {"error": {"message": "quota"}})
@@ -211,7 +234,6 @@ async def test_examforge_gemini_generate_budget_retry_and_registry(
     monkeypatch.setenv("GEMINI_TEXT_MODEL", "gemini-test")
     monkeypatch.setenv("ACTIVE_TEXT_MODEL", "gemini_flash")
     monkeypatch.delenv("ACTIVE_VERIFIER_MODEL", raising=False)
-    monkeypatch.setattr(exam_gemini, "_RETRY_DELAYS", (0.0, 0.0))
     _patch_client(monkeypatch, exam_gemini)
     exam_bridge._CONNECTOR_CACHE.clear()
     _FakeClient.errors = [genai_errors.ServerError(503, {"error": {"message": "busy"}})]

@@ -37,9 +37,14 @@ async def generate_exam_forge(request: ExamForgeRequest) -> ExamForgeResponse:
     start_time = time.time()
     exam_id = f"exam_{uuid.uuid4().hex[:12]}"
 
+    # 최소 문항 수 클램프 — plan_exam_node와 동일 규칙으로 예산을 산정해 굶김을 방지한다
+    from app.modules.ExamForge_V1.pipeline.nodes.plan_exam_node import clamp_total_questions
+
+    exam_config = clamp_total_questions(request.exam_config.model_dump())
+
     # LLM 호출 예산 서킷 브레이커 초기화 — 문항 수에 비례한 예산 + 해설 생성 예약분.
     # reserve 풀은 upstream 재시도가 소진해도 해설 생성이 굶지 않게 보호한다.
-    total_questions = request.exam_config.total_questions
+    total_questions = exam_config["total_questions"]
     budget = LLMBudgetCounter(
         budget=pipeline_llm_budget_for(total_questions),
         reserve=pipeline_llm_reserve_for(total_questions),
@@ -49,7 +54,7 @@ async def generate_exam_forge(request: ExamForgeRequest) -> ExamForgeResponse:
     initial_state = {
         "source_text": request.source_text,
         "subject": request.subject,
-        "exam_config": request.exam_config.model_dump(),
+        "exam_config": exam_config,
         "locale": request.exam_config.locale,
         "category": request.exam_config.category,
         "retry_count": 0,

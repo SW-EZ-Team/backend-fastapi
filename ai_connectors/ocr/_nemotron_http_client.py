@@ -119,7 +119,8 @@ async def post_recognize(image_bytes: bytes) -> dict[str, Any]:
     payload = build_payload(image_bytes)
 
     last_exc: Exception | None = None
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    # Modal 웹 엔드포인트의 303 등 리다이렉트를 따라가도록 follow_redirects 활성화
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         for attempt in range(retries + 1):
             try:
                 resp = await client.post(url, json=payload)

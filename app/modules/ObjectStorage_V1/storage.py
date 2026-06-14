@@ -29,6 +29,24 @@ def build_public_url(settings: S3Settings, key: str) -> str:
     return f"https://{settings.bucket}.s3.{settings.region}.amazonaws.com/{encoded_key}"
 
 
+def to_internal_url(url: str) -> str:
+    """브라우저용 공개 URL을 컨테이너 내부에서 접근 가능한 endpoint URL로 변환한다.
+
+    로컬 스택에서 공개 URL 베이스(예: http://localhost:9000/sw-ez-media)는 호스트 브라우저
+    기준이라 컨테이너 안에서는 닿지 않는다. 설정된 public_url_base 로 시작하는 URL이면
+    endpoint_url(예: http://minio:9000) + 버킷 경로로 바꿔 내부 다운로드가 가능하게 한다.
+    조건이 안 맞으면(설정 없음, 외부 URL 등) 원본을 그대로 반환한다.
+    """
+    settings = load_s3_settings()
+    if settings.public_url_base is None or settings.endpoint_url is None:
+        return url
+    base = settings.public_url_base.rstrip("/")
+    if not url.startswith(base + "/"):
+        return url
+    key_part = url[len(base) + 1 :]
+    return f"{settings.endpoint_url.rstrip('/')}/{settings.bucket}/{key_part}"
+
+
 def _put_object_sync(data: bytes, key: str, content_type: str, settings: S3Settings) -> str:
     client = create_s3_client(settings)
     try:
@@ -49,4 +67,4 @@ def _validate_upload_input(data: bytes, key: str, content_type: str, settings: S
         raise ObjectStorageConfigError("content_type이 비어 있다.")
 
 
-__all__ = ["ObjectStorageUploadError", "build_public_url", "put_object"]
+__all__ = ["ObjectStorageUploadError", "build_public_url", "put_object", "to_internal_url"]

@@ -76,7 +76,7 @@ def status_sql(schema: str) -> str:
         f"INSERT INTO {_table(schema, 'lesson_generation_status')} "
         "(lesson_id, tutoring_id, status, current_node, completed_nodes, total_nodes, "
         "progress_percent, chapter_id, generation_model, result_summary, error_message, updated_at, completed_at) "
-        "VALUES ($1,$2,'done','persist_chapter_state',3,3,100,$3,$4,$5::jsonb,NULL,NOW(),NOW()) "
+        "VALUES ($1,$2,'done','persist_chapter_state',5,5,100,$3,$4,$5::jsonb,NULL,NOW(),NOW()) "
         "ON CONFLICT (lesson_id) DO UPDATE SET "
         "status = EXCLUDED.status, "
         "current_node = EXCLUDED.current_node, "
@@ -198,7 +198,7 @@ def running_status_sql(schema: str) -> str:
         f"INSERT INTO {_table(schema, 'lesson_generation_status')} "
         "(lesson_id, tutoring_id, status, current_node, completed_nodes, total_nodes, "
         "progress_percent, chapter_id, generation_model, result_summary, error_message, updated_at, completed_at) "
-        "VALUES ($1,$2,'running','generate_chapter_state',0,3,0,$3,NULL,'{}'::jsonb,NULL,NOW(),NULL) "
+        "VALUES ($1,$2,'running','generate_chapter_state',0,5,0,$3,NULL,'{}'::jsonb,NULL,NOW(),NULL) "
         "ON CONFLICT (lesson_id) DO UPDATE SET "
         "tutoring_id = EXCLUDED.tutoring_id, "
         "status = EXCLUDED.status, "
@@ -213,13 +213,44 @@ def running_status_sql(schema: str) -> str:
     )
 
 
+def progress_status_sql(schema: str) -> str:
+    """그래프 노드 완료 시점마다 진행률을 lesson_generation_status에 남기는 upsert 쿼리다.
+
+    Spring/프론트가 챕터 단위(AVAILABLE) 신호만 보던 것을 노드 단위 진행률로 세분화한다.
+    스테일 콜백 가드: 이미 종결된 행(status='done'/'failed')은 되돌리지 않는다 —
+    완료 직후 도착한 늦은 노드 진행률 기록이 done→running 역행을 일으켜 프론트 폴링이
+    영원히 running에 갇히는 것을 막는다. 재생성은 running_status_sql(mark_chapter_running)이
+    먼저 행을 running으로 되돌리므로 이 가드와 충돌하지 않는다.
+    result_summary/generation_model은 건드리지 않는다.
+    """
+    table = _table(schema, "lesson_generation_status")
+    return (
+        f"INSERT INTO {table} "
+        "(lesson_id, tutoring_id, status, current_node, completed_nodes, total_nodes, "
+        "progress_percent, chapter_id, generation_model, result_summary, error_message, updated_at, completed_at) "
+        "VALUES ($1,$2,'running',$3,$4,$5,$6,$7,NULL,'{}'::jsonb,NULL,NOW(),NULL) "
+        "ON CONFLICT (lesson_id) DO UPDATE SET "
+        "tutoring_id = EXCLUDED.tutoring_id, "
+        "status = EXCLUDED.status, "
+        "current_node = EXCLUDED.current_node, "
+        "completed_nodes = EXCLUDED.completed_nodes, "
+        "total_nodes = EXCLUDED.total_nodes, "
+        "progress_percent = EXCLUDED.progress_percent, "
+        "chapter_id = EXCLUDED.chapter_id, "
+        "error_message = NULL, "
+        "updated_at = NOW(), "
+        "completed_at = NULL "
+        f"WHERE {table}.status NOT IN ('done', 'failed')"
+    )
+
+
 def failure_status_sql(schema: str) -> str:
     """실패 상태를 lesson_generation_status에 남기는 upsert 쿼리다."""
     return (
         f"INSERT INTO {_table(schema, 'lesson_generation_status')} "
         "(lesson_id, tutoring_id, status, current_node, completed_nodes, total_nodes, "
         "progress_percent, chapter_id, generation_model, result_summary, error_message, updated_at, completed_at) "
-        "VALUES ($1,$2,'failed',$3,0,3,0,$4,NULL,$5::jsonb,$6,NOW(),NOW()) "
+        "VALUES ($1,$2,'failed',$3,0,5,0,$4,NULL,$5::jsonb,$6,NOW(),NOW()) "
         "ON CONFLICT (lesson_id) DO UPDATE SET "
         "status = EXCLUDED.status, "
         "current_node = EXCLUDED.current_node, "
@@ -267,6 +298,20 @@ def save_reference_book_context_sql(schema: str) -> str:
         f"    {_table(schema, 'lesson_generation_status')}.generation_context, '{{}}' ::jsonb"
         ") || jsonb_build_object('reference_book_context', ($2::jsonb)->'reference_book_context'), "
         "updated_at = NOW()"
+    )
+
+
+def generation_status_select_sql(schema: str) -> str:
+    """프론트 진행률 표시용 lesson_generation_status 단건 조회 쿼리다.
+
+    Spring 프록시(GET /tutoring/{courseId}/lessons/{chapterId}/generation-status)가
+    폴링하며, 노드 단위 진행률(progress_percent)을 사용자 대기 화면에 노출한다.
+    """
+    return (
+        "SELECT status, current_node, completed_nodes, total_nodes, "
+        "progress_percent, error_message "
+        f"FROM {_table(schema, 'lesson_generation_status')} "
+        "WHERE lesson_id = $1"
     )
 
 

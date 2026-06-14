@@ -36,6 +36,14 @@ class InferenceError(AIConnectorError):
     """
 
 
+class ServiceUnavailableError(InferenceError):
+    """벤더 일시 과부하/사용 불가(503·UNAVAILABLE·overloaded) — 503.
+
+    재시도·모델 폴백 대상임을 구분하기 위해 InferenceError 에서 분리했다.
+    InferenceError 를 잡는 기존 핸들러와의 호환을 위해 하위 클래스로 둔다.
+    """
+
+
 class TimeoutError(AIConnectorError):
     """벤더 응답 타임아웃 — 504.
 

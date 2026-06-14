@@ -21,6 +21,22 @@ from ai_connectors.text.openai_connector import OpenAIConnector
 from ai_connectors.text_schemas import ChapterAIRequest
 
 
+@pytest.fixture(autouse=True)
+def isolate_fallback_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """프로바이더 폴백 키를 모두 제거해 테스트별 명시 설정만 유효하게 한다.
+
+    dotenv import 부수효과로 주입된 OPENAI/ANTHROPIC 키가 레지스트리 래핑
+    판단을 오염시키는 것을 막는다.
+    """
+    for key in (
+        "OPENAI_API_KEY",
+        "OPENAI_FALLBACK_ENABLED",
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_SONNET_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
 # --- 텍스트 커넥터 가짜 google-genai 클라이언트 (Gemini 생성 단계만 통과시키면 충분) ---
 
 
@@ -83,6 +99,45 @@ def test_registry_returns_raw_gemini_when_fallback_disabled(
 
     assert isinstance(connector, root_gemini.GeminiGenAIConnector)
     assert not isinstance(connector, FailoverAIConnector)
+
+
+def test_registry_builds_openai_then_claude_chain(
+    monkeypatch: pytest.MonkeyPatch, patch_gemini_client: None
+) -> None:
+    """OpenAI·Claude 키가 모두 있으면 폴백 체인이 OpenAI → Claude 2단으로 구성된다."""
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+    monkeypatch.setenv("CLAUDE_SONNET_API_KEY", "claude-key")
+
+    connector = root_registry.get_text_connector("gemini_flash")
+
+    assert isinstance(connector, FailoverAIConnector)
+    assert len(connector._fallback_factories) == 2
+
+
+def test_registry_wraps_with_claude_only_when_openai_key_unset(
+    monkeypatch: pytest.MonkeyPatch, patch_gemini_client: None
+) -> None:
+    """OPENAI_API_KEY 가 없어도 Claude 키가 있으면 Claude 단독 폴백으로 감싼다."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
+
+    connector = root_registry.get_text_connector("gemini_flash")
+
+    assert isinstance(connector, FailoverAIConnector)
+    assert len(connector._fallback_factories) == 1
+
+
+def test_registry_kill_switch_excludes_openai_but_keeps_claude(
+    monkeypatch: pytest.MonkeyPatch, patch_gemini_client: None
+) -> None:
+    """OPENAI_FALLBACK_ENABLED=false 면 OpenAI 만 체인에서 빠진다."""
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+    monkeypatch.setenv("OPENAI_FALLBACK_ENABLED", "false")
+    monkeypatch.setenv("CLAUDE_SONNET_API_KEY", "claude-key")
+
+    connector = root_registry.get_text_connector("gemini_flash")
+
+    assert isinstance(connector, FailoverAIConnector)
+    assert len(connector._fallback_factories) == 1
 
 
 def test_registry_does_not_wrap_non_gemini_connector(

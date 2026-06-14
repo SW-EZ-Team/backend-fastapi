@@ -12,7 +12,7 @@ from app.modules.ChapterStudio_V1.postprocess.nh3_sanitizer import sanitize
 from app.modules.ChapterStudio_V1.postprocess.shiki import shiki_render
 from app.modules.ChapterStudio_V1.postprocess.syntax_theme import code_theme_css
 from app.modules.ChapterStudio_V1.postprocess.visual_theme import accessibility_guard_css, visual_theme_css
-from app.modules.ChapterStudio_V1.postprocess.visual_quality import ensure_visual_body
+from app.modules.ChapterStudio_V1.postprocess.visual_quality import enforce_expected_visual, ensure_visual_body
 from app.modules.ChapterStudio_V1.validators.visual_density import visual_density_warnings
 
 
@@ -25,6 +25,9 @@ class SlideInput(TypedDict):
     narration: NotRequired[str]
     focus: NotRequired[str]
     voice_script: NotRequired[str]
+    # plan-first로 확정된 visual.type — 템플릿 디자인 구조 검증에 쓴다.
+    expected_visual_type: NotRequired[str]
+    visual_data: NotRequired[dict[str, object]]
 
 
 class PostprocessResult(TypedDict):
@@ -46,6 +49,8 @@ async def postprocess_slide(
     narration: str = "",
     focus: str = "",
     voice_script: str = "",
+    expected_visual_type: str = "",
+    visual_data: dict[str, object] | None = None,
 ) -> PostprocessResult:
     """슬라이드 원본을 검증 가능한 sandbox iframe 결과로 바꾼다."""
     warnings: list[str] = []
@@ -66,6 +71,15 @@ async def postprocess_slide(
         voice_script=voice_script,
     )
     warnings.extend(gate_warnings)
+    # 템플릿 디자인 강제: 배정된 visual_type 구조(marker class)가 없으면 결정적 재렌더로 복구한다.
+    html, template_warnings = enforce_expected_visual(
+        html,
+        expected_visual_type,
+        title=title,
+        narration=narration,
+        visual_data=visual_data,
+    )
+    warnings.extend(template_warnings)
     warnings.extend(visual_density_warnings(html, category))
     iframe_html = wrap_iframe(html, css=_compose_iframe_css(raw_css))
     return {
@@ -98,6 +112,8 @@ async def _bounded(slide: SlideInput, semaphore: asyncio.Semaphore) -> Postproce
             narration=slide.get("narration", ""),
             focus=slide.get("focus", ""),
             voice_script=slide.get("voice_script", ""),
+            expected_visual_type=slide.get("expected_visual_type", ""),
+            visual_data=slide.get("visual_data"),
         )
 
 

@@ -1,6 +1,7 @@
 """최종 출력(HTML + JSON)을 생성하는 노드."""
 from __future__ import annotations
 
+import math
 import time
 
 from app.modules.ExamForge_V1.pipeline.state import ExamForgeState
@@ -18,9 +19,24 @@ from app.modules.ExamForge_V1.common.verification_status import (
 
 logger = get_logger(__name__)
 
-# 최소 완료 비율 — 이 비율 미만이면 유효한 시험으로 반환하지 않는다
+# 최소 완료 비율 — 이 비율 미만이면 graceful degradation(needs_more_source)으로 분기한다
 _MINIMUM_COMPLETION_RATIO = 0.5
 _MINIMUM_COVERAGE_SCORE = 0.5
+# 출고 floor 절대 하한 — 유효 목표가 아무리 작아도 이만큼은 확보돼야 정상 출고로 본다.
+_OUTCOME_FLOOR_ABSOLUTE = 5
+
+
+def _completion_floor(effective_target: int) -> int:
+    """정상 출고로 인정하는 최소 고유 문항 수(floor)를 계산한다.
+
+    floor = max(_OUTCOME_FLOOR_ABSOLUTE, ceil(effective_target * _MINIMUM_COMPLETION_RATIO)).
+    단 effective_target 자체가 floor보다 작으면(아주 좁은 소스) effective_target을 floor로 쓴다.
+    """
+    if effective_target <= 0:
+        return _OUTCOME_FLOOR_ABSOLUTE
+    ratio_floor = math.ceil(effective_target * _MINIMUM_COMPLETION_RATIO)
+    floor = max(_OUTCOME_FLOOR_ABSOLUTE, ratio_floor)
+    return min(floor, effective_target)
 
 
 async def format_output_node(state: ExamForgeState) -> dict:
@@ -112,13 +128,17 @@ async def format_output_node(state: ExamForgeState) -> dict:
         "exhausted" if (retry_count >= max_retries and failed_ids) else "passed"
     )
 
-    # 완료 비율 검사 — outcome과 무관하게 항상 검사해 "축소된 시험" 문제를 감지한다
-    requested_count = state.get("exam_config", {}).get("total_questions", 0)
-    # 드롭 이후의 유효 문항 수를 기준으로 비율을 계산한다
+    # 완료 비율 검사 — outcome과 무관하게 항상 검사해 "축소된 시험" 문제를 감지한다.
+    # exam_config.total_questions는 plan_exam_node에서 소스 폭 캡이 적용된 유효 목표다.
+    # 사용자에게 보여줄 원래 요청 수는 requested_question_count로 별도 보존돼 있다.
+    exam_config = state.get("exam_config", {})
+    effective_target = exam_config.get("total_questions", 0)
+    requested_count = exam_config.get("requested_question_count", effective_target)
+    # 드롭 이후의 유효(고유) 문항 수를 기준으로 비율을 계산한다
     actual_count = len(clean_questions)
     error_message = state.get("error_message")
 
-    # 유효 문항이 0개면 FAILED 콜백을 보내야 하므로 즉시 실패 처리한다
+    # 유효 문항이 0개면 FAILED 콜백을 보내야 하므로 즉시 실패 처리한다(진짜 실패).
     if actual_count == 0:
         logger.error(
             "format_output_node: 드롭 후 유효 문항 0개 — 파이프라인 실패 처리"
@@ -133,26 +153,31 @@ async def format_output_node(state: ExamForgeState) -> dict:
             "error_message": "식별자 무결한 문항이 없음 — Spring 콜백 전송 불가",
         }
 
-    if requested_count > 0 and actual_count < requested_count:
-        completion_ratio = actual_count / requested_count
-        if completion_ratio < _MINIMUM_COMPLETION_RATIO:
-            pipeline_outcome = "failed_minimum_threshold"
+    # 유효 목표 기반 출고 floor — 좁은 소스로 고유 문항이 부족한 경우(0 < unique < floor)
+    # 진짜 FAILED 대신 needs_more_source(비-FAILED)로 분기해 확보된 고유 문항을 출고하고
+    # 사용자에게 "자료 부족(요청 N / 생성 M)" 안내를 보낸다.
+    floor = _completion_floor(int(effective_target or 0))
+    if effective_target > 0 and actual_count < effective_target:
+        completion_ratio = actual_count / effective_target
+        if actual_count < floor:
+            # graceful degradation — 출고는 하되 자료 부족을 명시한다(비-FAILED).
+            pipeline_outcome = "needs_more_source"
             error_message = (
-                f"문제 생성 품질 미달: 요청 {requested_count}문항 중 "
-                f"{actual_count}문항만 통과 ({actual_count}/{requested_count}). "
-                "소스 자료를 보강하거나 난이도를 조정하세요."
+                f"자료 부족: 요청 {requested_count}문항 중 고유 {actual_count}문항만 "
+                f"생성 가능(유효 목표 {effective_target}, 출고 floor {floor}). "
+                "자료(슬라이드/챕터)를 보강하면 더 많은 문항을 생성할 수 있습니다."
             )
             logger.warning(
-                "최소 완료 비율 미달: %d/%d (%.1f%% < %.1f%%)",
-                actual_count, requested_count,
-                completion_ratio * 100, _MINIMUM_COMPLETION_RATIO * 100,
+                "출고 floor 미달(needs_more_source): 고유 %d개 < floor %d "
+                "(유효 목표 %d, 요청 %s)",
+                actual_count, floor, effective_target, requested_count,
             )
         elif completion_ratio < 1.0 and pipeline_outcome == "passed":
-            # 일부 문항 누락이지만 최소 비율 이상 — 경고만 남기고 계속 진행
+            # 일부 문항 누락이지만 floor 이상 — 부분 완료로 출고한다
             pipeline_outcome = "passed_partial"
             logger.info(
                 "부분 완료: %d/%d (%.1f%%) — passed_partial로 표시",
-                actual_count, requested_count, completion_ratio * 100,
+                actual_count, effective_target, completion_ratio * 100,
             )
     if pipeline_outcome == "passed" and _is_low_coverage(quality_metrics, topic_weights):
         pipeline_outcome = "failed_quality_gate"
@@ -164,10 +189,33 @@ async def format_output_node(state: ExamForgeState) -> dict:
         pipeline_outcome = "failed_quality_gate"
         error_message = "프로그래밍 과목인데 코드 예제 문항이 없어 배포 품질 기준에 미달합니다."
 
-    # "failed*"/"exhausted" → "failed", "passed_partial" → "partial", 그 외 → "complete"
+    # 품질 게이트(커버리지/코드부재)는 1차적으로 "재시도해서 더 나은 문항을 만들라"는 신호다.
+    # 따라서 재시도 여유가 있으면 failed_quality_gate를 유지해 route_after_validation이
+    # 재생성하도록 둔다. 단 재시도가 소진된 터미널 케이스에서는, floor 이상 유효 문항이
+    # 확보돼 있으면 전체를 0으로 차단(FAILED)하지 말고 확보된 시험을 passed_partial로 출고한다
+    # (사용자에게 빈 결과보다 부분 시험이 낫다. 예: 스프링부트 개념 문항은 코드 스니펫이 적어
+    #  _missing_programming_code에 걸리지만 18/20을 0으로 버리는 건 과도하다).
+    # degrade 임계는 상대 floor가 아니라 "실질적 시험" 절대 하한(_OUTCOME_FLOOR_ABSOLUTE)으로 둔다.
+    # → 1~2문항짜리 빈약한 시험은 품질게이트로 막되(예: 코드 1문항 Rust 시험),
+    #   18/20처럼 충분한 시험은 코드/커버리지 경고가 있어도 출고한다.
+    retries_exhausted = retry_count >= max_retries
+    if (
+        pipeline_outcome == "failed_quality_gate"
+        and retries_exhausted
+        and actual_count >= _OUTCOME_FLOOR_ABSOLUTE
+    ):
+        logger.warning(
+            "품질 게이트 미달이나 재시도 소진+유효 문항 %d개(≥%d) — "
+            "FAILED 차단 대신 passed_partial로 출고 (%s)",
+            actual_count, _OUTCOME_FLOOR_ABSOLUTE, error_message,
+        )
+        pipeline_outcome = "passed_partial"
+
+    # "failed*"/"exhausted" → "failed", "passed_partial"/"needs_more_source" → "partial",
+    # 그 외 → "complete". needs_more_source는 비-FAILED(부분 출고)이므로 partial로 둔다.
     if pipeline_outcome.startswith("failed") or pipeline_outcome == "exhausted":
         final_status = "failed"
-    elif pipeline_outcome == "passed_partial":
+    elif pipeline_outcome in ("passed_partial", "needs_more_source"):
         final_status = "partial"
     else:
         final_status = "complete"

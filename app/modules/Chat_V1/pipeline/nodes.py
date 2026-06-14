@@ -50,7 +50,7 @@ def format_response(state: ChatState) -> ChatState:
 
     처리 순서:
       1) strip_thinking — Qwen 류의 <think> reasoning 이 채팅에 노출되지 않게 제거.
-      2) 환각 경량 가드 — 강의 자료와 전혀 겹치지 않으면 거절문으로 폴백.
+      2) 범위 가드 — 강의 자료와 안 겹치는 답변은 유지하되 끝에 범위 밖 안내문만 덧붙인다.
       3) 슬라이드 인용 추출 — slide_count 상한까지 검증해 없는 슬라이드 참조를 버린다.
     오류 상태이면 answer에 안내 문구를 설정해 사용자가 빈 응답을 받지 않도록 한다.
     """
@@ -73,12 +73,12 @@ def format_response(state: ChatState) -> ChatState:
     # 1) reasoning 블록 제거 — 모델이 바뀌어도 <think> 가 답변에 새지 않게 한다.
     answer = strip_thinking(raw)
 
-    # 2) 환각 경량 가드 — 강의 키워드와 전혀 매칭 안 되고 거절문도 아니면 폴백.
+    # 2) 범위 가드 — 강의 키워드와 매칭 안 되면 답변은 유지하고 범위 밖 안내문만 덧붙인다.
     answer, guarded = apply_hallucination_guard(
         answer, state.get("lecture_keywords", [])
     )
 
-    # 3) 슬라이드 인용 추출 + 상한 검증. 폴백된 거절문엔 인용이 없으므로 자연히 [].
+    # 3) 슬라이드 인용 추출 + 상한 검증. 범위 밖 답변엔 인용이 없으므로 자연히 [].
     slide_count = state.get("slide_count")
     refs = extract_referenced_slides(answer, slide_count)
     status = "guarded" if guarded else "done"

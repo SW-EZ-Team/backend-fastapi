@@ -23,6 +23,16 @@ _SERVER_CLASS = "Qwen3TTSServer"
 _REF_AUDIO_BYTES = b"ref-audio-bytes"
 
 
+@pytest.fixture(autouse=True)
+def force_native_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """QWEN3_TTS_MODAL_URL(.env dotenv 주입)을 제거해 네이티브 경로를 강제한다.
+
+    이 파일은 remote.aio 네이티브 호출 동작을 검증하므로, URL 이 설정되면
+    HTTP 경로로 분기해 실 네트워크 호출이 발생한다.
+    """
+    monkeypatch.delenv("QWEN3_TTS_MODAL_URL", raising=False)
+
+
 class _FakeRemote:
     def __init__(self, aio: AsyncMock) -> None:
         self.aio = aio

@@ -11,7 +11,7 @@ from ai_connectors.registry import get_tts_connector as get_root_tts_connector
 from ai_connectors.tts_schemas import TTSRequest, TTSResponse
 
 from app.modules.ObjectStorage_V1 import (
-    ObjectStorageConfigError, ObjectStorageUploadError, put_object, s3_enabled
+    ObjectStorageConfigError, ObjectStorageUploadError, put_object, s3_enabled, to_internal_url
 )
 from app.modules.ChapterStudio_V1.ai_connectors.base import TTSConnector
 from app.modules.ChapterStudio_V1.ai_connectors.registry import get_tts_connector
@@ -139,8 +139,11 @@ async def _synthesize_by_plan(script_text: str, plan: TtsPlan) -> TTSResponse:
 
 async def _load_ref_audio(ref_source: str) -> bytes:
     if ref_source.startswith(("http://", "https://")):
+        # 브라우저용 공개 URL(예: http://localhost:9000/...)은 컨테이너 안에서 닿지 않으므로
+        # S3 설정 기준 내부 endpoint URL(예: http://minio:9000/...)로 변환해 다운로드한다.
+        resolved = to_internal_url(ref_source)
         async with httpx.AsyncClient(timeout=_REF_DOWNLOAD_TIMEOUT_SEC) as client:
-            response = await client.get(ref_source)
+            response = await client.get(resolved)
             response.raise_for_status()
             return response.content
     return Path(ref_source).expanduser().read_bytes()

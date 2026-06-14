@@ -24,6 +24,7 @@ from app.modules.ChapterStudio_V1.db.persistence import persist_chapter_state
 from app.modules.ChapterStudio_V1.db.persistence_status import (
     mark_audio_backfill_pending,
     mark_chapter_failed,
+    mark_chapter_progress,
     mark_chapter_running,
 )
 from app.modules.ChapterStudio_V1.db.weakness_aggregator import aggregate_weak_points
@@ -34,6 +35,18 @@ from common.db import get_connection
 _LOG = logging.getLogger(__name__)
 _SPRING_COMMIT_RETRY_ATTEMPTS = 5
 _SPRING_COMMIT_RETRY_DELAY_SEC = 1.0
+
+# 노드 완료 → (완료 노드 수, 진행률%) 매핑 — persist 완료(100%)는 status_sql이 기록한다.
+_NODE_PROGRESS: dict[str, tuple[int, int]] = {
+    "prepare_context": (1, 10),
+    "generate_lesson": (2, 55),
+    "content_verify": (3, 70),
+    "synthesize_audio": (4, 85),
+    "postprocess_slides": (5, 95),
+}
+_TOTAL_NODES = 5
+# GenerationContext.weak_points 필드 상한(max_length=240)과 동일하게 유지한다.
+_WEAK_POINTS_MAX_CHARS = 240
 
 
 class ExecuteConnection(Protocol):
@@ -60,7 +73,7 @@ async def generate_lessons_for_course(course_id: str) -> None:
     # decommission이 필요하면 CHAPTERSTUDIO_MODAL_TEARDOWN=true를 설정하고 수동 실행한다.
     done = 0
     for lesson_id in lesson_ids:
-        if await _generate_one(lesson_id):
+        if await _generate_one(course_id, lesson_id):
             done += 1
     _LOG.info("[lessons] 완료 — courseId=%s, 성공 %d/%d", course_id, done, len(lesson_ids))
 
@@ -92,13 +105,19 @@ async def _course_lesson_ids_after_spring_commit(course_id: str) -> list[str]:
     return []
 
 
-async def _generate_one(lesson_id: str) -> bool:
-    """강의 1개를 생성·저장하고 public.chapter 상태를 AVAILABLE로 갱신한다."""
+async def _generate_one(course_id: str, lesson_id: str) -> bool:
+    """강의 1개를 생성·저장하고 public.chapter 상태를 AVAILABLE로 갱신한다.
+
+    전체 코스 일괄 생성 경로에서도 단건 경로와 동일하게 이전 강의 약점을 주입한다.
+    """
     try:
+        weak_points = await _aggregate_weak_points_safely(course_id, lesson_id)
         context = await _load_generation_context_after_spring_commit(lesson_id)
         if context is None:
             _LOG.error("[lessons] 강의 생성 입력 없음 — lesson_id=%s", lesson_id)
             return False
+        if weak_points:
+            context = context.model_copy(update={"weak_points": weak_points})
         return await _generate_loaded_context(context)
     except Exception as exc:
         _LOG.error("[lessons] 강의 실패 — lesson_id=%s, stage=load_generation_context, error=%s", lesson_id, exc)
@@ -124,15 +143,11 @@ async def generate_lesson_for_chapter(
 ) -> bool:
     """완료된 이전 강의 약점을 주입해 강의 1개를 progressive로 생성한다."""
     try:
-        async with get_connection() as conn:
-            weak_points = await aggregate_weak_points(conn, course_id, lesson_id)
+        weak_points = await _aggregate_weak_points_safely(course_id, lesson_id)
         context = await _load_generation_context_after_spring_commit(lesson_id)
         if context is None:
             _LOG.error("[lessons] 단건 강의 생성 입력 없음 — courseId=%s, lessonId=%s", course_id, lesson_id)
             return False
-        # 진단 우선: 무거운 생성에 들어가기 전에 진행중(running) 상태 행을 먼저 남긴다.
-        # 중간에 조용히 죽어도 0행이 아니라 running/failed 행이 남아 실패가 추적된다.
-        await _record_generation_running(context)
         personalized = _personalized_context(
             context,
             weak_points=weak_points,
@@ -182,9 +197,15 @@ async def _generate_loaded_context(context: GenerationContext) -> bool:
     # PDF 소스 강의에서 참고도서 컨텍스트가 아직 없으면 Qdrant에서 자동 주입한다
     context = await inject_reference_context_if_pdf(context)
     chapter_id = _chapter_id(context.lesson_id)
+    # 진단 우선: 무거운 생성에 들어가기 전에 진행중(running) 상태 행을 먼저 남긴다.
+    # 단건·전체 코스 두 경로 모두 여기서 공통 처리한다(중간에 죽어도 running 행이 남는다).
+    await _record_generation_running(context)
     stage = "generate_chapter_state"
     try:
-        state = await generate_chapter_state(context.to_generation_input())
+        state = await generate_chapter_state(
+            context.to_generation_input(),
+            on_node_complete=_progress_recorder(context, chapter_id),
+        )
         stage = "state_to_response"
         response = state_to_response(state, chapter_id)
         stage = "persist_chapter_state"
@@ -200,6 +221,55 @@ async def _generate_loaded_context(context: GenerationContext) -> bool:
         _LOG.exception("[lessons] 강의 생성 실패 — lessonId=%s, stage=%s", context.lesson_id, stage)
         await _record_generation_failure(context, chapter_id, stage, exc)
         return False
+
+
+async def _aggregate_weak_points_safely(course_id: str, lesson_id: str) -> str:
+    """이전 강의·모의고사 약점을 집계한다. 집계 실패가 강의 생성을 막지 않게 한다."""
+    try:
+        async with get_connection() as conn:
+            weak_points = await aggregate_weak_points(conn, course_id, lesson_id)
+    except Exception as exc:
+        _LOG.warning("[lessons] 약점 집계 실패 — courseId=%s, lessonId=%s, error=%s", course_id, lesson_id, exc)
+        return ""
+    weak_points = weak_points.strip()[:_WEAK_POINTS_MAX_CHARS]
+    if weak_points:
+        # 운영 확인용: 약점이 실제 프롬프트에 반영되는 강의를 로그로 추적할 수 있게 한다.
+        _LOG.info("[lessons] 약점 반영 — courseId=%s, lessonId=%s, weak_points=%s", course_id, lesson_id, weak_points)
+    return weak_points
+
+
+def _progress_recorder(context: GenerationContext, chapter_id: str):
+    """노드 완료마다 진행률을 짧은 독립 커넥션으로 기록하는 콜백을 만든다.
+
+    진행률 기록 실패가 생성 자체를 막아선 안 되므로 예외는 로그만 남기고 삼킨다.
+    """
+
+    async def record(node_name: str) -> None:
+        progress = _NODE_PROGRESS.get(node_name)
+        if progress is None:
+            return
+        completed_nodes, progress_percent = progress
+        try:
+            async with get_connection() as conn:
+                await mark_chapter_progress(
+                    conn,
+                    context,
+                    chapter_id,
+                    current_node=node_name,
+                    completed_nodes=completed_nodes,
+                    total_nodes=_TOTAL_NODES,
+                    progress_percent=progress_percent,
+                )
+            _LOG.info(
+                "[lessons] 진행률 기록 — lessonId=%s, node=%s, %d%%",
+                context.lesson_id,
+                node_name,
+                progress_percent,
+            )
+        except Exception:
+            _LOG.exception("[lessons] 진행률 기록 실패 — lessonId=%s, node=%s", context.lesson_id, node_name)
+
+    return record
 
 
 async def _backfill_audio_when_needed(context: GenerationContext) -> None:

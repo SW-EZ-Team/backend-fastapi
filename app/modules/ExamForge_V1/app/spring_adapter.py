@@ -152,8 +152,8 @@ def _build_forge_request(
         req.difficulty.lower(), _DIFFICULTY_DISTRIBUTIONS["medium"]
     )
     config = ExamConfig(
-        # ExamForge는 최소 5문항을 요구한다 — Spring이 5 미만을 보내도 실패하지 않도록 보정한다.
-        total_questions=max(5, req.questionCount),
+        # 모의고사 최소 20문항 정책 — Spring이 더 작게 보내도 클램프한다(plan_exam_node와 동일 기준).
+        total_questions=max(20, req.questionCount),
         time_limit_minutes=req.timeLimit or 60,
         locale="ko",
         category="korean",

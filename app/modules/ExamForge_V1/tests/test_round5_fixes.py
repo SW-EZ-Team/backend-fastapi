@@ -296,12 +296,23 @@ class TestP1_3_DifficultyDistributionSum:
 
 
 class TestP1_4_QuestionTypes:
-    """P1-4: 빈 문항 유형 차단 테스트."""
+    """P1-4: 빈 문항 유형 처리 테스트 (자동 분배 계약)."""
 
-    def test_empty_question_types_rejected(self) -> None:
-        """문항 유형이 비면 계획 단계 0 나눗셈 전에 거부된다."""
-        with pytest.raises(ValidationError):
-            ExamConfig(question_types=[])
+    def test_empty_question_types_resolves_to_default_mix(self) -> None:
+        """빈 유형 목록은 거부 대신 기본 혼합 유형 자동 분배로 수렴한다.
+
+        (변경된 계약: 최종모의고사는 question_types를 비워 보내고
+        plan_exam_node._question_types가 기본 혼합 유형으로 분배한다 — 0 나눗셈 없음)
+        """
+        from app.modules.ExamForge_V1.pipeline.nodes.plan_exam_node import (
+            _DEFAULT_QUESTION_TYPES,
+            _question_types,
+        )
+
+        config = ExamConfig(question_types=[])
+        resolved = _question_types(config.model_dump())
+        assert resolved == list(_DEFAULT_QUESTION_TYPES)
+        assert len(resolved) >= 2  # 빈 목록이 그대로 흘러가지 않음을 보장
 
 
 class TestP1_6_ShrinkingExam:

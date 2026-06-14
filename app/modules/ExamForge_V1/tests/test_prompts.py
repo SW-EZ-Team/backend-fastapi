@@ -54,6 +54,33 @@ class TestSystemPrompts:
         assert "오답 보기마다" in prompt or "오개념 라벨" in prompt
         assert "괄호로" in prompt
 
+    def test_korean_answer_concise_high_signal_rule(self) -> None:
+        """해설이 간결·고신호 지침과 길이채우기 금지·전제 재진술 금지를 담는다(통찰형 개선)."""
+        prompt = get_answer_system("ko")
+        # 길이 채우기 금지 메타 지침
+        assert "글자수 채우기 금지" in prompt
+        # 전제(보기·지문) 재진술 금지 → 원리/메커니즘 설명 요구
+        assert "재진술" in prompt
+        assert "메커니즘" in prompt or "원리" in prompt
+        # 학습 자료 밖 일반 상식 정당화 금지
+        assert "일반 상식 정당화 금지" in prompt
+        # takeaway(핵심 요약 한 줄) 요소 유지
+        assert "takeaway" in prompt
+        # 모든 오답을 장황히 나열하지 않고 가장 함정인 오답만 짚는다
+        assert "가장 함정인 오답" in prompt
+        # 과거의 장황한 길이 목표(400~800자)는 더 이상 강제하지 않는다
+        assert "400~800" not in prompt
+
+    def test_english_answer_concise_high_signal_rule(self) -> None:
+        """영문 정답 프롬프트도 간결화·메타 금지 규칙이 ko와 일관되게 포함된다."""
+        prompt = get_answer_system("en")
+        assert "Chain-of-Thought" in prompt
+        assert "Do not pad for length" in prompt
+        assert "No restatement" in prompt
+        assert "Takeaway" in prompt or "takeaway" in prompt
+        # 모든 오답 나열 대신 가장 함정인 1~2개만
+        assert "most tempting distractors" in prompt
+
     def test_korean_distractor_balance_rule(self) -> None:
         """보기 균형(정답 단서 제거) 규칙이 포함된다(갭2-E6)."""
         prompt = get_distractor_system("ko")

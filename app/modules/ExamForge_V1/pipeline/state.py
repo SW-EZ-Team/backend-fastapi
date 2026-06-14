@@ -49,10 +49,13 @@ class ExamForgeState(TypedDict, total=False):
 
     pipeline_outcome 값:
         - "passed"                   : 품질 검증 통과, 정상 완료
-        - "passed_partial"           : 일부 문제 제외 후 통과
+        - "passed_partial"           : 일부 문제 제외 후 통과(출고 floor 이상)
+        - "needs_more_source"        : 자료 부족으로 floor 미만 — 확보된 고유 문항은 출고하되
+                                       "자료 부족(요청 N / 생성 M)"을 안내한다(비-FAILED).
         - "exhausted"                : 최대 재시도 소진, 최선 결과 반환
-        - "failed_minimum_threshold" : 최소 문제 수 미달
+        - "failed_no_valid_questions": 식별자 무결 문항 0개 — 진짜 실패
         - "failed_quality_gate"      : 품질 게이트 미통과
+        - "failed_html_generation"   : HTML 생성 실패 — 배포 불가
     """
 
     # 입력
@@ -121,3 +124,7 @@ class ExamForgeState(TypedDict, total=False):
     timings: dict
     # 파이프라인 종료 사유 — 상단 docstring 참조
     pipeline_outcome: str
+    # 출처 grounding 저하 플래그 — course 본문이 hard-gate 미달이라 subject/topic 스텁으로
+    # 폴백했는지 여부. True면 "강의 기반"이 아닌 일반론 출제다(생성은 진행, 추적만 한다).
+    # mock_async_router가 initial_state에 실어 final_state까지 그대로 전달한다.
+    grounding_degraded: bool

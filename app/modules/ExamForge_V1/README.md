@@ -118,6 +118,9 @@ parse_source → plan_exam → generate_questions → generate_distractors
 - **오답 재작성 (`generate_distractors_node`)**: 같은 과목·오개념 기반 오답지를 생성한다. `EXAMFORGE_DISTRACTOR_REWRITE` 플래그로 켜고 끈다. 코드 헤비 선택지(줄바꿈·언어 키워드 포함)는 JSON 파싱 위험이 있어 원본 보존
 - **정답 계약 불변**: 교정·재작성 과정에서 `question_id`, `template_id`, `draft_id` 등 식별자·메타데이터는 절대 변경하지 않는다. content 필드(`stem`, `options`, `correct_answer`, `explanation` 등)만 허용 화이트리스트로 관리
 - **해설 오개념 라벨**: 퀴즈 해설에 오답별 오개념을 명시적으로 기술하도록 프롬프트가 요구한다
+- **출처 관련성 게이트 (`quality/relevance_gate.py`)**: 출처 발췌 + 주제 키워드 어휘와 토큰 겹침이 없는 일반 상식 의심 문항을 결정론적으로 탈락시켜 재시도 경로로 보낸다. 출처 어휘가 빈약하면(스텁 source_text) 오탐 방지를 위해 자체 생략된다
+- **난이도 발현 게이트 (`quality/difficulty_scorer.check_difficulty_manifestation`)**: 난이도 4~5(분석/평가) 문항이 "~란 무엇인가" 류 정의 회상형 발문으로 퇴화하면 결함 처리한다. 코드 스니펫·코드 포함 발문은 추적 문항이므로 검사하지 않는다. 생성 측에서는 blueprint 계약의 난이도별 조작적 요구사항(비교/추적/엣지케이스 분석)이 쌍으로 동작한다
+- **비동기 생성 출처 그라운딩**: `/api/exam-forge/mock/generate-async` 경로는 courseId로 `public.chapter`+`public.slide` 본문을 조립해 source_text로 사용한다(레거시 `/api/mock-exams/generate`와 동일 수준). DB 실패·본문 부재 시에만 subject/topic 스텁으로 폴백한다
 
 ## 지원 문제 유형
 
@@ -215,6 +218,16 @@ Spring `submitExam`이 채점 끝난 결과를 보내 동기 호출하면, 활�
 
 총평은 틀린 보기 텍스트를 복원해 인용하고, 오개념과 다음 학습 연습을 구조화해 제시한다.
 
+응답 JSON에는 `weakTopics`(약점 주제 목록)도 함께 담긴다 — 총평 마지막의 `약점주제: a | b | c` 줄을 파싱한 결과이며, ChapterStudio 약점 집계가 읽는다.
+
+#### 출력 정제 (사고/메타 누출 차단, 2026-06-13 장애 대응)
+
+일부 텍스트 모델이 한국어 총평 본문 앞뒤로 자기 사고/스크래치패드를 누출했다(예: `Total is around 750 characters`, `**Trimming the Draft:**` 같은 글자수 계산·초안 라벨). 이를 두 겹으로 막는다.
+
+1. **프롬프트 차단** (`_analysis_prompt.py`): system/instruction 양쪽에서 사고 과정·글자수 계산·초안/Trimming 메타·작성 단계 라벨·영어 메타 발화를 명시적으로 금지하고, 약점주제 줄을 필수로 못 박는다.
+2. **출력 정제** (`_analysis_sanitize.sanitize_analysis`): 모델 응답에서 `<think>` 블록과 영문 메타 라인(글자수 계산·초안 라벨·`**...:**` 작성단계 헤더)을 줄 단위 휴리스틱으로 제거한다. 한국어가 한 글자라도 있는 줄과 `약점주제:` 계약 줄은 무조건 보존해 본문 손실을 막는다. 정제 → `split_weak_topics` 순으로 본문/약점주제를 분리한다.
+
 #### 폴백 정책
 
-커넥터 호출 실패·빈 응답 시 200으로 폴백 안내문을 반환한다. Spring 흐름을 끊지 않는 것이 우선이다. 실패 사유는 로깅한다.
+- 커넥터 호출 실패·빈 응답 시 200으로 폴백 안내문을 반환한다. Spring 흐름을 끊지 않는 것이 우선이다. 실패 사유는 로깅한다.
+- 정제 후 본문이 비면(메타만 누출된 극단 케이스) 안전 폴백 문구(`총평 본문을 생성하지 못했어요. ...`)로 대체한다.

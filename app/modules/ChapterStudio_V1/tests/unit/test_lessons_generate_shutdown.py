@@ -37,7 +37,7 @@ async def test_batch_does_not_call_shutdown_after_lessons(monkeypatch: pytest.Mo
     async def fake_ids(course_id: str) -> list[str]:
         return ["l1", "l2", "l3"]
 
-    async def fake_generate_one(lesson_id: str) -> bool:
+    async def fake_generate_one(course_id: str, lesson_id: str) -> bool:
         return True
 
     # shutdown_text_connector가 모듈에 없으므로 패치 대상도 없다.
@@ -59,7 +59,7 @@ async def test_lesson_failure_does_not_stop_remaining_lessons(monkeypatch: pytes
     async def fake_ids(course_id: str) -> list[str]:
         return ["l1", "l2", "l3"]
 
-    async def fake_generate_one(lesson_id: str) -> bool:
+    async def fake_generate_one(course_id: str, lesson_id: str) -> bool:
         processed.append(lesson_id)
         return lesson_id != "l2"  # l2만 실패(False 반환)
 
@@ -79,7 +79,7 @@ async def test_empty_course_returns_early_without_processing(monkeypatch: pytest
     async def fake_ids(course_id: str) -> list[str]:
         return []
 
-    async def fake_generate_one(lesson_id: str) -> bool:
+    async def fake_generate_one(course_id: str, lesson_id: str) -> bool:
         generate_called["count"] += 1
         return True
 
