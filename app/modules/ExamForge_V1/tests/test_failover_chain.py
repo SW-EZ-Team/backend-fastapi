@@ -125,6 +125,25 @@ async def test_all_stages_fail_raises_last_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_skips_exhausted_gemini_primary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """gemini_flash 소진 기록이 있으면 primary를 건너뛰고 폴백 체인부터 시도한다."""
+    from app.modules.ExamForge_V1.common import _provider_health as health
+
+    health.reset()
+    health.mark_exhausted("gemini_flash", reason="billing depleted", ttl_sec=600)
+    gemini = _StubConnector("gemini_flash")
+    claude = _StubConnector("claude_sonnet")
+    chain = ai_bridge._OpenAIFailoverConnector(gemini, fallback_factories=[lambda: claude])
+
+    response = await chain.generate(_req())
+
+    assert response.text == "claude_sonnet 응답"
+    assert gemini.call_count == 0
+    assert claude.call_count == 1
+    health.reset()
+
+
+@pytest.mark.asyncio
 async def test_single_factory_signature_still_works() -> None:
     """기존 단일 fallback_factory 시그니처는 길이 1짜리 체인으로 동작한다(하위 호환)."""
     gemini = _StubConnector("gemini_flash", error=RateLimitError("429"))
@@ -155,6 +174,17 @@ def test_stage_factories_include_openai_then_claude(monkeypatch: pytest.MonkeyPa
 
 def test_stage_factories_claude_only_when_openai_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
+
+    factories = ai_bridge._fallback_stage_factories()
+
+    assert len(factories) == 1
+    connector = factories[0]()
+    assert getattr(connector, "name", "") == "claude_sonnet"
+
+
+def test_stage_factories_claude_from_sonnet_key_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ANTHROPIC_API_KEY 없이 CLAUDE_SONNET_API_KEY 만 있어도 Claude 폴백이 포함된다."""
+    monkeypatch.setenv("CLAUDE_SONNET_API_KEY", "claude-only-key")
 
     factories = ai_bridge._fallback_stage_factories()
 

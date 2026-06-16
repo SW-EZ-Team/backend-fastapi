@@ -55,7 +55,8 @@ class OpenAIConnector:
         api_key = openai_api_key()
         if api_key is None:
             raise AuthError(f"{connector_name}: OPENAI_API_KEY 필요")
-        self._client = AsyncOpenAI(api_key=api_key)
+        # 폴백 경로에서는 SDK 자동 재시도(수 초 대기)가 Claude 전환을 지연시킨다.
+        self._client = AsyncOpenAI(api_key=api_key, max_retries=0)
         self._model = openai_text_model()
         self.name = connector_name
 
