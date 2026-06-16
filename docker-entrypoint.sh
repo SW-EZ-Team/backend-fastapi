@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# API 컨테이너 기동 시 ChapterStudio qwen27b Modal 앱 자동 배포 보장
+# API 컨테이너 기동 시 연결된 Modal 앱 자동 배포 보장
 # celery worker/beat 또는 Modal 토큰 미설정 시 ensure-deploy는 스킵한다.
 
 # ensure-deploy 실패가 컨테이너 기동을 막지 않도록 set -e는 사용하지 않는다.
@@ -25,9 +25,22 @@ _should_run_modal_ensure_deploy() {
   return 0
 }
 
-_run_modal_ensure_deploy() {
-  local app_path="${MODAL_DEPLOY_APP_PATH:-app/modules/ChapterStudio_V1/deploy/modal_app.py}"
-  local timeout_sec="${MODAL_DEPLOY_TIMEOUT:-180}"
+_resolve_modal_deploy_paths() {
+  # 우선순위: MODAL_DEPLOY_APP_PATHS → MODAL_DEPLOY_APP_PATH → 기본 3개
+  if [[ -n "${MODAL_DEPLOY_APP_PATHS:-}" ]]; then
+    echo "${MODAL_DEPLOY_APP_PATHS}"
+    return
+  fi
+  if [[ -n "${MODAL_DEPLOY_APP_PATH:-}" ]]; then
+    echo "${MODAL_DEPLOY_APP_PATH}"
+    return
+  fi
+  echo "app/modules/ChapterStudio_V1/deploy/modal_app.py app/modules/ChapterStudio_V1/deploy/modal_kanana_app.py app/modules/TTS_V2/deploy/modal_tts_app.py"
+}
+
+_deploy_single_modal_app() {
+  local app_path="$1"
+  local timeout_sec="$2"
 
   if command -v timeout >/dev/null 2>&1; then
     if timeout "${timeout_sec}" modal deploy "${app_path}"; then
@@ -42,6 +55,16 @@ _run_modal_ensure_deploy() {
       echo "[modal-ensure-deploy] 실패: ${app_path} — 서비스는 폴백 모델로 계속 기동합니다."
     fi
   fi
+}
+
+_run_modal_ensure_deploy() {
+  local paths timeout_sec app_path
+  paths="$(_resolve_modal_deploy_paths)"
+  timeout_sec="${MODAL_DEPLOY_TIMEOUT:-180}"
+
+  for app_path in ${paths}; do
+    _deploy_single_modal_app "${app_path}" "${timeout_sec}" || true
+  done
 }
 
 if _should_run_modal_ensure_deploy "${1:-}"; then
