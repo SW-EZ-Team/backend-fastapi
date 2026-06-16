@@ -37,6 +37,8 @@ def fake_connector(monkeypatch: pytest.MonkeyPatch) -> None:
     registry.clear_cache()
     get_compiled_graph.cache_clear()
     monkeypatch.setitem(registry._REGISTRY, "unit_fake", FakeTextConnector)
+    # 로컬 .env의 LECTURE_TEXT_MODEL이 ACTIVE_TEXT_MODEL보다 우선해 가짜 커넥터를 덮어쓰지 못하게 한다.
+    monkeypatch.delenv("LECTURE_TEXT_MODEL", raising=False)
     monkeypatch.setenv("ACTIVE_TEXT_MODEL", "unit_fake")
     # 이 테스트는 그래프 배선만 검증한다. self-repair·content-verify는 각 전용 테스트
     # (test_generate_repair / test_content_verify)에서 다루므로 여기서는 끈다.

@@ -139,11 +139,13 @@ def modal_token_secret() -> str | None:
 
 
 def active_text_model() -> str:
+    # 기본값은 Modal 1순위 + Claude 폴백(qwen27b_sonnet_fallback).
+    # qwen27b_modal은 폴백 없는 Modal 단독이라 운영 기본값으로 쓰지 않는다.
     return (
         _optional_value("LECTURE_TEXT_MODEL")
         or _optional_value("ACTIVE_TEXT_MODEL")
         or _optional_value("AI_MODEL")
-        or "qwen27b_modal"
+        or "qwen27b_sonnet_fallback"
     )
 
 
