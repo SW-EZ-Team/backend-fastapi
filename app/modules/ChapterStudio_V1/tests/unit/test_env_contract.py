@@ -46,7 +46,7 @@ def test_module_env_example_uses_registered_text_connector() -> None:
     env = _module_env()
 
     assert _value_for(env, "AI_MODEL") == "qwen27b_modal"
-    assert _value_for(env, "ACTIVE_TEXT_MODEL") == "qwen27b_modal"
+    assert _value_for(env, "ACTIVE_TEXT_MODEL") == "qwen27b_sonnet_fallback"
     assert _value_for(env, "EXAMFORGE_VERIFICATION_ADVISORY") == "false"
 
 
