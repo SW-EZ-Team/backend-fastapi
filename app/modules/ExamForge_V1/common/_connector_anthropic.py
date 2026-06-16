@@ -4,7 +4,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 
-from anthropic import AsyncAnthropic, RateLimitError, APIStatusError
+from anthropic import APIStatusError, AsyncAnthropic
+from anthropic import RateLimitError as AnthropicRateLimitError
 
 from app.modules.ExamForge_V1.common._ai_schemas import (
     AIConnector,
@@ -13,8 +14,8 @@ from app.modules.ExamForge_V1.common._ai_schemas import (
     LLMBudgetCounter,
     current_budget,
 )
-from app.modules.ExamForge_V1.common.config import anthropic_api_key
-from app.modules.ExamForge_V1.common.errors import ConnectorError
+from app.modules.ExamForge_V1.common.config import claude_sonnet_api_key
+from app.modules.ExamForge_V1.common.errors import ConnectorError, RateLimitError
 
 # 재시도 설정
 _MAX_RETRIES = 3
@@ -37,9 +38,11 @@ class AnthropicConnector:
     """Anthropic Claude API를 통해 텍스트를 생성하는 커넥터."""
 
     def __init__(self, model_id: str, connector_name: str) -> None:
-        key = anthropic_api_key()
+        key = claude_sonnet_api_key()
         if not key:
-            raise RuntimeError(f"{connector_name}: ANTHROPIC_API_KEY 필요")
+            raise RuntimeError(
+                f"{connector_name}: CLAUDE_SONNET_API_KEY 또는 ANTHROPIC_API_KEY 필요"
+            )
         self._client = AsyncAnthropic(api_key=key)
         self._model = model_id
         self.name = connector_name
@@ -62,7 +65,7 @@ class AnthropicConnector:
                 if budget is not None:
                     budget.increment()
                 return result
-            except RateLimitError as e:
+            except AnthropicRateLimitError as e:
                 last_error = e
                 if attempt < _MAX_RETRIES - 1:
                     await asyncio.sleep(_RETRY_DELAYS[attempt])
@@ -85,7 +88,9 @@ class AnthropicConnector:
                 last_error = e
                 if attempt < _MAX_RETRIES - 1:
                     await asyncio.sleep(_RETRY_DELAYS[attempt])
-        raise RuntimeError(f"API 호출 {_MAX_RETRIES}회 실패: {last_error}")
+        if isinstance(last_error, AnthropicRateLimitError):
+            raise RateLimitError(f"API 호출 {_MAX_RETRIES}회 실패: {last_error}") from last_error
+        raise ConnectorError(f"API 호출 {_MAX_RETRIES}회 실패: {last_error}") from last_error
 
     async def _call_api(self, req: ChapterAIRequest) -> ChapterAIResponse:
         """단일 Anthropic API 호출을 수행한다."""

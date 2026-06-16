@@ -29,7 +29,7 @@ from app.modules.ExamForge_V1.common.config import (
     active_planner_model,
     active_text_model,
     active_verifier_model,
-    anthropic_api_key,
+    claude_sonnet_api_key,
     openai_api_key,
     openai_fallback_enabled,
 )
@@ -211,16 +211,35 @@ class _OpenAIFailoverConnector:
         req: ChapterAIRequest,
         budget: LLMBudgetCounter | None = None,
     ) -> ChapterAIResponse:
-        try:
-            return await self._primary.generate(req, budget)
-        except ConnectorError as exc:
-            last_error: Exception = exc
+        from app.modules.ExamForge_V1.common import _provider_health as health
+
+        last_error: Exception = ConnectorError("폴백 체인 진입")
+        primary_name = getattr(self._primary, "name", "")
+        skip_primary = primary_name == "gemini_flash" and health.is_exhausted("gemini_flash")
+
+        if not skip_primary:
+            try:
+                return await self._primary.generate(req, budget)
+            except ConnectorError as exc:
+                last_error = exc
+        else:
+            _LOG.info(
+                "%s: gemini_flash 소진 기록 — OpenAI→Claude 폴백 체인으로 바로 진행",
+                self.name,
+            )
+
         for index in range(len(self._fallback_factories)):
             connector = self._connector_at(index)
             if connector is None:
                 continue
+            stage_name = getattr(connector, "name", "fallback")
+            if health.is_exhausted(stage_name):
+                _LOG.debug("%s: 폴백 %s 소진 기록 — 단계 건너뜀", self.name, stage_name)
+                continue
             try:
-                return await connector.generate(req, budget)
+                response = await connector.generate(req, budget)
+                _LOG.info("%s: 폴백 %s 성공", self.name, stage_name)
+                return response
             except AuthError as exc:
                 # 인증 실패 단계는 영구 제외하고 다음 단계로 넘어간다.
                 self._skipped.add(index)
@@ -228,7 +247,7 @@ class _OpenAIFailoverConnector:
                 _LOG.warning(
                     "%s: 폴백 %s AuthError — 영구 제외하고 다음 단계 진행: %s",
                     self.name,
-                    getattr(connector, "name", "fallback"),
+                    stage_name,
                     exc,
                 )
             except ConnectorError as exc:
@@ -236,7 +255,16 @@ class _OpenAIFailoverConnector:
                 _LOG.warning(
                     "%s: 폴백 %s 실패 — 다음 단계 시도: %s",
                     self.name,
-                    getattr(connector, "name", "fallback"),
+                    stage_name,
+                    exc,
+                )
+            except RuntimeError as exc:
+                # Anthropic 커넥터 생성/호출 실패가 RuntimeError 로 올라오는 경로 흡수.
+                last_error = ConnectorError(str(exc))
+                _LOG.warning(
+                    "%s: 폴백 %s RuntimeError — 다음 단계 시도: %s",
+                    self.name,
+                    stage_name,
                     exc,
                 )
         # 전 단계 실패 — 마지막 에러를 그대로 드러낸다(조용한 빈 응답 금지).
@@ -274,7 +302,7 @@ def _build_gemini_genai_connector() -> AIConnector:
 
     폴백 체인은 OpenAI → Claude Sonnet 순이다(키 있는 단계만 포함):
     - OpenAI : OPENAI_API_KEY 존재 + OPENAI_FALLBACK_ENABLED!=false 일 때만.
-    - Claude : ANTHROPIC_API_KEY 존재 시(_ANTHROPIC_MODEL_MAP 의 claude_sonnet 재사용).
+    - Claude : CLAUDE_SONNET_API_KEY 또는 ANTHROPIC_API_KEY 존재 시.
     후보가 하나도 없으면 raw Gemini 커넥터를 그대로 반환한다(기존 동작 보존).
     """
     from app.modules.ExamForge_V1.common._connector_gemini_genai import (
@@ -301,7 +329,7 @@ def _fallback_stage_factories() -> list[Callable[[], AIConnector]]:
             factories.append(OpenAIConnector)
         except ImportError:
             pass
-    if anthropic_api_key() is not None:
+    if claude_sonnet_api_key() is not None:
         factories.append(
             lambda: AnthropicConnector(_ANTHROPIC_MODEL_MAP["claude_sonnet"], "claude_sonnet")
         )
@@ -327,7 +355,7 @@ def active_text_provider_chain() -> list[str]:
     chain = ["gemini_flash"]
     if openai_fallback_enabled() and openai_api_key() is not None:
         chain.append("openai_text")
-    if anthropic_api_key() is not None:
+    if claude_sonnet_api_key() is not None:
         chain.append("claude_sonnet")
     return chain
 

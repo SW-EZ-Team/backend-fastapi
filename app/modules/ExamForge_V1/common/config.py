@@ -62,6 +62,15 @@ def anthropic_api_key() -> str | None:
     return _optional("ANTHROPIC_API_KEY")
 
 
+def claude_sonnet_api_key() -> str | None:
+    """Claude Sonnet 폴백/커넥터 API 키를 반환한다.
+
+    CLAUDE_SONNET_API_KEY 가 우선. 없으면 ANTHROPIC_API_KEY 를 공유한다.
+    (루트 common/text_config.py 와 동일 규칙 — ExamForge 폴백 체인 누락 방지)
+    """
+    return _optional("CLAUDE_SONNET_API_KEY") or anthropic_api_key()
+
+
 def google_api_key() -> str | None:
     """Google AI Studio API 키를 반환한다. GEMINI_API_KEY를 대체 키로 허용한다."""
     return _optional("GOOGLE_API_KEY") or _optional("GEMINI_API_KEY")
