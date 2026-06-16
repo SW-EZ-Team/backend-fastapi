@@ -1,9 +1,9 @@
-"""Gemini 로 텍스트 답안을 채점하는 원자적 모듈이다.
+"""Claude Sonnet(1순위) → Gemini(폴백)로 텍스트 답안을 채점하는 원자적 모듈이다.
 
 IN : assignment_title, assignment_description, assignment_questions, answer_text
 OUT: TextGradingResult(score, feedback, ai_confidence)
 
-채점 호출은 동기 google-genai SDK 로 수행한다(상위 핸들러가 asyncio.to_thread 로 감싼다).
+채점 호출은 동기 SDK 로 수행한다(상위 핸들러가 asyncio.to_thread 로 감싼다).
 """
 
 from __future__ import annotations
@@ -13,9 +13,13 @@ import logging
 import os
 from dataclasses import dataclass
 
+from anthropic import Anthropic
+
 from ai_connectors import _gemini_throttle as _throttle
 from ai_connectors._gemini_common import build_genai_client, google_api_key
 from ai_connectors.errors import AIConnectorError
+from ai_connectors.text.claude_sonnet_connector import _first_text_block
+from common.text_config import claude_sonnet_api_key, claude_sonnet_model
 
 _LOG = logging.getLogger(__name__)
 
@@ -114,20 +118,25 @@ def grade_text_submission(
     answer_text: str,
     timeout_seconds: int = 90,
 ) -> TextGradingResult:
-    """Gemini 로 텍스트 답안을 채점하고 결과를 반환한다.
+    """Claude Sonnet → Gemini 폴백으로 텍스트 답안을 채점하고 결과를 반환한다.
 
-    동기 google-genai SDK 로 호출한다(상위 핸들러가 asyncio.to_thread 로 감싼다).
+    동기 SDK 로 호출한다(상위 핸들러가 asyncio.to_thread 로 감싼다).
     호출/파싱 실패 시 TextGradingError를 raise한다. timeout_seconds 는 SDK
     HTTP 옵션으로 전달해 무한 대기를 막는다.
     """
     prompt = _build_grading_prompt(
         assignment_title, assignment_description, assignment_questions, answer_text
     )
-    _LOG.info("[TextGrader] Gemini 채점 시작 | 답안 길이: %d자", len(answer_text))
+    _LOG.info("[TextGrader] Claude 채점 시작 | 답안 길이: %d자", len(answer_text))
 
-    raw_output = _call_gemini(prompt, timeout_seconds)
+    raw_output: str | None = None
+    try:
+        raw_output = _call_claude(prompt, timeout_seconds)
+    except Exception as exc:
+        _LOG.warning("[TextGrader] Claude 채점 실패, Gemini 폴백 | %s", exc)
+        raw_output = _call_gemini(prompt, timeout_seconds)
     if not raw_output:
-        raise TextGradingError("Gemini 채점 출력이 비어 있다")
+        raise TextGradingError("채점 출력이 비어 있다")
 
     grading_result = _parse_grading_json(raw_output)
     _LOG.info(
@@ -136,6 +145,25 @@ def grade_text_submission(
         grading_result.ai_confidence,
     )
     return grading_result
+
+
+def _call_claude(prompt: str, timeout_seconds: int) -> str:
+    """동기 Anthropic 호출로 채점 응답 텍스트를 받는다."""
+    api_key = claude_sonnet_api_key()
+    if api_key is None:
+        raise TextGradingError("CLAUDE_SONNET_API_KEY 또는 ANTHROPIC_API_KEY가 설정되지 않았다.")
+    try:
+        client = Anthropic(api_key=api_key, timeout=timeout_seconds)
+        msg = client.messages.create(
+            model=claude_sonnet_model(),
+            max_tokens=8192,
+            temperature=0.0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except Exception as exc:
+        raise TextGradingError(f"Claude 채점 호출 실패: {exc}") from exc
+
+    return _first_text_block(msg).strip()
 
 
 def _call_gemini(prompt: str, timeout_seconds: int) -> str:

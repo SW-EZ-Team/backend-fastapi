@@ -139,7 +139,12 @@ def modal_token_secret() -> str | None:
 
 
 def active_text_model() -> str:
-    return _optional_value("ACTIVE_TEXT_MODEL") or _optional_value("AI_MODEL") or "qwen27b_modal"
+    return (
+        _optional_value("LECTURE_TEXT_MODEL")
+        or _optional_value("ACTIVE_TEXT_MODEL")
+        or _optional_value("AI_MODEL")
+        or "qwen27b_modal"
+    )
 
 
 def active_planner_model() -> str:
