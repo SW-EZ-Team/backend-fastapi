@@ -42,7 +42,8 @@ COPY --from=deps /app/.venv /app/.venv
 # 애플리케이션 소스 전체 복사
 COPY . /app
 
-RUN chown -R appuser:appuser /app
+RUN chown -R appuser:appuser /app \
+    && chmod +x /app/docker-entrypoint.sh
 
 # venv의 bin을 PATH에 추가 + 파이썬 런타임 튜닝
 ENV PATH="/app/.venv/bin:$PATH" \
@@ -52,6 +53,8 @@ ENV PATH="/app/.venv/bin:$PATH" \
 USER appuser
 
 EXPOSE 8000
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 # 기본 커맨드는 api 서버 — compose에서 worker/beat용으로 override 한다
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
